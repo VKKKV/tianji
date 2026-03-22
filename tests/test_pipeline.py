@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tempfile import TemporaryDirectory
@@ -71,6 +72,49 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(artifact.mode, "fetch")
             self.assertEqual(artifact.input_summary["raw_item_count"], 3)
             self.assertTrue(output_path.exists())
+
+    def test_fixture_pipeline_can_persist_run_to_sqlite(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "report.json"
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+
+            artifact = run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=str(output_path),
+                sqlite_path=str(sqlite_path),
+            )
+
+            self.assertTrue(sqlite_path.exists())
+            self.assertEqual(artifact.input_summary["raw_item_count"], 3)
+
+            with sqlite3.connect(sqlite_path) as connection:
+                run_count = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[
+                    0
+                ]
+                raw_item_count = connection.execute(
+                    "SELECT COUNT(*) FROM raw_items"
+                ).fetchone()[0]
+                normalized_count = connection.execute(
+                    "SELECT COUNT(*) FROM normalized_events"
+                ).fetchone()[0]
+                scored_count = connection.execute(
+                    "SELECT COUNT(*) FROM scored_events"
+                ).fetchone()[0]
+                intervention_count = connection.execute(
+                    "SELECT COUNT(*) FROM intervention_candidates"
+                ).fetchone()[0]
+                schema_version = connection.execute(
+                    "SELECT schema_version FROM runs"
+                ).fetchone()[0]
+
+            self.assertEqual(run_count, 1)
+            self.assertEqual(raw_item_count, 3)
+            self.assertEqual(normalized_count, 3)
+            self.assertEqual(scored_count, 3)
+            self.assertEqual(intervention_count, 3)
+            self.assertEqual(schema_version, "tianji.run-artifact.v1")
 
     def test_cli_requires_input_source(self) -> None:
         with self.assertRaises(SystemExit) as context:

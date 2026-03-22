@@ -9,6 +9,7 @@ from .fetch import fetch_url, parse_feed, read_fixture, source_name_from_url
 from .models import RawItem, RunArtifact
 from .normalize import normalize_items
 from .scoring import score_events, summarize_scenario
+from .storage import persist_run
 
 
 def run_pipeline(
@@ -17,6 +18,7 @@ def run_pipeline(
     fetch: bool,
     source_urls: list[str],
     output_path: str | None,
+    sqlite_path: str | None = None,
 ) -> RunArtifact:
     raw_items: list[RawItem] = []
 
@@ -58,6 +60,16 @@ def run_pipeline(
         scored_events=scored_events,
         intervention_candidates=interventions,
     )
+
+    if sqlite_path:
+        persist_run(
+            sqlite_path=sqlite_path,
+            artifact=artifact,
+            raw_items=raw_items,
+            normalized_events=normalized_events,
+            scored_events=scored_events,
+            intervention_candidates=interventions,
+        )
 
     if output_path:
         output = Path(output_path)

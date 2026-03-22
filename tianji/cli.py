@@ -31,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="runs/latest-run.json",
         help="Path for the generated JSON artifact (default: runs/latest-run.json)",
     )
+    run_parser.add_argument(
+        "--sqlite-path",
+        default=None,
+        help="Optional SQLite database path for persisting run data",
+    )
     return parser
 
 
@@ -51,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             fetch=args.fetch,
             source_urls=args.source_url,
             output_path=args.output,
+            sqlite_path=args.sqlite_path,
         )
         print(json.dumps(artifact.to_dict(), ensure_ascii=False, indent=2))
         print(f"\nArtifact written to: {Path(args.output)}")
