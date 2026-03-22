@@ -249,6 +249,68 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(intervention_count, 3)
             self.assertEqual(schema_version, "tianji.run-artifact.v1")
 
+    def test_cli_history_lists_persisted_runs(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "history",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["schema_version"], "tianji.run-artifact.v1")
+            self.assertEqual(payload[0]["mode"], "fixture")
+            self.assertEqual(payload[0]["raw_item_count"], 3)
+            self.assertEqual(payload[0]["dominant_field"], "technology")
+
+    def test_cli_history_show_reads_single_persisted_run(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "history-show",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--run-id",
+                        "1",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["run_id"], 1)
+            self.assertEqual(payload["schema_version"], "tianji.run-artifact.v1")
+            self.assertEqual(payload["mode"], "fixture")
+            self.assertEqual(payload["input_summary"]["raw_item_count"], 3)
+            self.assertEqual(
+                payload["scenario_summary"]["dominant_field"], "technology"
+            )
+
     def test_fixture_pipeline_has_stable_scoring_and_backtrack_order(self) -> None:
         artifact = run_pipeline(
             fixture_paths=[str(FIXTURE_PATH)],

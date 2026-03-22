@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sqlite3
+from typing import TypeAlias, cast
 
 from .models import (
     RUN_ARTIFACT_SCHEMA_VERSION,
@@ -12,6 +13,9 @@ from .models import (
     RunArtifact,
     ScoredEvent,
 )
+
+
+RunRow: TypeAlias = tuple[int, str, str, str, str, str]
 
 
 def persist_run(
@@ -35,6 +39,39 @@ def persist_run(
         insert_scored_events(connection, run_id, scored_events)
         insert_intervention_candidates(connection, run_id, intervention_candidates)
         connection.commit()
+
+
+def list_runs(*, sqlite_path: str, limit: int = 20) -> list[dict[str, object]]:
+    with sqlite3.connect(sqlite_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json
+            FROM runs
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    typed_rows = [coerce_run_row(row) for row in rows]
+    return [build_run_list_item(row) for row in typed_rows]
+
+
+def get_run_summary(*, sqlite_path: str, run_id: int) -> dict[str, object] | None:
+    with sqlite3.connect(sqlite_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json
+            FROM runs
+            WHERE id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return build_run_detail(coerce_run_row(row))
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -270,4 +307,68 @@ def insert_intervention_candidates(
             )
             for candidate in intervention_candidates
         ],
+    )
+
+
+def build_run_list_item(row: RunRow) -> dict[str, object]:
+    (
+        run_id,
+        schema_version,
+        mode,
+        generated_at,
+        input_summary_json,
+        scenario_summary_json,
+    ) = row
+    input_summary = json.loads(cast(str, input_summary_json))
+    scenario_summary = json.loads(cast(str, scenario_summary_json))
+    return {
+        "run_id": run_id,
+        "schema_version": schema_version,
+        "mode": mode,
+        "generated_at": generated_at,
+        "raw_item_count": input_summary.get("raw_item_count", 0),
+        "normalized_event_count": input_summary.get("normalized_event_count", 0),
+        "dominant_field": scenario_summary.get("dominant_field", "uncategorized"),
+        "risk_level": scenario_summary.get("risk_level", "low"),
+        "headline": scenario_summary.get("headline", ""),
+    }
+
+
+def build_run_detail(row: RunRow) -> dict[str, object]:
+    (
+        run_id,
+        schema_version,
+        mode,
+        generated_at,
+        input_summary_json,
+        scenario_summary_json,
+    ) = row
+    return {
+        "run_id": run_id,
+        "schema_version": schema_version,
+        "mode": mode,
+        "generated_at": generated_at,
+        "input_summary": json.loads(cast(str, input_summary_json)),
+        "scenario_summary": json.loads(cast(str, scenario_summary_json)),
+    }
+
+
+def coerce_run_row(row: sqlite3.Row | tuple[object, ...]) -> RunRow:
+    (
+        run_id,
+        schema_version,
+        mode,
+        generated_at,
+        input_summary_json,
+        scenario_summary_json,
+    ) = row
+    if not isinstance(run_id, int | str):
+        raise RuntimeError("Unexpected run id type in SQLite row")
+    return (
+        int(run_id),
+        str(schema_version),
+        str(mode),
+        str(generated_at),
+        str(input_summary_json),
+        str(scenario_summary_json),
     )

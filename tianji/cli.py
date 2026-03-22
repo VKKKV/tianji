@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .fetch import TianJiInputError
 from .pipeline import run_pipeline
+from .storage import get_run_summary, list_runs
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +48,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--sqlite-path",
         default=None,
         help="Optional SQLite database path for persisting run data",
+    )
+
+    history_parser = subparsers.add_parser(
+        "history", help="List persisted TianJi runs from SQLite"
+    )
+    history_parser.add_argument(
+        "--sqlite-path",
+        required=True,
+        help="SQLite database path containing persisted TianJi runs",
+    )
+    history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of runs to list (default: 20)",
+    )
+
+    history_show_parser = subparsers.add_parser(
+        "history-show", help="Show one persisted TianJi run summary from SQLite"
+    )
+    history_show_parser.add_argument(
+        "--sqlite-path",
+        required=True,
+        help="SQLite database path containing persisted TianJi runs",
+    )
+    history_show_parser.add_argument(
+        "--run-id",
+        required=True,
+        type=int,
+        help="Run identifier to inspect",
     )
     return parser
 
@@ -154,6 +185,18 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(error))
         print(json.dumps(artifact.to_dict(), ensure_ascii=False, indent=2))
         print(f"\nArtifact written to: {Path(args.output)}")
+        return 0
+
+    if args.command == "history":
+        payload = list_runs(sqlite_path=args.sqlite_path, limit=args.limit)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "history-show":
+        payload = get_run_summary(sqlite_path=args.sqlite_path, run_id=args.run_id)
+        if payload is None:
+            parser.error(f"Run not found: {args.run_id}")
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     parser.error(f"Unsupported command: {args.command}")
