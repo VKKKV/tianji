@@ -450,6 +450,78 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(groups[0]["shared_actors"], ["china", "usa"])
         self.assertEqual(groups[0]["shared_regions"], ["east-asia", "united-states"])
 
+    def test_group_events_do_not_cluster_distant_related_events(self) -> None:
+        early_event = ScoredEvent(
+            event_id="evt-early",
+            title="China and USA expand chip controls",
+            source="fixture:test",
+            link="https://example.com/early",
+            published_at="2026-03-22T08:00:00Z",
+            actors=["china", "usa"],
+            regions=["east-asia", "united-states"],
+            keywords=["chip", "controls", "export", "dispute"],
+            dominant_field="technology",
+            impact_score=14.03,
+            field_attraction=7.75,
+            divergence_score=19.58,
+            rationale=["Im=14.03", "Fa=7.75"],
+        )
+        late_event = ScoredEvent(
+            event_id="evt-late",
+            title="USA and China deepen export chip restrictions",
+            source="fixture:test",
+            link="https://example.com/late",
+            published_at="2026-03-25T08:00:00Z",
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            keywords=["chip", "restrictions", "export", "controls"],
+            dominant_field="technology",
+            impact_score=13.5,
+            field_attraction=7.1,
+            divergence_score=18.31,
+            rationale=["Im=13.5", "Fa=7.1"],
+        )
+
+        groups = pipeline_module.group_events([early_event, late_event])
+
+        self.assertEqual(groups, [])
+
+    def test_group_events_allow_missing_timestamp_fallback(self) -> None:
+        unknown_time_a = ScoredEvent(
+            event_id="evt-a",
+            title="China and USA expand chip controls",
+            source="fixture:test",
+            link="https://example.com/a",
+            published_at=None,
+            actors=["china", "usa"],
+            regions=["east-asia", "united-states"],
+            keywords=["chip", "controls", "export", "dispute"],
+            dominant_field="technology",
+            impact_score=14.03,
+            field_attraction=7.75,
+            divergence_score=19.58,
+            rationale=["Im=14.03", "Fa=7.75"],
+        )
+        unknown_time_b = ScoredEvent(
+            event_id="evt-b",
+            title="USA and China deepen export chip restrictions",
+            source="fixture:test",
+            link="https://example.com/b",
+            published_at=None,
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            keywords=["chip", "restrictions", "export", "controls"],
+            dominant_field="technology",
+            impact_score=13.5,
+            field_attraction=7.1,
+            divergence_score=18.31,
+            rationale=["Im=13.5", "Fa=7.1"],
+        )
+
+        groups = pipeline_module.group_events([unknown_time_a, unknown_time_b])
+
+        self.assertEqual(len(groups), 1)
+
     def test_pipeline_surfaces_event_groups_in_scenario_summary(self) -> None:
         artifact = run_pipeline(
             fixture_paths=[str(FIXTURE_PATH)],

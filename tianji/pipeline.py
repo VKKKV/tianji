@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 import json
 from pathlib import Path
 from typing import TypedDict
@@ -15,6 +16,7 @@ from .storage import persist_run
 
 
 MIN_SHARED_KEYWORDS = 2
+MAX_GROUP_TIME_DELTA = timedelta(hours=24)
 
 
 class EventGroupSummary(TypedDict):
@@ -128,6 +130,9 @@ def matches_group(event: ScoredEvent, group: list[ScoredEvent]) -> bool:
     if event.dominant_field != anchor.dominant_field:
         return False
 
+    if not is_within_group_time_window(event, anchor):
+        return False
+
     shared_actors = intersection(event.actors, anchor.actors)
     shared_regions = intersection(event.regions, anchor.regions)
     if not shared_actors and not shared_regions:
@@ -174,3 +179,28 @@ def shared_values(value_lists: Iterable[list[str]]) -> list[str]:
 
 def intersection(left: list[str], right: list[str]) -> list[str]:
     return sorted(set(left) & set(right))
+
+
+def is_within_group_time_window(event: ScoredEvent, anchor: ScoredEvent) -> bool:
+    event_time = parse_event_time(event.published_at)
+    anchor_time = parse_event_time(anchor.published_at)
+    if event_time is None or anchor_time is None:
+        return True
+    return abs(event_time - anchor_time) <= MAX_GROUP_TIME_DELTA
+
+
+def parse_event_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
