@@ -167,6 +167,16 @@ Planned shape:
 - compare runs
 - navigate with Vim-style motions and shortcuts
 
+Current planning status:
+
+- a first contract-only draft now exists in `TUI_CONTRACT.md`
+- the planned first TUI slice is read-only and persisted-analysis-first:
+  - history list
+  - run detail
+  - run compare
+- the TUI contract intentionally reuses current `history`, `history-show`, and
+  `history-compare` semantics instead of depending on a new daemon or local API
+
 Do not do:
 
 - do not turn the TUI into a second orchestration runtime
@@ -276,7 +286,7 @@ Recent progress on the now-mostly-shipped CLI workflow:
 - `history` now exposes top event-group summary fields and filters for grouped-run triage across persisted runs
 - `history-compare` now supports the same scored-event and event-group projection filters as `history-show` for lens-specific persisted comparison
 
-Draft contract note now lives in `LOCAL_API_CONTRACT.md`; implementation remains future work.
+Draft contract notes now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; implementation remains future work.
 
 ## Next Recommended Milestone
 
@@ -782,6 +792,9 @@ working boundaries:
 - **Local API work** stays contract-only until a real process boundary exists;
   `LOCAL_API_CONTRACT.md` is a planning input, not a near-term implementation
   trigger
+- **TUI planning work** can proceed at the contract level before implementation,
+  but should stay read-only and reuse the current storage/artifact vocabulary in
+  `TUI_CONTRACT.md`
 
 ## Guardrails
 
