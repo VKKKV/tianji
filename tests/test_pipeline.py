@@ -15,6 +15,7 @@ from tianji.backtrack import EventGroupSummary, backtrack_candidates
 from tianji.fetch import TianJiInputError
 from tianji.models import NormalizedEvent, ScoredEvent
 from tianji import pipeline as pipeline_module
+from tianji import storage
 from tianji.pipeline import run_pipeline
 from tianji.scoring import score_event
 
@@ -545,6 +546,14 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(payload["left"]["dominant_field"], "technology")
             self.assertEqual(payload["right"]["dominant_field"], "uncategorized")
             self.assertEqual(payload["diff"]["raw_item_count_delta"], -3)
+            self.assertEqual(payload["left"]["event_group_count"], 0)
+            self.assertEqual(payload["right"]["event_group_count"], 0)
+            self.assertEqual(payload["diff"]["event_group_count_delta"], 0)
+            self.assertFalse(payload["diff"]["top_event_group_changed"])
+            self.assertIsNone(payload["diff"]["left_top_event_group_headline_event_id"])
+            self.assertIsNone(
+                payload["diff"]["right_top_event_group_headline_event_id"]
+            )
             self.assertTrue(payload["diff"]["top_scored_event_changed"])
             self.assertTrue(payload["diff"]["top_intervention_changed"])
             self.assertEqual(
@@ -566,6 +575,75 @@ class PipelineTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(payload["diff"]["right_only_intervention_event_ids"], [])
+
+    def test_history_compare_reports_group_diff_when_grouping_changes(self) -> None:
+        left = {
+            "run_id": 1,
+            "schema_version": "tianji.run-artifact.v1",
+            "mode": "fixture",
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "left",
+                "event_groups": [
+                    {
+                        "group_id": "group:evt-a",
+                        "headline_event_id": "evt-a",
+                        "headline_title": "China and USA expand chip controls",
+                        "member_event_ids": ["evt-a", "evt-b"],
+                        "member_count": 2,
+                        "dominant_field": "technology",
+                        "shared_keywords": ["chip", "controls", "export"],
+                        "shared_actors": ["china", "usa"],
+                        "shared_regions": ["east-asia", "united-states"],
+                        "group_score": 37.89,
+                    }
+                ],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        }
+        right = {
+            "run_id": 2,
+            "schema_version": "tianji.run-artifact.v1",
+            "mode": "fixture",
+            "generated_at": "2026-03-22T11:00:00+00:00",
+            "input_summary": {"raw_item_count": 2, "normalized_event_count": 2},
+            "scenario_summary": {
+                "dominant_field": "diplomacy",
+                "risk_level": "medium",
+                "headline": "right",
+                "event_groups": [
+                    {
+                        "group_id": "group:evt-c",
+                        "headline_event_id": "evt-c",
+                        "headline_title": "Iran diplomacy channel reopens",
+                        "member_event_ids": ["evt-c", "evt-d"],
+                        "member_count": 2,
+                        "dominant_field": "diplomacy",
+                        "shared_keywords": ["channel", "diplomacy"],
+                        "shared_actors": ["iran"],
+                        "shared_regions": ["middle-east"],
+                        "group_score": 20.5,
+                    }
+                ],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        }
+
+        left_summary = storage.build_compare_side(left)
+        right_summary = storage.build_compare_side(right)
+        diff = storage.build_compare_diff(left_summary, right_summary)
+
+        self.assertEqual(left_summary["event_group_count"], 1)
+        self.assertEqual(right_summary["event_group_count"], 1)
+        self.assertEqual(diff["event_group_count_delta"], 0)
+        self.assertTrue(diff["top_event_group_changed"])
+        self.assertEqual(diff["left_top_event_group_headline_event_id"], "evt-a")
+        self.assertEqual(diff["right_top_event_group_headline_event_id"], "evt-c")
 
     def test_fixture_pipeline_has_stable_scoring_and_backtrack_order(self) -> None:
         artifact = run_pipeline(

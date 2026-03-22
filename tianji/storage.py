@@ -501,10 +501,14 @@ def build_intervention_candidate_detail(
 def build_compare_side(run_payload: dict[str, object]) -> dict[str, object]:
     input_summary = cast(dict[str, object], run_payload["input_summary"])
     scenario_summary = cast(dict[str, object], run_payload["scenario_summary"])
+    event_groups = cast(
+        list[dict[str, object]], scenario_summary.get("event_groups", [])
+    )
     scored_events = cast(list[dict[str, object]], run_payload["scored_events"])
     intervention_candidates = cast(
         list[dict[str, object]], run_payload["intervention_candidates"]
     )
+    top_event_group = event_groups[0] if event_groups else None
     top_scored_event = scored_events[0] if scored_events else None
     top_intervention = intervention_candidates[0] if intervention_candidates else None
     return {
@@ -516,6 +520,8 @@ def build_compare_side(run_payload: dict[str, object]) -> dict[str, object]:
         "dominant_field": scenario_summary.get("dominant_field", "uncategorized"),
         "risk_level": scenario_summary.get("risk_level", "low"),
         "headline": scenario_summary.get("headline", ""),
+        "event_group_count": len(event_groups),
+        "top_event_group": top_event_group,
         "top_scored_event": top_scored_event,
         "top_intervention": top_intervention,
         "intervention_event_ids": [
@@ -532,8 +538,20 @@ def build_compare_diff(
     right_intervention_ids = cast(list[str], right["intervention_event_ids"])
     left_top_scored_event = cast(dict[str, object] | None, left["top_scored_event"])
     right_top_scored_event = cast(dict[str, object] | None, right["top_scored_event"])
+    left_top_event_group = cast(dict[str, object] | None, left["top_event_group"])
+    right_top_event_group = cast(dict[str, object] | None, right["top_event_group"])
     left_top_intervention = cast(dict[str, object] | None, left["top_intervention"])
     right_top_intervention = cast(dict[str, object] | None, right["top_intervention"])
+    left_top_event_group_headline_event_id = (
+        cast(str, left_top_event_group["headline_event_id"])
+        if left_top_event_group is not None
+        else None
+    )
+    right_top_event_group_headline_event_id = (
+        cast(str, right_top_event_group["headline_event_id"])
+        if right_top_event_group is not None
+        else None
+    )
     left_top_scored_event_id = (
         cast(str, left_top_scored_event["event_id"])
         if left_top_scored_event is not None
@@ -559,8 +577,14 @@ def build_compare_diff(
         - cast(int, left["raw_item_count"]),
         "normalized_event_count_delta": cast(int, right["normalized_event_count"])
         - cast(int, left["normalized_event_count"]),
+        "event_group_count_delta": cast(int, right["event_group_count"])
+        - cast(int, left["event_group_count"]),
         "dominant_field_changed": left["dominant_field"] != right["dominant_field"],
         "risk_level_changed": left["risk_level"] != right["risk_level"],
+        "top_event_group_changed": left_top_event_group_headline_event_id
+        != right_top_event_group_headline_event_id,
+        "left_top_event_group_headline_event_id": left_top_event_group_headline_event_id,
+        "right_top_event_group_headline_event_id": right_top_event_group_headline_event_id,
         "top_scored_event_changed": left_top_scored_event_id
         != right_top_scored_event_id,
         "top_intervention_changed": left_top_intervention_event_id
