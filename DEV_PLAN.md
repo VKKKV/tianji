@@ -34,7 +34,6 @@ Shipped in the current branch:
 
 Still open before Phase 1 is fully closed:
 
-- explicit no-signal / empty-valid-feed handling path
 - final doc/examples pass whenever the CLI surface changes again
 
 Exit criteria:
@@ -160,7 +159,7 @@ Retirement trigger:
 1. define first-party TianJi `Im` / `Fa` spec
 2. formalize richer event grouping and causal clustering
 3. draft the future local API contract that a web UI would consume
-4. add richer persisted run drill-down over scored events and interventions
+4. begin actual local API implementation only when a real process boundary is chosen
 5. document the first persisted-run query workflow
 6. tighten remaining doc/examples drift as commands evolve
 

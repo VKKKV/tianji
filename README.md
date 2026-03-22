@@ -18,7 +18,7 @@ It supports:
 - producing ranked intervention candidates
 - writing a structured JSON artifact
 - optionally persisting runs to local SQLite
-- listing persisted runs and inspecting a stored run summary from SQLite
+- listing persisted runs and inspecting stored run details from SQLite
 - surfacing clean CLI errors for malformed feeds and failed fetches
 
 This keeps the first version testable, local, and reproducible.
@@ -106,7 +106,7 @@ The current MVP flow is:
    Store run metadata plus raw, normalized, scored, and intervention rows in SQLite when `--sqlite-path` is provided.
 
 7. **Inspect Run History (Optional)**  
-   Query persisted run summaries later with `history` and `history-show` commands over the same SQLite database.
+   Query persisted run summaries later with `history` and inspect one stored run's summaries, scored events, and intervention candidates with `history-show`.
 
 ## Output Artifact
 
@@ -120,7 +120,7 @@ The artifact includes:
 - `scored_events`: normalized events with impact score, field attraction, divergence score, and rationale
 - `intervention_candidates`: ranked backtracked actions derived from the top events
 
-Persisted run history currently exposes run-level summaries, not full stored scored-event drill-down.
+Persisted run history now exposes both compact run summaries and per-run drill-down over stored scored events and intervention candidates.
 
 ## Repository Layout
 
@@ -180,15 +180,18 @@ These are reference inputs, not part of the initial TianJi repo history.
 - config-driven source registry
 - optional SQLite persistence
 - SQLite-backed run history inspection
+- richer `history-show` drill-down over stored scored events and interventions
 - deterministic scoring and backtracking JSON report
 - schema-versioned artifacts
 - hardened input and fetch failure handling
+
+Future local API contract now lives in `LOCAL_API_CONTRACT.md`; it is a draft contract only, not a shipped server.
 
 ### Next
 
 - more formalized `Im` / `Fa`-style scoring model
 - richer backtracking and causal grouping
-- richer persisted run drill-down over scored events and interventions
+- future local API implementation when a real local service boundary exists
 
 ### Later
 

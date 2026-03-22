@@ -29,7 +29,7 @@ tianji/
 | Change ingestion | `tianji/fetch.py` | RSS/Atom fixture loading and one-time URL fetch |
 | Change source selection | `tianji/cli.py` | Source registry parsing and URL selection live here today |
 | Change persistence | `tianji/storage.py` | Optional SQLite persistence boundary |
-| Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` and `history-show` read from the `runs` table |
+| Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` reads run summaries; `history-show` adds stored scored events and interventions |
 | Change heuristics | `tianji/normalize.py`, `tianji/scoring.py`, `tianji/backtrack.py` | Deterministic first |
 | Verify changes | `tests/test_pipeline.py`, `tests/fixtures/sample_feed.xml` | Local fixture + local HTTP server |
 | Plan future divergence ideas | `DivergenceMeter/`, `DEV_PLAN.md` | Use as concept source, not owned runtime |
@@ -87,5 +87,6 @@ python3 -m unittest discover -s tests -v
 
 ## NOTES
 - Workspace scale is dominated by embedded repos, not by TianJi itself.
+- Future local API contract is documented in `LOCAL_API_CONTRACT.md`; no HTTP server ships in this repo yet.
 - Existing AGENTS already live in `worldmonitor/` and `oh-my-openagent/`; prefer those if you intentionally work there.
 - Missing AGENTS coverage existed mainly in `MiroFish/` and `DivergenceMeter/`; local files below cover only the highest-value boundaries.
