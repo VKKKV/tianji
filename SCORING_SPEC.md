@@ -11,11 +11,12 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
 - **`Im` (Impact)**
   - TianJi's deterministic estimate of how strongly an event can move the current branch.
   - In the current slice, it is a bounded additive score built from:
-    - actor weight
-    - region weight
-    - keyword density
-    - a small dominant-field evidence bonus
-    - a small nonzero-field diversity bonus
+     - actor weight
+     - region weight
+     - keyword density
+     - a small dominant-field evidence bonus
+     - a small nonzero-field diversity bonus
+     - a bounded text-signal-intensity bonus for dominant-field cue concentration across normalized text surfaces
 
 - **`Fa` (Field Attraction)**
   - TianJi's deterministic estimate of how strongly an event belongs to its dominant attractor field.
@@ -30,15 +31,25 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
 
 ## Why This Slice Is Small
 
-This first Phase 2 change does **not**:
+This first scoring-focused Phase 2 change does **not**:
 
 - alter the feed parsing or normalization stages
-- change the artifact schema
 - add clustering or multi-event causal logic
 - alter SQLite persistence shape
 - add model-driven or cloud-based scoring
 
 It only makes the existing deterministic scoring language explicit and testable in first-party TianJi terms.
+
+Later Phase 2 grouping work now adds lightweight evidence-chain metadata inside
+`scenario_summary.event_groups` so grouped backtracking can cite corroborating
+events. That additive nested-group metadata is separate from the scoring slice
+defined here and does not change how `Im`, `Fa`, or top-level artifact versioning
+work.
+
+Current grouping work now also supports transitive causal clustering inside
+`scenario_summary.event_groups`, adding admission-path `causal_ordered_event_ids`,
+`causal_span_hours`, per-link relationship metadata, and `causal_summary`
+without changing SQLite table shape.
 
 ## Deferred Work
 
@@ -46,10 +57,73 @@ Still deferred after this slice:
 
 - richer `Fa` from corroboration and contradiction handling beyond field-score concentration
 - richer `Im` from novelty/spike and baseline deviation signals
-- richer `Im` from novelty/spike and baseline deviation signals
-- event grouping and causal clustering
-- evidence-chain backtracking
-- persisted run-history queries over scoring components
+- deeper event grouping and causal clustering beyond the current transitive evidence-chain summaries
+- broader persisted analysis beyond top scored-event run-history queries
+
+## Current Text-Signal-Intensity Expansion
+
+The current Phase 2 scoring slice now includes:
+
+- **add one bounded text-signal-intensity factor to `Im`**
+
+Intent:
+
+- improve TianJi's ability to distinguish weak textual evidence from strong
+  branch-relevant textual evidence inside a single normalized event
+- deepen `Im` without changing the meaning of `Fa`
+- preserve the current split where `Im` represents branch-moving force and `Fa`
+  represents dominant-field alignment
+
+Allowed inputs for this slice:
+
+- normalized `keywords`
+- normalized `title`
+- normalized `summary`
+- existing `field_scores`
+
+Disallowed inputs for this slice:
+
+- prior runs or SQLite history
+- grouped-event or cross-event corroboration
+- model-driven inference
+- any hidden heuristic that cannot be described as one bounded additive term
+
+Constraints implemented in this slice:
+
+- the new factor is a single additive `Im` subcomponent
+- it rewards **field-evidence intensity**, not mere text length
+- it is bounded so actor and region weighting remain more important than raw text repetition
+- `Fa` and the `divergence_score` blend remain unchanged in this branch
+
+Current implementation shape:
+
+- the bonus is derived from boundary-aware dominant-field cue concentration across three normalized
+  text surfaces:
+  - extracted `keywords`
+  - normalized `title`
+  - normalized `summary`
+- it is intentionally smaller than the combined actor+region contribution
+- it is separate from the existing keyword-density bonus because it rewards
+  dominant-field-specific cue concentration rather than raw token count
+- title and summary cue checks are boundary-aware so short cues like `ai` do not
+  receive incidental credit inside unrelated larger words
+
+Recommended verification for this slice:
+
+- paired synthetic-event tests where actor, region, and dominant-field structure
+  remain fixed
+- stronger dominant-field textual evidence should raise `impact_score`
+- the same paired tests should leave `field_attraction` unchanged or nearly so
+- one exact-value scoring test should remain pinned so the additive formula stays
+  inspectable
+
+Out of scope for this slice:
+
+- novelty or baseline-deviation scoring
+- contradiction-aware or corroboration-aware `Fa`
+- persistence-schema changes
+- grouped-analysis changes
+- CLI/history surface expansion unrelated to score validation
 
 ## Current Implementation Boundary
 
@@ -58,3 +132,47 @@ Still deferred after this slice:
 - `field_attraction` in the artifact corresponds to current TianJi `Fa`.
 
 This preserves backward compatibility while making the Phase 2 vocabulary real inside first-party code.
+
+Current persisted operator workflow now also exposes top scored-event `impact_score`,
+`field_attraction`, and `divergence_score` in `history`, along with threshold filters
+over those top-event values. Those thresholds apply only to the single persisted
+top scored event for each run, and runs without scored events expose `null` top
+metrics that will not match numeric score filters. `history-compare` now also
+reports additive deltas for those same top-event score metrics, while broader
+per-event or aggregate scoring queries remain future work.
+
+`history` now also exposes grouped-run summary fields such as `event_group_count`
+and the top event group's dominant field, so persisted run triage can use grouped
+scenario signals without opening `history-show` or `history-compare` first.
+
+For compare semantics, `top_scored_event_comparable=true` means both runs share
+the same top scored `event_id`, so the score deltas can be read as one persisted
+leading signal evolving over time. When `top_scored_event_comparable=false`, the
+same delta fields remain populated but represent contrast between different top
+events rather than longitudinal change of one event.
+
+Single-run persisted analysis now also supports score-aware `history-show`
+filtering over stored `scored_events`, including dominant-field, `impact_score`,
+`field_attraction`, and `divergence_score` selectors plus per-run event limits.
+That drill-down still operates on persisted scored events for one chosen run,
+not on broader cross-run aggregate scoring queries. When operators want the
+intervention list to stay aligned with the visible scored-event selection,
+`history-show` can now optionally keep only intervention candidates whose
+`event_id` remains in that final visible scored-event set after filters and
+limits.
+
+Single-run grouped analysis now also supports read-time `history-show`
+filtering over persisted `scenario_summary.event_groups`, including dominant-field
+selection and per-run event-group limits. This is still a view over the stored
+scenario summary, not a new grouping or persistence contract.
+
+That same read-time projection model now also applies to `history-compare`, so
+paired run comparison can be scoped to one scored-event dominant field, score
+window, visible intervention subset, or event-group dominant field/limit without
+changing the persisted runs themselves.
+
+Within grouped summaries, `causal_ordered_event_ids` follows the admission-path
+tree used to attach members to a cluster, not guaranteed timestamp order.
+`causal_span_hours` uses the earliest and latest known timestamps when at least
+two are present; otherwise it remains `null`, and `causal_summary` falls back to
+non-span wording instead of implying a known timeline.

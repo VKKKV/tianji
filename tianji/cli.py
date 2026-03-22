@@ -97,6 +97,59 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional inclusive upper bound for generated_at (ISO timestamp)",
     )
+    history_parser.add_argument(
+        "--min-top-impact-score",
+        type=float,
+        default=None,
+        help="Optional minimum impact_score for the persisted run's top scored event",
+    )
+    history_parser.add_argument(
+        "--max-top-impact-score",
+        type=float,
+        default=None,
+        help="Optional maximum impact_score for the persisted run's top scored event",
+    )
+    history_parser.add_argument(
+        "--min-top-field-attraction",
+        type=float,
+        default=None,
+        help="Optional minimum field_attraction for the persisted run's top scored event",
+    )
+    history_parser.add_argument(
+        "--max-top-field-attraction",
+        type=float,
+        default=None,
+        help="Optional maximum field_attraction for the persisted run's top scored event",
+    )
+    history_parser.add_argument(
+        "--min-top-divergence-score",
+        type=float,
+        default=None,
+        help="Optional minimum divergence_score for the persisted run's top scored event",
+    )
+    history_parser.add_argument(
+        "--max-top-divergence-score",
+        type=float,
+        default=None,
+        help="Optional maximum divergence_score for the persisted run's top scored event",
+    )
+    history_parser.add_argument(
+        "--top-group-dominant-field",
+        default=None,
+        help="Optional dominant field filter for the persisted run's top event group",
+    )
+    history_parser.add_argument(
+        "--min-event-group-count",
+        type=int,
+        default=None,
+        help="Optional minimum persisted event-group count for the run",
+    )
+    history_parser.add_argument(
+        "--max-event-group-count",
+        type=int,
+        default=None,
+        help="Optional maximum persisted event-group count for the run",
+    )
 
     history_show_parser = subparsers.add_parser(
         "history-show", help="Show one persisted TianJi run summary from SQLite"
@@ -125,6 +178,69 @@ def build_parser() -> argparse.ArgumentParser:
         "--next",
         action="store_true",
         help="Show the persisted run immediately after --run-id",
+    )
+    history_show_parser.add_argument(
+        "--dominant-field",
+        default=None,
+        help="Optional dominant field filter for scored events inside the selected run",
+    )
+    history_show_parser.add_argument(
+        "--min-impact-score",
+        type=float,
+        default=None,
+        help="Optional minimum impact_score for scored events inside the selected run",
+    )
+    history_show_parser.add_argument(
+        "--max-impact-score",
+        type=float,
+        default=None,
+        help="Optional maximum impact_score for scored events inside the selected run",
+    )
+    history_show_parser.add_argument(
+        "--min-field-attraction",
+        type=float,
+        default=None,
+        help="Optional minimum field_attraction for scored events inside the selected run",
+    )
+    history_show_parser.add_argument(
+        "--max-field-attraction",
+        type=float,
+        default=None,
+        help="Optional maximum field_attraction for scored events inside the selected run",
+    )
+    history_show_parser.add_argument(
+        "--min-divergence-score",
+        type=float,
+        default=None,
+        help="Optional minimum divergence_score for scored events inside the selected run",
+    )
+    history_show_parser.add_argument(
+        "--max-divergence-score",
+        type=float,
+        default=None,
+        help="Optional maximum divergence_score for scored events inside the selected run",
+    )
+    history_show_parser.add_argument(
+        "--limit-scored-events",
+        type=int,
+        default=None,
+        help="Optional maximum number of scored events to return for the selected run",
+    )
+    history_show_parser.add_argument(
+        "--only-matching-interventions",
+        action="store_true",
+        help="Keep only intervention candidates whose event_id remains in the final visible scored-event set after filters and limits",
+    )
+    history_show_parser.add_argument(
+        "--group-dominant-field",
+        default=None,
+        help="Optional dominant field filter for persisted event groups inside the selected run",
+    )
+    history_show_parser.add_argument(
+        "--limit-event-groups",
+        type=int,
+        default=None,
+        help="Optional maximum number of persisted event groups to return for the selected run",
     )
 
     history_compare_parser = subparsers.add_parser(
@@ -164,6 +280,69 @@ def build_parser() -> argparse.ArgumentParser:
         "--against-previous",
         action="store_true",
         help="Use the immediately previous persisted run as the left-hand side for comparison",
+    )
+    history_compare_parser.add_argument(
+        "--dominant-field",
+        default=None,
+        help="Optional dominant field filter for scored events inside both compared runs",
+    )
+    history_compare_parser.add_argument(
+        "--min-impact-score",
+        type=float,
+        default=None,
+        help="Optional minimum impact_score for scored events inside both compared runs",
+    )
+    history_compare_parser.add_argument(
+        "--max-impact-score",
+        type=float,
+        default=None,
+        help="Optional maximum impact_score for scored events inside both compared runs",
+    )
+    history_compare_parser.add_argument(
+        "--min-field-attraction",
+        type=float,
+        default=None,
+        help="Optional minimum field_attraction for scored events inside both compared runs",
+    )
+    history_compare_parser.add_argument(
+        "--max-field-attraction",
+        type=float,
+        default=None,
+        help="Optional maximum field_attraction for scored events inside both compared runs",
+    )
+    history_compare_parser.add_argument(
+        "--min-divergence-score",
+        type=float,
+        default=None,
+        help="Optional minimum divergence_score for scored events inside both compared runs",
+    )
+    history_compare_parser.add_argument(
+        "--max-divergence-score",
+        type=float,
+        default=None,
+        help="Optional maximum divergence_score for scored events inside both compared runs",
+    )
+    history_compare_parser.add_argument(
+        "--limit-scored-events",
+        type=int,
+        default=None,
+        help="Optional maximum number of scored events to return for each compared run",
+    )
+    history_compare_parser.add_argument(
+        "--only-matching-interventions",
+        action="store_true",
+        help="Keep only intervention candidates whose event_id remains in the final visible scored-event set for each compared run",
+    )
+    history_compare_parser.add_argument(
+        "--group-dominant-field",
+        default=None,
+        help="Optional dominant field filter for persisted event groups inside both compared runs",
+    )
+    history_compare_parser.add_argument(
+        "--limit-event-groups",
+        type=int,
+        default=None,
+        help="Optional maximum number of persisted event groups to return for each compared run",
     )
     return parser
 
@@ -274,6 +453,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "history":
+        if args.min_event_group_count is not None and args.min_event_group_count < 0:
+            parser.error("--min-event-group-count must be zero or greater.")
+        if args.max_event_group_count is not None and args.max_event_group_count < 0:
+            parser.error("--max-event-group-count must be zero or greater.")
+        if (
+            args.min_event_group_count is not None
+            and args.max_event_group_count is not None
+            and args.min_event_group_count > args.max_event_group_count
+        ):
+            parser.error(
+                "--min-event-group-count cannot be greater than --max-event-group-count."
+            )
         payload = list_runs(
             sqlite_path=args.sqlite_path,
             limit=args.limit,
@@ -282,6 +473,15 @@ def main(argv: list[str] | None = None) -> int:
             risk_level=args.risk_level,
             since=args.since,
             until=args.until,
+            min_top_impact_score=args.min_top_impact_score,
+            max_top_impact_score=args.max_top_impact_score,
+            min_top_field_attraction=args.min_top_field_attraction,
+            max_top_field_attraction=args.max_top_field_attraction,
+            min_top_divergence_score=args.min_top_divergence_score,
+            max_top_divergence_score=args.max_top_divergence_score,
+            top_group_dominant_field=args.top_group_dominant_field,
+            min_event_group_count=args.min_event_group_count,
+            max_event_group_count=args.max_event_group_count,
         )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
@@ -291,6 +491,10 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(
                 "Use only one history-show navigation mode: --latest, --previous, or --next."
             )
+        if args.limit_scored_events is not None and args.limit_scored_events < 0:
+            parser.error("--limit-scored-events must be zero or greater.")
+        if args.limit_event_groups is not None and args.limit_event_groups < 0:
+            parser.error("--limit-event-groups must be zero or greater.")
         if args.latest and args.run_id is not None:
             parser.error("Use either --run-id or --latest for history-show, not both.")
         if (args.previous or args.next) and args.run_id is None:
@@ -325,13 +529,31 @@ def main(argv: list[str] | None = None) -> int:
             if next_run_id is None:
                 parser.error(f"No next persisted run exists after run {args.run_id}.")
             run_id = next_run_id
-        payload = get_run_summary(sqlite_path=args.sqlite_path, run_id=run_id)
+        payload = get_run_summary(
+            sqlite_path=args.sqlite_path,
+            run_id=run_id,
+            dominant_field=args.dominant_field,
+            min_impact_score=args.min_impact_score,
+            max_impact_score=args.max_impact_score,
+            min_field_attraction=args.min_field_attraction,
+            max_field_attraction=args.max_field_attraction,
+            min_divergence_score=args.min_divergence_score,
+            max_divergence_score=args.max_divergence_score,
+            limit_scored_events=args.limit_scored_events,
+            only_matching_interventions=args.only_matching_interventions,
+            group_dominant_field=args.group_dominant_field,
+            limit_event_groups=args.limit_event_groups,
+        )
         if payload is None:
             parser.error(f"Run not found: {run_id}")
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "history-compare":
+        if args.limit_scored_events is not None and args.limit_scored_events < 0:
+            parser.error("--limit-scored-events must be zero or greater.")
+        if args.limit_event_groups is not None and args.limit_event_groups < 0:
+            parser.error("--limit-event-groups must be zero or greater.")
         if args.latest_pair and (
             args.left_run_id is not None
             or args.right_run_id is not None
@@ -390,6 +612,17 @@ def main(argv: list[str] | None = None) -> int:
             sqlite_path=args.sqlite_path,
             left_run_id=left_run_id,
             right_run_id=right_run_id,
+            dominant_field=args.dominant_field,
+            min_impact_score=args.min_impact_score,
+            max_impact_score=args.max_impact_score,
+            min_field_attraction=args.min_field_attraction,
+            max_field_attraction=args.max_field_attraction,
+            min_divergence_score=args.min_divergence_score,
+            max_divergence_score=args.max_divergence_score,
+            limit_scored_events=args.limit_scored_events,
+            only_matching_interventions=args.only_matching_interventions,
+            group_dominant_field=args.group_dominant_field,
+            limit_event_groups=args.limit_event_groups,
         )
         if payload is None:
             parser.error(

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter
+import re
 
 from .models import NormalizedEvent, ScoredEvent
+from .normalize import FIELD_KEYWORDS
 
 
 REGION_WEIGHTS = {
@@ -31,6 +33,13 @@ FA_MAX_MARGIN_BONUS = 1.0
 FA_COHERENCE_WEIGHT = 0.75
 IM_DOMINANT_FIELD_WEIGHT = 0.25
 IM_NONZERO_FIELD_WEIGHT = 0.2
+IM_TEXT_SIGNAL_KEYWORD_WEIGHT = 0.12
+IM_TEXT_SIGNAL_TITLE_WEIGHT = 0.2
+IM_TEXT_SIGNAL_SUMMARY_WEIGHT = 0.1
+IM_TEXT_SIGNAL_MAX_KEYWORD_HITS = 4
+IM_TEXT_SIGNAL_MAX_TITLE_HITS = 2
+IM_TEXT_SIGNAL_MAX_SUMMARY_HITS = 2
+IM_TEXT_SIGNAL_MAX_BONUS = 1.0
 
 
 def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
@@ -75,11 +84,64 @@ def compute_im(
     region_weight = sum(REGION_WEIGHTS.get(region, 0.5) for region in event.regions)
     keyword_density = min(len(event.keywords) * 0.25, 3.0)
     nonzero_field_count = sum(1 for score in field_scores.values() if score > 0)
+    dominant_field = select_dominant_field(event)[0]
+    text_signal_intensity = compute_text_signal_intensity(event, dominant_field)
     evidence_bonus = (dominant_field_strength * IM_DOMINANT_FIELD_WEIGHT) + (
         nonzero_field_count * IM_NONZERO_FIELD_WEIGHT
     )
     return round(
-        3.0 + actor_weight + region_weight + keyword_density + evidence_bonus, 2
+        3.0
+        + actor_weight
+        + region_weight
+        + keyword_density
+        + evidence_bonus
+        + text_signal_intensity,
+        2,
+    )
+
+
+def compute_text_signal_intensity(event: NormalizedEvent, dominant_field: str) -> float:
+    dominant_keywords = FIELD_KEYWORDS.get(dominant_field, {})
+    if not dominant_keywords:
+        return 0.0
+
+    keyword_hits = min(
+        sum(1 for keyword in event.keywords if keyword in dominant_keywords),
+        IM_TEXT_SIGNAL_MAX_KEYWORD_HITS,
+    )
+    title_hits = count_text_signal_surface_hits(
+        text=event.title,
+        dominant_keywords=dominant_keywords,
+        max_hits=IM_TEXT_SIGNAL_MAX_TITLE_HITS,
+    )
+    summary_hits = count_text_signal_surface_hits(
+        text=event.summary,
+        dominant_keywords=dominant_keywords,
+        max_hits=IM_TEXT_SIGNAL_MAX_SUMMARY_HITS,
+    )
+
+    return round(
+        min(
+            (keyword_hits * IM_TEXT_SIGNAL_KEYWORD_WEIGHT)
+            + (title_hits * IM_TEXT_SIGNAL_TITLE_WEIGHT)
+            + (summary_hits * IM_TEXT_SIGNAL_SUMMARY_WEIGHT),
+            IM_TEXT_SIGNAL_MAX_BONUS,
+        ),
+        2,
+    )
+
+
+def count_text_signal_surface_hits(
+    *, text: str, dominant_keywords: dict[str, float], max_hits: int
+) -> int:
+    lowered_text = text.lower()
+    return min(
+        sum(
+            1
+            for keyword in dominant_keywords
+            if re.search(rf"\b{re.escape(keyword)}\b", lowered_text)
+        ),
+        max_hits,
     )
 
 
@@ -122,6 +184,10 @@ def build_rationale(
     fa_score: float,
 ) -> list[str]:
     rationale = [f"Im={im_score}", f"Fa={fa_score}"]
+    dominant_field_keywords = FIELD_KEYWORDS.get(dominant_field, {})
+    if dominant_field_keywords:
+        text_signal_intensity = compute_text_signal_intensity(event, dominant_field)
+        rationale.append(f"im_text_signal_intensity={text_signal_intensity}")
     if event.actors:
         rationale.append(f"actors={', '.join(event.actors)}")
     if event.regions:
