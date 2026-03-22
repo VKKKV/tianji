@@ -88,6 +88,7 @@ python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
 python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --latest
 python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
 python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --latest-pair
+python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-latest
 ```
 
 ### Run tests
@@ -122,7 +123,7 @@ The current MVP flow is:
    Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, or generated-at range, and inspect one stored run's summaries, scored events, and intervention candidates with `history-show` or `history-show --latest`.
 
 8. **Compare Persisted Runs (Optional)**  
-   Compare two stored runs with `history-compare` or the newest two stored runs with `history-compare --latest-pair` to inspect count deltas, dominant-field/risk changes, grouped-analysis changes, and intervention differences.
+   Compare two stored runs with `history-compare`, compare the newest two stored runs with `history-compare --latest-pair`, or compare one chosen run against the newest run with `history-compare --run-id N --against-latest` to inspect count deltas, dominant-field/risk changes, grouped-analysis changes, and intervention differences.
 
 ## Output Artifact
 
