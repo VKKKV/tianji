@@ -700,6 +700,60 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(payload["left_run_id"], 1)
             self.assertEqual(payload["right_run_id"], 2)
 
+    def test_cli_history_compare_can_compare_run_against_previous(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            first_empty = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>First Empty Feed</title></channel></rss>
+"""
+            second_empty = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Second Empty Feed</title></channel></rss>
+"""
+            first_fixture = Path(tmpdir) / "first-empty.xml"
+            second_fixture = Path(tmpdir) / "second-empty.xml"
+            first_fixture.write_text(first_empty, encoding="utf-8")
+            second_fixture.write_text(second_empty, encoding="utf-8")
+
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+            run_pipeline(
+                fixture_paths=[str(first_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+            run_pipeline(
+                fixture_paths=[str(second_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--run-id",
+                        "3",
+                        "--against-previous",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["left_run_id"], 2)
+            self.assertEqual(payload["right_run_id"], 3)
+
     def test_history_compare_reports_group_diff_when_grouping_changes(self) -> None:
         left = {
             "run_id": 1,

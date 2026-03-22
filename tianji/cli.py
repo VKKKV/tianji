@@ -10,6 +10,7 @@ from .storage import (
     compare_runs,
     get_latest_run_id,
     get_latest_run_pair,
+    get_previous_run_id,
     get_run_summary,
     list_runs,
 )
@@ -147,6 +148,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--against-latest",
         action="store_true",
         help="Use the latest persisted run as the right-hand side for comparison",
+    )
+    history_compare_parser.add_argument(
+        "--against-previous",
+        action="store_true",
+        help="Use the immediately previous persisted run as the left-hand side for comparison",
     )
     return parser
 
@@ -291,9 +297,10 @@ def main(argv: list[str] | None = None) -> int:
             or args.right_run_id is not None
             or args.run_id is not None
             or args.against_latest
+            or args.against_previous
         ):
             parser.error(
-                "Use either --latest-pair, --run-id with --against-latest, or explicit --left-run-id/--right-run-id, not a mix."
+                "Use either --latest-pair, --run-id with --against-latest, --run-id with --against-previous, or explicit --left-run-id/--right-run-id, not a mix."
             )
         if args.latest_pair:
             pair = get_latest_run_pair(sqlite_path=args.sqlite_path)
@@ -303,6 +310,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
             left_run_id, right_run_id = pair
         elif args.against_latest:
+            if args.against_previous:
+                parser.error(
+                    "Use only one comparison preset: --against-latest or --against-previous."
+                )
             if args.run_id is None:
                 parser.error("history-compare with --against-latest requires --run-id.")
             latest_run_id = get_latest_run_id(sqlite_path=args.sqlite_path)
@@ -310,14 +321,28 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("No persisted runs are available.")
             left_run_id = args.run_id
             right_run_id = latest_run_id
+        elif args.against_previous:
+            if args.run_id is None:
+                parser.error(
+                    "history-compare with --against-previous requires --run-id."
+                )
+            previous_run_id = get_previous_run_id(
+                sqlite_path=args.sqlite_path, run_id=args.run_id
+            )
+            if previous_run_id is None:
+                parser.error(
+                    f"No previous persisted run exists before run {args.run_id}."
+                )
+            left_run_id = previous_run_id
+            right_run_id = args.run_id
         else:
             if args.run_id is not None:
                 parser.error(
-                    "Use --run-id only with --against-latest for history-compare."
+                    "Use --run-id only with --against-latest or --against-previous for history-compare."
                 )
             if args.left_run_id is None or args.right_run_id is None:
                 parser.error(
-                    "history-compare requires --latest-pair, --run-id with --against-latest, or both --left-run-id and --right-run-id."
+                    "history-compare requires --latest-pair, --run-id with --against-latest, --run-id with --against-previous, or both --left-run-id and --right-run-id."
                 )
             left_run_id = args.left_run_id
             right_run_id = args.right_run_id
