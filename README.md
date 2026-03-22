@@ -33,28 +33,36 @@ This keeps the first version testable, local, and reproducible.
 
 ## Quick Start
 
+### Create the local uv environment
+
+```bash
+uv venv .venv
+```
+
+All commands below use the repo-local environment directly via `.venv/bin/python`.
+
 ### Run from fixture
 
 ```bash
-python3 -m tianji run --fixture tests/fixtures/sample_feed.xml
+.venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml
 ```
 
 ### Run with output file
 
 ```bash
-python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/latest-run.json
+.venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/latest-run.json
 ```
 
 ### Run with one-time fetch
 
 ```bash
-python3 -m tianji run --fetch --source-url https://example.com/feed.xml
+.venv/bin/python -m tianji run --fetch --source-url https://example.com/feed.xml
 ```
 
 ### Run with optional SQLite persistence
 
 ```bash
-python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
+.venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
 ```
 
 ### Run with a source registry
@@ -75,26 +83,27 @@ Create a JSON file shaped like:
 Then run:
 
 ```bash
-python3 -m tianji run --fetch --source-config /path/to/sources.json --source-name example-feed
+.venv/bin/python -m tianji run --fetch --source-config /path/to/sources.json --source-name example-feed
 ```
 
 ### Inspect persisted run history
 
 ```bash
-python3 -m tianji history --sqlite-path runs/tianji.sqlite3
-python3 -m tianji history --sqlite-path runs/tianji.sqlite3 --dominant-field technology --risk-level high
-python3 -m tianji history --sqlite-path runs/tianji.sqlite3 --since 2026-03-22T10:00:00+00:00 --until 2026-03-22T12:00:00+00:00
-python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
-python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --latest
-python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
-python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --latest-pair
-python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-latest
+.venv/bin/python -m tianji history --sqlite-path runs/tianji.sqlite3
+.venv/bin/python -m tianji history --sqlite-path runs/tianji.sqlite3 --dominant-field technology --risk-level high
+.venv/bin/python -m tianji history --sqlite-path runs/tianji.sqlite3 --since 2026-03-22T10:00:00+00:00 --until 2026-03-22T12:00:00+00:00
+.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
+.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --latest
+.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
+.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --latest-pair
+.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-latest
+.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-previous
 ```
 
 ### Run tests
 
 ```bash
-python3 -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 ## What the Pipeline Does
@@ -123,7 +132,7 @@ The current MVP flow is:
    Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, or generated-at range, and inspect one stored run's summaries, scored events, and intervention candidates with `history-show` or `history-show --latest`.
 
 8. **Compare Persisted Runs (Optional)**  
-   Compare two stored runs with `history-compare`, compare the newest two stored runs with `history-compare --latest-pair`, or compare one chosen run against the newest run with `history-compare --run-id N --against-latest` to inspect count deltas, dominant-field/risk changes, grouped-analysis changes, and intervention differences.
+   Compare two stored runs with `history-compare`, compare the newest two stored runs with `history-compare --latest-pair`, compare one chosen run against the newest run with `history-compare --run-id N --against-latest`, or compare one chosen run against its immediate predecessor with `history-compare --run-id N --against-previous`.
 
 ## Output Artifact
 

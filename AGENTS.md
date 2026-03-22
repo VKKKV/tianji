@@ -29,7 +29,7 @@ tianji/
 | Change ingestion | `tianji/fetch.py` | RSS/Atom fixture loading and one-time URL fetch |
 | Change source selection | `tianji/cli.py` | Source registry parsing and URL selection live here today |
 | Change persistence | `tianji/storage.py` | Optional SQLite persistence boundary |
-| Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` lists/filters runs; `history-show` supports run id or latest; `history-compare` supports explicit ids or latest pair |
+| Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` lists/filters runs; `history-show` supports run id or latest; `history-compare` supports explicit ids and latest/relative presets |
 | Change heuristics | `tianji/normalize.py`, `tianji/scoring.py`, `tianji/backtrack.py` | Deterministic first |
 | Verify changes | `tests/test_pipeline.py`, `tests/fixtures/sample_feed.xml` | Local fixture + local HTTP server |
 | Plan future divergence ideas | `DivergenceMeter/`, `DEV_PLAN.md` | Use as concept source, not owned runtime |
@@ -49,7 +49,7 @@ tianji/
 
 ## CONVENTIONS
 - First-party TianJi source is only `tianji/` and `tests/`.
-- Prefer module execution: `python3 -m tianji`.
+- Prefer the repo-local uv environment: `uv venv .venv` and `.venv/bin/python -m tianji`.
 - Python 3.12+; stdlib-first; no heavy framework implied by current code.
 - Verification is `unittest`-based even though `pyproject.toml` includes a minimal pytest stanza.
 - Current CLI also supports `--source-config`, `--source-name`, `--sqlite-path`, `history`, `history-show`, and `history-compare`.
@@ -76,17 +76,20 @@ tianji/
 
 ## COMMANDS
 ```bash
-python3 -m tianji run --fixture tests/fixtures/sample_feed.xml
-python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/latest-run.json
-python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
-python3 -m tianji run --fetch --source-url https://example.com/feed.xml
-python3 -m tianji history --sqlite-path runs/tianji.sqlite3
-python3 -m tianji history --sqlite-path runs/tianji.sqlite3 --since 2026-03-22T10:00:00+00:00 --until 2026-03-22T12:00:00+00:00
-python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
-python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --latest
-python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
-python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --latest-pair
-python3 -m unittest discover -s tests -v
+uv venv .venv
+.venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml
+.venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/latest-run.json
+.venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
+.venv/bin/python -m tianji run --fetch --source-url https://example.com/feed.xml
+.venv/bin/python -m tianji history --sqlite-path runs/tianji.sqlite3
+.venv/bin/python -m tianji history --sqlite-path runs/tianji.sqlite3 --since 2026-03-22T10:00:00+00:00 --until 2026-03-22T12:00:00+00:00
+.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
+.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --latest
+.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
+.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --latest-pair
+.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-latest
+.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-previous
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 ## NOTES
