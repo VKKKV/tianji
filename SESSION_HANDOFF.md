@@ -15,10 +15,10 @@ Primary verification command:
 Latest verified state in this session:
 
 - full unittest suite passes
-- current count: `109` tests
+- current count: `110` tests
 - history/history-show/history-compare operator workflows are substantially richer than at the start of the branch
 - Candidate A scoring slice is now shipped: `Im` includes a bounded text-signal-intensity bonus while `Fa` remains field-alignment-only
-- Candidate B has now started in a narrow shipped form: `Fa` includes a bounded near-tie ambiguity penalty when the top two fields nearly tie
+- Candidate B has now advanced through two narrow shipped refinements: `Fa` includes a bounded near-tie ambiguity penalty when the top two fields nearly tie and a bounded diffuse mixed-field penalty when a strong third field remains after the top-two margin is already clear
 - history-compare parser coverage now includes negative compare limits and mixed-preset misuse, and the CLI rejects explicit-pair ids mixed with `--against-latest` / `--against-previous`
 - inverted score windows are now rejected consistently across `history`, `history-show`, and `history-compare`
 - negative `history --limit` values are now parser-rejected instead of silently changing slice behavior
@@ -52,6 +52,7 @@ Latest verified state in this session:
   - dominance margin over the second-best field
   - coherence share of dominant-field mass
   - bounded near-tie ambiguity penalty on the top-two margin when the rounded top-two gap is below `1.0`
+  - bounded diffuse mixed-field penalty when the rounded top-two gap is at least `1.0` but third-field support remains unusually strong
 - current text-signal-intensity behavior is **boundary-aware cross-surface dominant-field cue concentration**, not historical novelty and not grouped corroboration
 - title/summary cue matching now uses cached compiled regexes, so the boundary-aware rule stays cheap in the scoring loop
 - `score_event()` now computes dominant field and text-signal intensity once and reuses them for both `impact_score` and rationale construction
@@ -155,7 +156,7 @@ Best next milestone:
 1. **Refine the first-party scoring model from the now-shipped Candidate A base**
    - keep the next step narrow and deterministic
    - strongest likely next target is either:
-     - a small follow-up to the new near-tie `Fa` refinement only if a concrete mixed-field weakness remains after this slice, or
+     - a small follow-up to the now-shipped `Fa` ambiguity refinements only if a new concrete mixed-field weakness remains after this slice, or
      - one more tightly bounded text-signal edge-case pass only if a real cue-boundary bug appears,
    - likely files: `tianji/scoring.py`, `SCORING_SPEC.md`, `tests/test_pipeline.py`
    - preserve current branch guardrails:
@@ -209,6 +210,7 @@ Current scoring-focused tests worth reading first:
 - `test_score_event_combines_text_signal_surface_contributions_inside_im`
 - `test_score_event_applies_dominance_margin_inside_fa`
 - `test_score_event_applies_coherence_inside_fa`
+- `test_score_event_penalizes_diffuse_mixed_field_support_in_fa`
 - `test_score_event_rewards_clearer_field_alignment_in_fa`
 - `test_score_event_penalizes_near_tie_field_alignment_in_fa`
 - `test_score_event_keeps_clear_field_alignment_semantics_stable`

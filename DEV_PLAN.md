@@ -741,12 +741,16 @@ Recommended next branch after Candidate A hardening:
 Current status after the first Candidate B slice:
 
 - a bounded near-tie `Fa` ambiguity penalty is now shipped
+- a bounded diffuse mixed-field `Fa` penalty is now also shipped for cases where
+  the top-two margin is already clear but third-field support remains unusually
+  strong
 - compare preset misuse, negative compare limits, and inverted persisted score
   windows are now parser-rejected across the read-only operator surface
 - additive `Im` terms and direct text-signal bonus surfaces now have explicit
   isolation coverage in `tests/test_pipeline.py`
-- the next likely useful work is either a further narrow `Fa` refinement with a
-  concrete mixed-field case or a return to pure scoring-model depth inside `Im`
+- the next likely useful work is now either a further narrow `Fa` refinement only
+  if a new concrete mixed-field case still escapes the current ambiguity rules,
+  or a return to pure scoring-model depth inside `Im`
 
 ## Phase Boundary Notes
 
