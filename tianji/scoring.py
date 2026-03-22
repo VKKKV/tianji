@@ -24,6 +24,9 @@ ACTOR_WEIGHTS = {
     "iran": 1.2,
 }
 
+IMPACT_WEIGHT = 0.65
+FIELD_ATTRACTION_WEIGHT = 1.35
+
 
 def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
     scored = [score_event(event) for event in events]
@@ -31,27 +34,15 @@ def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
 
 
 def score_event(event: NormalizedEvent) -> ScoredEvent:
-    dominant_field, field_attraction = max(
-        event.field_scores.items(),
-        key=lambda item: item[1],
-        default=("uncategorized", 0.0),
+    dominant_field, fa_score = compute_fa(event)
+    im_score = compute_im(event, fa_score)
+    divergence_score = compute_divergence_score(im_score, fa_score)
+    rationale = build_rationale(
+        event=event,
+        dominant_field=dominant_field,
+        im_score=im_score,
+        fa_score=fa_score,
     )
-    actor_weight = sum(ACTOR_WEIGHTS.get(actor, 0.6) for actor in event.actors)
-    region_weight = sum(REGION_WEIGHTS.get(region, 0.5) for region in event.regions)
-    keyword_density = min(len(event.keywords) * 0.25, 3.0)
-    impact_score = round(
-        3.0 + actor_weight + region_weight + keyword_density + field_attraction, 2
-    )
-    divergence_score = round((impact_score * 0.65) + (field_attraction * 1.35), 2)
-    rationale = []
-    if event.actors:
-        rationale.append(f"actors={', '.join(event.actors)}")
-    if event.regions:
-        rationale.append(f"regions={', '.join(event.regions)}")
-    if field_attraction > 0:
-        rationale.append(f"dominant_field={dominant_field}:{field_attraction}")
-    else:
-        rationale.append("dominant_field=uncategorized:0")
     return ScoredEvent(
         event_id=event.event_id,
         title=event.title,
@@ -62,11 +53,50 @@ def score_event(event: NormalizedEvent) -> ScoredEvent:
         regions=event.regions,
         keywords=event.keywords,
         dominant_field=dominant_field,
-        impact_score=impact_score,
-        field_attraction=round(field_attraction, 2),
+        impact_score=im_score,
+        field_attraction=fa_score,
         divergence_score=divergence_score,
         rationale=rationale,
     )
+
+
+def compute_im(event: NormalizedEvent, fa_score: float) -> float:
+    actor_weight = sum(ACTOR_WEIGHTS.get(actor, 0.6) for actor in event.actors)
+    region_weight = sum(REGION_WEIGHTS.get(region, 0.5) for region in event.regions)
+    keyword_density = min(len(event.keywords) * 0.25, 3.0)
+    return round(3.0 + actor_weight + region_weight + keyword_density + fa_score, 2)
+
+
+def compute_fa(event: NormalizedEvent) -> tuple[str, float]:
+    dominant_field, field_strength = max(
+        event.field_scores.items(),
+        key=lambda item: item[1],
+        default=("uncategorized", 0.0),
+    )
+    return dominant_field, round(field_strength, 2)
+
+
+def compute_divergence_score(im_score: float, fa_score: float) -> float:
+    return round((im_score * IMPACT_WEIGHT) + (fa_score * FIELD_ATTRACTION_WEIGHT), 2)
+
+
+def build_rationale(
+    *,
+    event: NormalizedEvent,
+    dominant_field: str,
+    im_score: float,
+    fa_score: float,
+) -> list[str]:
+    rationale = [f"Im={im_score}", f"Fa={fa_score}"]
+    if event.actors:
+        rationale.append(f"actors={', '.join(event.actors)}")
+    if event.regions:
+        rationale.append(f"regions={', '.join(event.regions)}")
+    if fa_score > 0:
+        rationale.append(f"dominant_field={dominant_field}:{fa_score}")
+    else:
+        rationale.append("dominant_field=uncategorized:0")
+    return rationale
 
 
 def summarize_scenario(scored_events: list[ScoredEvent]) -> dict[str, object]:

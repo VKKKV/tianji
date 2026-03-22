@@ -12,7 +12,9 @@ import unittest
 
 from tianji.cli import main
 from tianji.fetch import TianJiInputError
+from tianji.models import NormalizedEvent
 from tianji.pipeline import run_pipeline
+from tianji.scoring import score_event
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_feed.xml"
@@ -209,6 +211,42 @@ class PipelineTests(unittest.TestCase):
             artifact.intervention_candidates[0].intervention_type,
             "capability-control",
         )
+
+    def test_score_event_exposes_explicit_im_fa_semantics(self) -> None:
+        event = NormalizedEvent(
+            event_id="evt-1",
+            source="fixture:test",
+            title="Coordinated chip sanctions and cyber controls expand",
+            summary="Officials expand coordinated chip sanctions after cyber escalation.",
+            link="https://example.com/evt-1",
+            published_at="2026-03-22T12:00:00Z",
+            keywords=[
+                "coordinated",
+                "chip",
+                "sanctions",
+                "cyber",
+                "controls",
+                "escalation",
+            ],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 2.0,
+                "economy": 1.5,
+                "conflict": 0.0,
+            },
+        )
+
+        scored = score_event(event)
+
+        self.assertEqual(scored.dominant_field, "technology")
+        self.assertEqual(scored.impact_score, 17.0)
+        self.assertEqual(scored.field_attraction, 6.5)
+        self.assertEqual(scored.divergence_score, 19.83)
+        self.assertIn("Im=17.0", scored.rationale)
+        self.assertIn("Fa=6.5", scored.rationale)
+        self.assertIn("dominant_field=technology:6.5", scored.rationale)
 
     def test_cli_can_fetch_using_source_config(self) -> None:
         fixture_bytes = FIXTURE_PATH.read_bytes()
