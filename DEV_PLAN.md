@@ -387,11 +387,13 @@ Expected outcome:
 
 Recommended verification additions:
 
-- add factor-isolation tests for actor-weight changes inside `Im`
-- add factor-isolation tests for region-weight changes inside `Im`
-- add factor-isolation tests for keyword-density cap behavior
-- add factor-isolation tests for nonzero-field-count and dominant-field-strength
-  effects inside `Im`
+- these `Im` factor-isolation tests are now shipped:
+  - actor-weight changes inside `Im`
+  - region-weight changes inside `Im`
+  - keyword-density cap behavior
+  - nonzero-field-count effects inside `Im`
+  - dominant-field-strength effects inside `Im`
+  - direct keyword/title/summary text-signal surface contributions
 - add factor-isolation tests for dominance-margin and coherence effects inside
   `Fa`
 - keep at least one exact-value test for a representative scored event so the
@@ -741,6 +743,8 @@ Current status after the first Candidate B slice:
 - a bounded near-tie `Fa` ambiguity penalty is now shipped
 - compare preset misuse, negative compare limits, and inverted persisted score
   windows are now parser-rejected across the read-only operator surface
+- additive `Im` terms and direct text-signal bonus surfaces now have explicit
+  isolation coverage in `tests/test_pipeline.py`
 - the next likely useful work is either a further narrow `Fa` refinement with a
   concrete mixed-field case or a return to pure scoring-model depth inside `Im`
 
