@@ -1,0 +1,8 @@
+[project]
+name = "tianji"
+version = "0.1.0"
+description = "TianJi one-shot fetch infer backtrack MVP"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

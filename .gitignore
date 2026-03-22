@@ -1,0 +1,13 @@
+.ruff_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+runs/
+
+# Local reference repositories kept outside initial TianJi history
+/worldmonitor/
+/DivergenceMeter/
+/MiroFish/
+/oh-my-openagent/

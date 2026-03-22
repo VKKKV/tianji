@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+from collections import Counter
+
+from .models import NormalizedEvent, ScoredEvent
+
+
+REGION_WEIGHTS = {
+    "ukraine": 2.5,
+    "russia": 2.0,
+    "middle-east": 2.5,
+    "east-asia": 2.0,
+    "united-states": 1.0,
+    "europe": 1.0,
+}
+
+ACTOR_WEIGHTS = {
+    "nato": 1.5,
+    "eu": 1.0,
+    "un": 1.0,
+    "usa": 1.5,
+    "china": 1.5,
+    "russia": 1.5,
+    "iran": 1.2,
+}
+
+
+def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
+    scored = [score_event(event) for event in events]
+    return sorted(scored, key=lambda item: item.divergence_score, reverse=True)
+
+
+def score_event(event: NormalizedEvent) -> ScoredEvent:
+    dominant_field, field_attraction = max(
+        event.field_scores.items(),
+        key=lambda item: item[1],
+        default=("uncategorized", 0.0),
+    )
+    actor_weight = sum(ACTOR_WEIGHTS.get(actor, 0.6) for actor in event.actors)
+    region_weight = sum(REGION_WEIGHTS.get(region, 0.5) for region in event.regions)
+    keyword_density = min(len(event.keywords) * 0.25, 3.0)
+    impact_score = round(
+        3.0 + actor_weight + region_weight + keyword_density + field_attraction, 2
+    )
+    divergence_score = round((impact_score * 0.65) + (field_attraction * 1.35), 2)
+    rationale = []
+    if event.actors:
+        rationale.append(f"actors={', '.join(event.actors)}")
+    if event.regions:
+        rationale.append(f"regions={', '.join(event.regions)}")
+    if field_attraction > 0:
+        rationale.append(f"dominant_field={dominant_field}:{field_attraction}")
+    else:
+        rationale.append("dominant_field=uncategorized:0")
+    return ScoredEvent(
+        event_id=event.event_id,
+        title=event.title,
+        source=event.source,
+        link=event.link,
+        published_at=event.published_at,
+        actors=event.actors,
+        regions=event.regions,
+        keywords=event.keywords,
+        dominant_field=dominant_field,
+        impact_score=impact_score,
+        field_attraction=round(field_attraction, 2),
+        divergence_score=divergence_score,
+        rationale=rationale,
+    )
+
+
+def summarize_scenario(scored_events: list[ScoredEvent]) -> dict[str, object]:
+    if not scored_events:
+        return {
+            "headline": "No high-signal events were available for inference.",
+            "dominant_field": "uncategorized",
+            "risk_level": "low",
+            "top_regions": [],
+            "top_actors": [],
+        }
+
+    top_events = scored_events[:3]
+    field_counts = Counter(event.dominant_field for event in scored_events)
+    region_counts = Counter(region for event in top_events for region in event.regions)
+    actor_counts = Counter(actor for event in top_events for actor in event.actors)
+    average_score = sum(event.divergence_score for event in top_events) / len(
+        top_events
+    )
+    risk_level = (
+        "high" if average_score >= 9 else "medium" if average_score >= 6 else "low"
+    )
+    dominant_field = field_counts.most_common(1)[0][0]
+    headline = (
+        f"The strongest current branch is {dominant_field}, driven by "
+        f"{top_events[0].title.lower()} and {len(top_events) - 1} additional high-signal events."
+    )
+    return {
+        "headline": headline,
+        "dominant_field": dominant_field,
+        "risk_level": risk_level,
+        "top_regions": [name for name, _ in region_counts.most_common(3)],
+        "top_actors": [name for name, _ in actor_counts.most_common(3)],
+    }
