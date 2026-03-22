@@ -116,6 +116,119 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(intervention_count, 3)
             self.assertEqual(schema_version, "tianji.run-artifact.v1")
 
+    def test_cli_can_fetch_using_source_config(self) -> None:
+        fixture_bytes = FIXTURE_PATH.read_bytes()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/rss+xml")
+                self.send_header("Content-Length", str(len(fixture_bytes)))
+                self.end_headers()
+                self.wfile.write(fixture_bytes)
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "sources.json"
+            output_path = Path(tmpdir) / "config-report.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "sources": [
+                            {
+                                "name": "local-feed",
+                                "url": f"http://127.0.0.1:{server.server_port}/feed.xml",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            exit_code = main(
+                [
+                    "run",
+                    "--fetch",
+                    "--source-config",
+                    str(config_path),
+                    "--source-name",
+                    "local-feed",
+                    "--output",
+                    str(output_path),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(output_path.exists())
+
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["mode"], "fetch")
+            self.assertEqual(payload["input_summary"]["raw_item_count"], 3)
+            self.assertEqual(payload["schema_version"], "tianji.run-artifact.v1")
+
+    def test_cli_dedupes_config_and_explicit_source_urls(self) -> None:
+        fixture_bytes = FIXTURE_PATH.read_bytes()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/rss+xml")
+                self.send_header("Content-Length", str(len(fixture_bytes)))
+                self.end_headers()
+                self.wfile.write(fixture_bytes)
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+
+        url = f"http://127.0.0.1:{server.server_port}/feed.xml"
+
+        with TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "sources.json"
+            output_path = Path(tmpdir) / "dedupe-report.json"
+            config_path.write_text(
+                json.dumps(
+                    {"sources": [{"name": "local-feed", "url": url}]},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            exit_code = main(
+                [
+                    "run",
+                    "--fetch",
+                    "--source-config",
+                    str(config_path),
+                    "--source-name",
+                    "local-feed",
+                    "--source-url",
+                    url,
+                    "--output",
+                    str(output_path),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["input_summary"]["raw_item_count"], 3)
+
     def test_cli_requires_input_source(self) -> None:
         with self.assertRaises(SystemExit) as context:
             main(["run"])
