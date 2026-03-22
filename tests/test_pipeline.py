@@ -1309,6 +1309,23 @@ class PipelineTests(unittest.TestCase):
             )
             self.assertEqual(len(payload["intervention_candidates"]), 3)
 
+    def test_cli_history_show_rejects_non_positive_run_id(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-show",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--run-id",
+                        "0",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("--run-id must be greater than zero.", stderr.getvalue())
+
     def test_cli_history_show_limits_scored_events(self) -> None:
         with TemporaryDirectory() as tmpdir:
             sqlite_path = Path(tmpdir) / "tianji.sqlite3"
@@ -2121,6 +2138,43 @@ class PipelineTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(payload["diff"]["right_only_intervention_event_ids"], [])
+
+    def test_cli_history_compare_rejects_non_positive_run_id(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--run-id",
+                        "0",
+                        "--against-latest",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("--run-id must be greater than zero.", stderr.getvalue())
+
+    def test_cli_history_compare_rejects_non_positive_explicit_pair_ids(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--left-run-id",
+                        "0",
+                        "--right-run-id",
+                        "2",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("--left-run-id must be greater than zero.", stderr.getvalue())
 
     def test_cli_history_compare_can_use_latest_pair(self) -> None:
         with TemporaryDirectory() as tmpdir:

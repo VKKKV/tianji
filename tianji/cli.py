@@ -417,6 +417,13 @@ def validate_score_range(
         parser.error(f"{min_flag} cannot be greater than {max_flag}.")
 
 
+def validate_positive_run_id(
+    parser: argparse.ArgumentParser, *, value: int | None, flag: str
+) -> None:
+    if value is not None and value < 1:
+        parser.error(f"{flag} must be greater than zero.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -551,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:
             min_flag="--min-divergence-score",
             max_flag="--max-divergence-score",
         )
+        validate_positive_run_id(parser, value=args.run_id, flag="--run-id")
         if args.latest and args.run_id is not None:
             parser.error("Use either --run-id or --latest for history-show, not both.")
         if (args.previous or args.next) and args.run_id is None:
@@ -631,6 +639,9 @@ def main(argv: list[str] | None = None) -> int:
             min_flag="--min-divergence-score",
             max_flag="--max-divergence-score",
         )
+        validate_positive_run_id(parser, value=args.run_id, flag="--run-id")
+        validate_positive_run_id(parser, value=args.left_run_id, flag="--left-run-id")
+        validate_positive_run_id(parser, value=args.right_run_id, flag="--right-run-id")
         if args.latest_pair and (
             args.left_run_id is not None
             or args.right_run_id is not None
