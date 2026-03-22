@@ -3167,6 +3167,66 @@ class PipelineTests(unittest.TestCase):
             incidental_scored.field_attraction, neutral_scored.field_attraction
         )
 
+    def test_score_event_text_signal_intensity_matches_punctuation_adjacent_cues(
+        self,
+    ) -> None:
+        plain_text_event = NormalizedEvent(
+            event_id="evt-plain-text",
+            source="fixture:test",
+            title="Policy update remains under review",
+            summary="Officials discuss restrictions and oversight planning.",
+            link="https://example.com/plain-text",
+            published_at="2026-03-22T13:00:00Z",
+            keywords=[
+                "policy",
+                "update",
+                "review",
+                "restrictions",
+                "oversight",
+                "planning",
+            ],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 2.0,
+                "economy": 1.5,
+                "conflict": 0.0,
+            },
+        )
+        punctuated_cue_event = NormalizedEvent(
+            event_id="evt-punctuated-text",
+            source="fixture:test",
+            title="AI-driven chip, cyber, and satellite controls tighten",
+            summary="Officials review chip, cyber, and satellite restrictions after new alerts.",
+            link="https://example.com/punctuated-text",
+            published_at="2026-03-22T13:05:00Z",
+            keywords=[
+                "policy",
+                "update",
+                "review",
+                "restrictions",
+                "oversight",
+                "planning",
+            ],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 2.0,
+                "economy": 1.5,
+                "conflict": 0.0,
+            },
+        )
+
+        plain_scored = score_event(plain_text_event)
+        punctuated_scored = score_event(punctuated_cue_event)
+
+        self.assertGreater(punctuated_scored.impact_score, plain_scored.impact_score)
+        self.assertEqual(
+            punctuated_scored.field_attraction, plain_scored.field_attraction
+        )
+
     def test_group_events_clusters_obviously_related_events(self) -> None:
         related_a = ScoredEvent(
             event_id="evt-a",
