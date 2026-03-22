@@ -16,9 +16,11 @@ TianJi should grow in this order:
 1. strengthen the owned Python core
 2. add persistence and repeatable local workflows
 3. formalize divergence and backtracking logic
-4. introduce a daemon/orchestrator only after the one-shot path is solid
-5. add an optional web UI after stable backend contracts exist
-6. retire embedded reference repos once their useful ideas are reimplemented in first-party code
+4. complete the CLI-first operator workflow
+5. add a terminal UI with Vim-style navigation on top of stable local data/contracts
+6. introduce a daemon/orchestrator only after the one-shot path is solid
+7. add an optional web UI only after CLI and TUI workflows are stable
+8. retire embedded reference repos once their useful ideas are reimplemented in first-party code
 
 ## Phase 1 — Harden the Owned Core
 
@@ -76,7 +78,45 @@ Deliverables:
 
 This is the point where TianJi starts owning “source code” for ingestion and state instead of leaning on nearby references for design inspiration.
 
-## Phase 4 — Hongmeng Lite
+## Phase 4 — CLI Completion
+
+Goal: finish the operator workflow in the terminal before adding any richer interface layer.
+
+Deliverables:
+
+- complete persisted history/query ergonomics
+- strong compare/navigation shortcuts for stored runs
+- stable local docs and commands for day-to-day operator usage
+- no hidden dependency on any future daemon or UI layer
+
+This phase ends when TianJi feels coherent as a terminal-first tool even without any additional interface.
+
+## Phase 5 — Terminal UI (Vim-Motion TUI)
+
+Goal: add a keyboard-first terminal interface after the CLI surface is complete.
+
+Principles:
+
+- TUI comes **after** CLI maturity, not before
+- TUI comes **before** any web GUI
+- navigation should be Vim-oriented by default
+- TUI should reuse the same local run/history/artifact concepts the CLI already exposes
+- no duplication of business logic inside the TUI layer
+
+Planned shape:
+
+- browse run history
+- inspect one run and its scored events/interventions
+- compare runs
+- navigate with Vim-style motions and shortcuts
+
+Do not do:
+
+- do not turn the TUI into a second orchestration runtime
+- do not bypass CLI/storage contracts with ad hoc state
+- do not let TUI-specific UX force premature web/API design
+
+## Phase 6 — Hongmeng Lite
 
 Goal: introduce a small local orchestrator only when the data path is stable.
 
@@ -93,7 +133,7 @@ Keep it narrow:
 - no cloud dependency
 - no mandatory web stack
 
-## Phase 5 — Optional Web UI
+## Phase 7 — Optional Web UI
 
 Goal: add a future web UI without coupling it to the core engine.
 
@@ -102,6 +142,7 @@ Principles:
 - UI remains optional and off by default
 - UI is a separate service or process boundary
 - backend contract should already exist before UI work starts
+- CLI and TUI should already be mature before UI work starts
 - CLI remains the source-of-truth operator surface
 
 Planned shape:
@@ -114,13 +155,15 @@ Planned shape:
   - compare historical runs
   - browse intervention candidates
 
+TUI remains the preferred rich local interface before this phase exists.
+
 Reference use:
 
 - borrow workflow presentation ideas from `MiroFish/frontend/`
 - borrow decoupled service thinking from `worldmonitor/` and `oh-my-openagent/`
 - do not adopt any reference frontend wholesale
 
-## Phase 6 — Reference Repo Retirement
+## Phase 8 — Reference Repo Retirement
 
 Goal: remove the embedded local reference repositories from the long-term TianJi workspace.
 
@@ -158,10 +201,10 @@ Retirement trigger:
 
 1. define first-party TianJi `Im` / `Fa` spec
 2. formalize richer event grouping and causal clustering
-3. draft the future local API contract that a web UI would consume
-4. begin actual local API implementation only when a real process boundary is chosen
-5. extend persisted comparison/query workflows beyond the first history slice
-6. tighten remaining doc/examples drift as commands evolve
+3. finish the remaining CLI ergonomics for persisted analysis workflows
+4. define the Vim-motion TUI contract and navigation model
+5. draft the future local API contract that a web UI would consume
+6. begin actual local API implementation only when a real process boundary is chosen
 
 Draft contract note now lives in `LOCAL_API_CONTRACT.md`; implementation remains future work.
 

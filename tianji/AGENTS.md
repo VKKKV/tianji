@@ -10,7 +10,7 @@ Owned TianJi runtime: one-shot Python pipeline from feed input to JSON artifact.
 | End-to-end flow | `pipeline.py` | Read this first for control flow |
 | Input parsing | `fetch.py` | Fixture and live feed loading |
 | Optional persistence | `storage.py` | SQLite schema and per-run persistence |
-| Run history reads | `storage.py`, `cli.py` | `history`, `history-show`, and `history-compare` are read-only SQLite entrypoints with filtering, grouped compare, and latest/relative shortcuts |
+| Run history reads | `storage.py`, `cli.py` | `history`, `history-show`, and `history-compare` are read-only SQLite entrypoints with filtering, grouped compare, and latest/relative navigation shortcuts |
 | Event extraction | `normalize.py` | Keywords, actors, regions, field scores |
 | Heuristic ranking | `scoring.py` | Impact, field attraction, scenario summary |
 | Reverse inference | `backtrack.py` | Intervention candidate generation |
@@ -22,7 +22,7 @@ Owned TianJi runtime: one-shot Python pipeline from feed input to JSON artifact.
 - `pipeline.py` orchestrates; subordinate modules stay single-purpose.
 - `cli.py` currently owns source-config resolution because that logic is still operator-surface policy.
 - Use the repo-local uv environment for package work: `uv venv .venv` and `.venv/bin/python -m ...`.
-- `cli.py` also owns lightweight operator-facing history commands; keep `history`, `history-show`, and `history-compare` read-only unless a broader service layer appears, including latest-run shortcut flags.
+- `cli.py` also owns lightweight operator-facing history commands; keep `history`, `history-show`, and `history-compare` read-only unless a broader service layer appears, including latest/previous/next shortcut flags.
 - Preserve deterministic behavior unless a change explicitly introduces an optional model-assisted layer.
 - Maintain artifact stability through `RunArtifact.to_dict()`.
 

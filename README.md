@@ -94,6 +94,8 @@ Then run:
 .venv/bin/python -m tianji history --sqlite-path runs/tianji.sqlite3 --since 2026-03-22T10:00:00+00:00 --until 2026-03-22T12:00:00+00:00
 .venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
 .venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --latest
+.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 3 --previous
+.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1 --next
 .venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
 .venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --latest-pair
 .venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-latest
@@ -129,7 +131,7 @@ The current MVP flow is:
    Store run metadata plus raw, normalized, scored, and intervention rows in SQLite when `--sqlite-path` is provided.
 
 7. **Inspect Run History (Optional)**  
-   Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, or generated-at range, and inspect one stored run's summaries, scored events, and intervention candidates with `history-show` or `history-show --latest`.
+   Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, or generated-at range, and inspect one stored run's summaries, scored events, and intervention candidates with `history-show`, `history-show --latest`, `history-show --previous`, or `history-show --next`.
 
 8. **Compare Persisted Runs (Optional)**  
    Compare two stored runs with `history-compare`, compare the newest two stored runs with `history-compare --latest-pair`, compare one chosen run against the newest run with `history-compare --run-id N --against-latest`, or compare one chosen run against its immediate predecessor with `history-compare --run-id N --against-previous`.
@@ -223,7 +225,9 @@ Future local API contract now lives in `LOCAL_API_CONTRACT.md`; it is a draft co
 
 - more formalized `Im` / `Fa`-style scoring model
 - richer backtracking and causal grouping
-- future local API implementation when a real local service boundary exists
+- finish the CLI-first operator workflow for persisted analysis
+- design and implement a Vim-motion TUI on top of stable local contracts
+- future local API implementation only when a real local service boundary is chosen
 
 ### Later
 
@@ -231,7 +235,7 @@ Future local API contract now lives in `LOCAL_API_CONTRACT.md`; it is a draft co
 - scheduled ingestion
 - local LLM-assisted inference as an optional layer
 - constrained Nuwa replay / perturbation sandbox
-- optional decoupled web UI
+- optional decoupled web UI after CLI and TUI are mature
 
 ## Principles
 
