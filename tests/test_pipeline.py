@@ -3535,6 +3535,96 @@ class PipelineTests(unittest.TestCase):
         )
         self.assertEqual(capped_scored.impact_score, still_capped_scored.impact_score)
 
+    def test_score_event_applies_dominant_field_strength_inside_im(self) -> None:
+        lower_strength_event = NormalizedEvent(
+            event_id="evt-strength-low",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/strength-low",
+            published_at="2026-03-22T12:15:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.5,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        higher_strength_event = NormalizedEvent(
+            event_id="evt-strength-high",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/strength-high",
+            published_at="2026-03-22T12:16:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 6.0,
+                "diplomacy": 0.5,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+
+        lower_scored = score_event(lower_strength_event)
+        higher_scored = score_event(higher_strength_event)
+
+        self.assertAlmostEqual(
+            higher_scored.impact_score - lower_scored.impact_score,
+            0.5,
+            places=2,
+        )
+
+    def test_score_event_applies_nonzero_field_count_inside_im(self) -> None:
+        lower_count_event = NormalizedEvent(
+            event_id="evt-nonzero-low",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/nonzero-low",
+            published_at="2026-03-22T12:17:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        higher_count_event = NormalizedEvent(
+            event_id="evt-nonzero-high",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/nonzero-high",
+            published_at="2026-03-22T12:18:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.5,
+                "economy": 0.3,
+                "conflict": 0.0,
+            },
+        )
+
+        lower_scored = score_event(lower_count_event)
+        higher_scored = score_event(higher_count_event)
+
+        self.assertAlmostEqual(
+            higher_scored.impact_score - lower_scored.impact_score,
+            0.4,
+            places=2,
+        )
+
     def test_score_event_rewards_stronger_weighted_field_intensity_in_im(self) -> None:
         lower_intensity_event = NormalizedEvent(
             event_id="evt-low-im",
