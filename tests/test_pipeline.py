@@ -3625,6 +3625,156 @@ class PipelineTests(unittest.TestCase):
             places=2,
         )
 
+    def test_score_event_applies_text_signal_surface_contributions_inside_im(
+        self,
+    ) -> None:
+        baseline_event = NormalizedEvent(
+            event_id="evt-text-signal-baseline",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/text-signal-baseline",
+            published_at="2026-03-22T12:19:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        baseline_scored = score_event(baseline_event)
+
+        surface_cases = [
+            (
+                "keywords",
+                NormalizedEvent(
+                    event_id="evt-text-signal-keywords",
+                    source="fixture:test",
+                    title="Neutral update",
+                    summary="Neutral summary language.",
+                    link="https://example.com/text-signal-keywords",
+                    published_at="2026-03-22T12:20:00Z",
+                    keywords=["neutral", "update", "brief", "chip"],
+                    actors=["observer"],
+                    regions=["unknown-region"],
+                    field_scores={
+                        "technology": 4.0,
+                        "diplomacy": 0.0,
+                        "economy": 0.0,
+                        "conflict": 0.0,
+                    },
+                ),
+                0.37,
+            ),
+            (
+                "title",
+                NormalizedEvent(
+                    event_id="evt-text-signal-title",
+                    source="fixture:test",
+                    title="Chip update",
+                    summary="Neutral summary language.",
+                    link="https://example.com/text-signal-title",
+                    published_at="2026-03-22T12:21:00Z",
+                    keywords=["neutral", "update", "brief"],
+                    actors=["observer"],
+                    regions=["unknown-region"],
+                    field_scores={
+                        "technology": 4.0,
+                        "diplomacy": 0.0,
+                        "economy": 0.0,
+                        "conflict": 0.0,
+                    },
+                ),
+                0.2,
+            ),
+            (
+                "summary",
+                NormalizedEvent(
+                    event_id="evt-text-signal-summary",
+                    source="fixture:test",
+                    title="Neutral update",
+                    summary="Chip summary language.",
+                    link="https://example.com/text-signal-summary",
+                    published_at="2026-03-22T12:22:00Z",
+                    keywords=["neutral", "update", "brief"],
+                    actors=["observer"],
+                    regions=["unknown-region"],
+                    field_scores={
+                        "technology": 4.0,
+                        "diplomacy": 0.0,
+                        "economy": 0.0,
+                        "conflict": 0.0,
+                    },
+                ),
+                0.1,
+            ),
+        ]
+
+        for surface_name, event, expected_delta in surface_cases:
+            with self.subTest(surface=surface_name):
+                scored = score_event(event)
+                self.assertEqual(
+                    baseline_scored.field_attraction, scored.field_attraction
+                )
+                self.assertAlmostEqual(
+                    scored.impact_score - baseline_scored.impact_score,
+                    expected_delta,
+                    places=2,
+                )
+
+    def test_score_event_combines_text_signal_surface_contributions_inside_im(
+        self,
+    ) -> None:
+        baseline_event = NormalizedEvent(
+            event_id="evt-text-signal-combined-baseline",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/text-signal-combined-baseline",
+            published_at="2026-03-22T12:23:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        combined_signal_event = NormalizedEvent(
+            event_id="evt-text-signal-combined",
+            source="fixture:test",
+            title="Chip update",
+            summary="Chip summary language.",
+            link="https://example.com/text-signal-combined",
+            published_at="2026-03-22T12:24:00Z",
+            keywords=["neutral", "update", "brief", "chip"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+
+        baseline_scored = score_event(baseline_event)
+        combined_scored = score_event(combined_signal_event)
+
+        self.assertEqual(
+            baseline_scored.field_attraction, combined_scored.field_attraction
+        )
+        self.assertAlmostEqual(
+            combined_scored.impact_score - baseline_scored.impact_score,
+            0.67,
+            places=2,
+        )
+
     def test_score_event_rewards_stronger_weighted_field_intensity_in_im(self) -> None:
         lower_intensity_event = NormalizedEvent(
             event_id="evt-low-im",
