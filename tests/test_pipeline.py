@@ -3354,6 +3354,55 @@ class PipelineTests(unittest.TestCase):
             near_tie_scored.divergence_score,
         )
 
+    def test_score_event_near_tie_penalty_starts_below_margin_threshold(self) -> None:
+        threshold_margin_event = NormalizedEvent(
+            event_id="evt-near-tie-threshold",
+            source="fixture:test",
+            title="Shared field ambiguity case",
+            summary="Shared event text for top-two field ambiguity checks.",
+            link="https://example.com/near-tie-threshold",
+            published_at="2026-03-22T12:07:30Z",
+            keywords=["chip", "cyber", "talks", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 5.5,
+                "economy": 0.5,
+                "conflict": 0.0,
+            },
+        )
+        below_threshold_margin_event = NormalizedEvent(
+            event_id="evt-near-tie-below-threshold",
+            source="fixture:test",
+            title="Shared field ambiguity case",
+            summary="Shared event text for top-two field ambiguity checks.",
+            link="https://example.com/near-tie-below-threshold",
+            published_at="2026-03-22T12:07:31Z",
+            keywords=["chip", "cyber", "talks", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 5.52,
+                "economy": 0.48,
+                "conflict": 0.0,
+            },
+        )
+
+        threshold_scored = score_event(threshold_margin_event)
+        below_threshold_scored = score_event(below_threshold_margin_event)
+
+        self.assertEqual(
+            threshold_scored.impact_score, below_threshold_scored.impact_score
+        )
+        self.assertGreater(
+            threshold_scored.field_attraction, below_threshold_scored.field_attraction
+        )
+        self.assertGreater(
+            threshold_scored.divergence_score, below_threshold_scored.divergence_score
+        )
+
     def test_score_event_keeps_clear_field_alignment_semantics_stable(self) -> None:
         clear_event = NormalizedEvent(
             event_id="evt-clear-stable",
@@ -3511,6 +3560,57 @@ class PipelineTests(unittest.TestCase):
         )
         self.assertGreater(
             clearer_scored.divergence_score, diffuse_scored.divergence_score
+        )
+
+    def test_score_event_diffuse_third_field_penalty_starts_above_threshold(
+        self,
+    ) -> None:
+        threshold_third_field_event = NormalizedEvent(
+            event_id="evt-diffuse-third-threshold",
+            source="fixture:test",
+            title="Shared field structure",
+            summary="Shared field structure summary.",
+            link="https://example.com/diffuse-third-threshold",
+            published_at="2026-03-22T12:08:36Z",
+            keywords=["chip", "cyber", "controls", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 5.4,
+                "economy": 2.5,
+                "conflict": 0.13,
+            },
+        )
+        above_threshold_third_field_event = NormalizedEvent(
+            event_id="evt-diffuse-third-above-threshold",
+            source="fixture:test",
+            title="Shared field structure",
+            summary="Shared field structure summary.",
+            link="https://example.com/diffuse-third-above-threshold",
+            published_at="2026-03-22T12:08:37Z",
+            keywords=["chip", "cyber", "controls", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 5.4,
+                "economy": 2.62,
+                "conflict": 0.01,
+            },
+        )
+
+        threshold_scored = score_event(threshold_third_field_event)
+        above_threshold_scored = score_event(above_threshold_third_field_event)
+
+        self.assertEqual(
+            threshold_scored.impact_score, above_threshold_scored.impact_score
+        )
+        self.assertGreater(
+            threshold_scored.field_attraction, above_threshold_scored.field_attraction
+        )
+        self.assertGreater(
+            threshold_scored.divergence_score, above_threshold_scored.divergence_score
         )
 
     def test_score_event_applies_actor_weight_inside_im(self) -> None:
