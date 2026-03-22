@@ -258,7 +258,7 @@ Retirement trigger:
 
 1. deepen the first-party deterministic scoring model in `tianji/scoring.py`
 2. define a clearer first-party TianJi `Im` / `Fa` spec in docs and tests
-3. add focused validation/doc cleanup for compare projections if a short slice is needed
+3. add focused doc/handoff cleanup for shipped scoring determinism and compare-projection semantics when a short slice is needed
 4. define the Vim-motion TUI contract and navigation model only after scoring work lands
 5. keep the future local API contract as documentation until a real process boundary is chosen
 
@@ -317,7 +317,9 @@ Current code-grounded factor inventory:
   - weighted region presence from normalized `regions`
   - bounded keyword density from normalized `keywords`
   - a dominant-field-strength evidence bonus from `field_scores`
-  - a nonzero-field-count diversity bonus from `field_scores`
+  - a thresholded field-diversity bonus from `field_scores`, where only fields
+    with meaningful support (`field_score >= 1.0`) count toward extra diversity
+    credit beyond the dominant positive-field baseline
 - **Current `Fa` inputs in `tianji/scoring.py`**
   - dominant field strength from `field_scores`
   - dominance margin over the second-best field
@@ -391,7 +393,7 @@ Recommended verification additions:
   - actor-weight changes inside `Im`
   - region-weight changes inside `Im`
   - keyword-density cap behavior
-  - nonzero-field-count effects inside `Im`
+  - thresholded field-diversity behavior inside `Im`
   - dominant-field-strength effects inside `Im`
   - direct keyword/title/summary text-signal surface contributions
 - add factor-isolation tests for dominance-margin and coherence effects inside
@@ -744,6 +746,15 @@ Current status after the first Candidate B slice:
 - a bounded diffuse mixed-field `Fa` penalty is now also shipped for cases where
   the top-two margin is already clear but third-field support remains unusually
   strong
+- zero positive field-mass events now stay `uncategorized` with `Fa = 0.0`
+- exact positive-score dominant-field ties are now deterministic at the event
+  level instead of depending on `field_scores` insertion order
+- scenario-summary dominant-field count ties are now deterministic and prefer the
+  strongest tied event by `divergence_score`, with field-name order only as the
+  final fallback
+- `Im` field-diversity credit is now thresholded so only fields with
+  `field_score >= 1.0` count toward extra diversity credit beyond the dominant
+  positive-field baseline
 - compare preset misuse, negative compare limits, and inverted persisted score
   windows are now parser-rejected across the read-only operator surface
 - additive `Im` terms and direct text-signal bonus surfaces now have explicit
@@ -751,9 +762,11 @@ Current status after the first Candidate B slice:
 - the current `Fa` ambiguity rules now also have threshold-boundary regression
   coverage for the `< 1.0` near-tie gate and the `> 2.5` diffuse-third-field
   gate
-- the next likely useful work is now either a further narrow `Fa` refinement only
-  if a new concrete mixed-field case still escapes the current ambiguity rules,
-  or a return to pure scoring-model depth inside `Im`
+- the next likely useful work is now either a short doc/spec cleanup pass that
+  captures these shipped deterministic rules, a further narrow `Fa` refinement
+  only if a new concrete mixed-field case still escapes the current ambiguity
+  rules, or a return to pure scoring-model depth inside `Im` only if a new
+  concrete weakness appears
 
 ## Phase Boundary Notes
 

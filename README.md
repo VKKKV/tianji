@@ -157,7 +157,7 @@ The artifact includes:
 
 - `schema_version`: stable top-level artifact contract version
 - `input_summary`: item counts and source list
-- `scenario_summary`: dominant field, top actors, top regions, risk level, and a short headline
+- `scenario_summary`: dominant field, top actors, top regions, risk level, and a short headline; when dominant-field counts tie across scored events, the stored summary resolves the winner deterministically by field-name order
 - `scored_events`: normalized events with impact score, field attraction, divergence score, and rationale
 - `intervention_candidates`: ranked backtracked actions derived from the top events
 

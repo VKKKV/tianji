@@ -15,16 +15,24 @@ Primary verification command:
 Latest verified state in this session:
 
 - full unittest suite passes
-- current count: `112` tests
+- current count: `117` tests
+- local `main` branch now exists and already includes the merged scoring-refinement work
+- active continuation branch is `feat/scoring-fa-threshold-boundaries`
 - history/history-show/history-compare operator workflows are substantially richer than at the start of the branch
 - Candidate A scoring slice is now shipped: `Im` includes a bounded text-signal-intensity bonus while `Fa` remains field-alignment-only
 - Candidate B has now advanced through two narrow shipped refinements: `Fa` includes a bounded near-tie ambiguity penalty when the top two fields nearly tie and a bounded diffuse mixed-field penalty when a strong third field remains after the top-two margin is already clear
+- scoring determinism has now been tightened in three more narrow shipped slices:
+  - zero positive field-mass events stay `uncategorized` instead of inheriting a dominant field from dict order, and `Fa` floors at `0.0` for that case
+  - exact positive-score dominant-field ties are now resolved canonically by field-name order so `Im` text-signal matching and rationale output do not depend on `field_scores` insertion order
+  - scenario-summary dominant-field count ties are now deterministic and prefer the strongest tied event by `divergence_score`, with field-name order only as the final fallback
+- `Im` field-diversity credit is now thresholded: only fields with `field_score >= 1.0` count toward the diversity bonus, while the dominant positive field still preserves the baseline one-field credit
 - history-compare parser coverage now includes negative compare limits and mixed-preset misuse, and the CLI rejects explicit-pair ids mixed with `--against-latest` / `--against-previous`
 - inverted score windows are now rejected consistently across `history`, `history-show`, and `history-compare`
 - negative `history --limit` values are now parser-rejected instead of silently changing slice behavior
 - non-positive explicit persisted run ids are now parser-rejected for `history-show` and explicit/preset `history-compare` paths
-- scoring coverage now includes isolated `Im` tests for actor weighting, region weighting, raw keyword-density cap behavior, dominant-field-strength bonus behavior, nonzero-field-count bonus behavior, direct text-signal surface contributions, and isolated `Fa` tests for dominance-margin and coherence behavior
+- scoring coverage now includes isolated `Im` tests for actor weighting, region weighting, raw keyword-density cap behavior, dominant-field-strength bonus behavior, thresholded field-diversity behavior, direct text-signal surface contributions, and isolated `Fa` tests for dominance-margin and coherence behavior
 - `Fa` threshold-boundary coverage now explicitly pins both ambiguity gates: the near-tie penalty starts below the `1.0` top-two margin threshold and the diffuse-third-field penalty starts above the `2.5` third-field threshold
+- scoring coverage now also explicitly pins zero-field uncategorized behavior, exact dominant-field tie determinism, and scenario-summary tie determinism
 
 ## What Ships Now
 
@@ -46,7 +54,7 @@ Latest verified state in this session:
   - region weight
   - keyword density
   - dominant-field evidence bonus
-  - nonzero-field diversity bonus
+  - thresholded field-diversity bonus (`field_score >= 1.0`, with the dominant positive field still preserving baseline one-field credit)
   - bounded text-signal-intensity bonus
 - `Fa` still comes only from dominant-field concentration semantics:
   - dominant field strength
@@ -58,6 +66,7 @@ Latest verified state in this session:
 - title/summary cue matching now uses cached compiled regexes, so the boundary-aware rule stays cheap in the scoring loop
 - `score_event()` now computes dominant field and text-signal intensity once and reuses them for both `impact_score` and rationale construction
 - score rationale now includes `im_text_signal_intensity=...` so the new `Im` factor stays inspectable
+- dominant-field selection is now deterministic across both scored events and scenario summaries; no field winner should depend on Python dict insertion order
 
 ### Grouping and causal logic
 
@@ -130,12 +139,27 @@ For runs with no grouped scenarios:
 - `README.md` — current reality, commands, shipped surface
 - `DEV_PLAN.md` — roadmap and recent progress
 - `SCORING_SPEC.md` — deterministic scoring + current grouping semantics
-- `tianji/scoring.py` — explicit `Im` / `Fa` math including text-signal-intensity bonus
+- `tianji/scoring.py` — explicit `Im` / `Fa` math including text-signal-intensity bonus, thresholded field-diversity credit, and deterministic field selection rules
 - `tianji/cli.py` — operator surface and parser validation
 - `tianji/storage.py` — persistence + all history/history-show/history-compare read logic
 - `tianji/pipeline.py` — orchestration, grouping, causal clustering
 - `tianji/backtrack.py` — intervention generation and grouped reasoning text
 - `tests/test_pipeline.py` — authoritative fixture-first and end-to-end verification suite
+
+## Branch / Resume Context
+
+- `main` now exists locally and includes the merged scoring-refinement stack at:
+  - `c01aaa8` — `merge scoring refinement work into main`
+- current continuation branch for new work:
+  - `feat/scoring-fa-threshold-boundaries`
+- latest commits on the active branch:
+  - `226671c` — `document field attraction threshold coverage`
+  - `46e0876` — `cover field attraction threshold boundaries`
+- latest branch before that:
+  - `feat/scoring-fa-mixed-field-case`
+  - `31dfac5` — `document diffuse field attraction refinement`
+  - `342b0bb` — `refine field attraction for diffuse mixed fields`
+- working tree was clean at handoff time
 
 ## Roadmap Position
 
@@ -145,30 +169,37 @@ The just-completed slices pushed far into:
 - Phase 4: CLI-first persisted-analysis ergonomics
 
 At this point, the biggest obvious CLI gap was already closed by making
-`history-compare` projection-aware, and the first recommended scoring branch has
-also landed. The next session should either continue **scoring-model refinement**
-in a similarly narrow deterministic slice beyond the near-tie `Fa` refinement, or
-take a smaller doc/validation cleanup pass if no new scoring issue is identified.
+`history-compare` projection-aware, and the next several narrow scoring cleanup
+slices have also landed. The next session should default to a **small doc/spec
+cleanup or a fresh scoring issue only if a new concrete weakness is found**, not
+to reopening already-shipped tie-handling or residual-noise work.
+
+Given the current branch stack, the default resume path should be:
+
+1. start from `feat/scoring-fa-threshold-boundaries` if continuing scoring work
+2. start from `main` only if beginning a new unrelated feature branch
 
 ## Recommended Next Work
 
 Best next milestone:
 
 1. **Refine the first-party scoring model from the now-shipped Candidate A base**
+   - only if a fresh concrete scoring weakness appears after the now-shipped determinism cleanup
    - keep the next step narrow and deterministic
-   - strongest likely next target is either:
-     - a small follow-up to the now-shipped `Fa` ambiguity refinements only if a new concrete mixed-field weakness remains after this slice, or
-     - one more tightly bounded text-signal edge-case pass only if a real cue-boundary bug appears,
-   - likely files: `tianji/scoring.py`, `SCORING_SPEC.md`, `tests/test_pipeline.py`
-   - preserve current branch guardrails:
-     - no persistence or schema changes
-     - no CLI/history surface expansion unless a score-driven test truly requires it
-     - no novelty/baseline scoring yet
+    - strongest likely next target is either:
+      - a small follow-up to the shipped `Fa` ambiguity refinements only if a new mixed-field weakness remains after the pinned threshold tests, or
+      - one more tightly bounded text-signal edge-case pass only if a real cue-boundary bug appears,
+    - likely files: `tianji/scoring.py`, `SCORING_SPEC.md`, `tests/test_pipeline.py`
+    - preserve current branch guardrails:
+      - no persistence or schema changes
+      - no CLI/history surface expansion unless a score-driven test truly requires it
+      - no novelty/baseline scoring yet
 
-Best smaller alternative if staying in persisted analysis:
+Best smaller default next step:
 
-2. **Add doc/validation cleanup around compare projections**
-   - smaller remaining README/handoff polish only if operator confusion still appears around compare payload interpretation
+2. **Refresh handoff/spec/docs around shipped scoring semantics**
+   - capture the now-shipped determinism stack in `SESSION_HANDOFF.md`, `DEV_PLAN.md`, and `SCORING_SPEC.md`
+   - keep the next session from reopening already-shipped tie-handling or raw nonzero-field assumptions
 
 Best larger next branch after scoring:
 
@@ -204,7 +235,8 @@ Current scoring-focused tests worth reading first:
 - `test_score_event_exposes_explicit_im_fa_semantics`
 - `test_score_event_applies_actor_weight_inside_im`
 - `test_score_event_applies_dominant_field_strength_inside_im`
-- `test_score_event_applies_nonzero_field_count_inside_im`
+- `test_score_event_ignores_subthreshold_field_noise_inside_im`
+- `test_score_event_rewards_meaningful_field_diversity_inside_im`
 - `test_score_event_applies_region_weight_inside_im`
 - `test_score_event_applies_text_signal_surface_contributions_inside_im`
 - `test_score_event_caps_raw_keyword_density_inside_im`
@@ -222,6 +254,9 @@ Current scoring-focused tests worth reading first:
 - `test_score_event_text_signal_intensity_ignores_incidental_substrings`
 - `test_score_event_text_signal_intensity_matches_punctuation_adjacent_cues`
 - `test_score_event_text_signal_intensity_respects_cap`
+- `test_score_event_treats_zero_field_mass_as_uncategorized`
+- `test_score_event_exact_top_field_tie_is_order_independent`
+- `test_summarize_scenario_resolves_dominant_field_ties_independently_of_event_order`
 
 ## Guardrails For The Next Session
 
@@ -232,4 +267,5 @@ Current scoring-focused tests worth reading first:
 - do not jump to daemon/web work yet
 - preserve deterministic behavior by default
 - for the next scoring slice, keep `Fa` isolated unless a concrete field-alignment bug is demonstrated
+- do not reopen dominant-field tie handling or raw nonzero-field `Im` diversity assumptions unless a new regression proves current deterministic rules wrong
 - avoid widening text-signal scoring into history-aware novelty, grouped corroboration, or opaque heuristics

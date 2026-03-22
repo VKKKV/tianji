@@ -15,15 +15,18 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
      - region weight
      - keyword density
      - a small dominant-field evidence bonus
-     - a small nonzero-field diversity bonus
+     - a small thresholded field-diversity bonus for fields with meaningful scored support
      - a bounded text-signal-intensity bonus for dominant-field cue concentration across normalized text surfaces
 
 - **`Fa` (Field Attraction)**
   - TianJi's deterministic estimate of how strongly an event belongs to its dominant attractor field.
   - In the current slice, it starts from the strongest normalized field score and then adds:
-    - a small dominance-margin bonus over the second-best field
-    - a small coherence bonus based on how much of the total scored field mass belongs to the dominant field
-    - a small bounded near-tie ambiguity penalty when the top two fields are almost tied
+     - a small dominance-margin bonus over the second-best field
+     - a small coherence bonus based on how much of the total scored field mass belongs to the dominant field
+     - a small bounded near-tie ambiguity penalty when the top two fields are almost tied
+     - a small bounded diffuse mixed-field penalty when a strong third field remains after the top-two margin is already clear
+    - when no field has any positive scored mass, TianJi treats the event as `uncategorized` and returns `Fa = 0.0`
+    - when multiple positive fields tie for the top score, TianJi picks one deterministically by canonical field-name order rather than dict insertion order
 
 - **`divergence_score`**
   - TianJi's current ranking score derived from explicit `Im` and `Fa` intermediates.
@@ -200,6 +203,12 @@ Current implementation shape:
   `Fa` subtracts a small bounded diffuse-support penalty
 - this remains a surgical ambiguity adjustment rather than a broad contradiction
   model
+- when all field scores are zero, TianJi does not infer a dominant field from
+  dict order; it treats the event as `uncategorized` with `Fa = 0.0`
+- when multiple positive fields share the exact top score, TianJi keeps the event
+  categorized but resolves the dominant-field label deterministically by
+  canonical field-name order so `Im` text-signal matching and rationale output do
+  not depend on field-score dict insertion order
 
 Recommended verification for this slice:
 
