@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime
 import json
 from pathlib import Path
@@ -44,7 +45,7 @@ def persist_run(
     database_path = Path(sqlite_path)
     database_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with sqlite3.connect(database_path) as connection:
+    with closing(sqlite3.connect(database_path)) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         initialize_schema(connection)
         run_id = insert_run(connection, artifact)
@@ -64,32 +65,74 @@ def list_runs(
     risk_level: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    min_top_impact_score: float | None = None,
+    max_top_impact_score: float | None = None,
+    min_top_field_attraction: float | None = None,
+    max_top_field_attraction: float | None = None,
+    min_top_divergence_score: float | None = None,
+    max_top_divergence_score: float | None = None,
+    top_group_dominant_field: str | None = None,
+    min_event_group_count: int | None = None,
+    max_event_group_count: int | None = None,
 ) -> list[dict[str, object]]:
-    with sqlite3.connect(sqlite_path) as connection:
+    with closing(sqlite3.connect(sqlite_path)) as connection:
         rows = connection.execute(
             """
             SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json
             FROM runs
             ORDER BY id DESC
-            LIMIT ?
             """,
-            (limit,),
         ).fetchall()
+        typed_rows = [coerce_run_row(row) for row in rows]
+        top_scored_events_by_run_id = get_top_scored_event_summaries(
+            connection,
+            [run_id for run_id, *_ in typed_rows],
+        )
 
-    typed_rows = [coerce_run_row(row) for row in rows]
-    items = [build_run_list_item(row) for row in typed_rows]
-    return filter_run_list_items(
+    items = [
+        build_run_list_item(
+            row,
+            top_scored_event=top_scored_events_by_run_id.get(row[0]),
+        )
+        for row in typed_rows
+    ]
+    filtered = filter_run_list_items(
         items,
         mode=mode,
         dominant_field=dominant_field,
         risk_level=risk_level,
         since=since,
         until=until,
+        min_top_impact_score=min_top_impact_score,
+        max_top_impact_score=max_top_impact_score,
+        min_top_field_attraction=min_top_field_attraction,
+        max_top_field_attraction=max_top_field_attraction,
+        min_top_divergence_score=min_top_divergence_score,
+        max_top_divergence_score=max_top_divergence_score,
+        top_group_dominant_field=top_group_dominant_field,
+        min_event_group_count=min_event_group_count,
+        max_event_group_count=max_event_group_count,
     )
+    return filtered[:limit]
 
 
-def get_run_summary(*, sqlite_path: str, run_id: int) -> dict[str, object] | None:
-    with sqlite3.connect(sqlite_path) as connection:
+def get_run_summary(
+    *,
+    sqlite_path: str,
+    run_id: int,
+    dominant_field: str | None = None,
+    min_impact_score: float | None = None,
+    max_impact_score: float | None = None,
+    min_field_attraction: float | None = None,
+    max_field_attraction: float | None = None,
+    min_divergence_score: float | None = None,
+    max_divergence_score: float | None = None,
+    limit_scored_events: int | None = None,
+    only_matching_interventions: bool = False,
+    group_dominant_field: str | None = None,
+    limit_event_groups: int | None = None,
+) -> dict[str, object] | None:
+    with closing(sqlite3.connect(sqlite_path)) as connection:
         row = connection.execute(
             """
             SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json
@@ -122,16 +165,44 @@ def get_run_summary(*, sqlite_path: str, run_id: int) -> dict[str, object] | Non
         return None
 
     payload = build_run_detail(coerce_run_row(row))
-    payload["scored_events"] = [
+    scenario_summary = cast(dict[str, object], payload["scenario_summary"])
+    event_groups = cast(
+        list[dict[str, object]], scenario_summary.get("event_groups", [])
+    )
+    scenario_summary["event_groups"] = filter_event_group_details(
+        event_groups,
+        dominant_field=group_dominant_field,
+        limit_event_groups=limit_event_groups,
+    )
+    scored_events = [
         build_scored_event_detail(coerce_scored_event_row(event_row))
         for event_row in scored_event_rows
     ]
-    payload["intervention_candidates"] = [
+    filtered_scored_events = filter_scored_event_details(
+        scored_events,
+        dominant_field=dominant_field,
+        min_impact_score=min_impact_score,
+        max_impact_score=max_impact_score,
+        min_field_attraction=min_field_attraction,
+        max_field_attraction=max_field_attraction,
+        min_divergence_score=min_divergence_score,
+        max_divergence_score=max_divergence_score,
+        limit_scored_events=limit_scored_events,
+    )
+    payload["scored_events"] = filtered_scored_events
+    intervention_candidates = [
         build_intervention_candidate_detail(
             coerce_intervention_candidate_row(intervention_row)
         )
         for intervention_row in intervention_rows
     ]
+    payload["intervention_candidates"] = filter_intervention_candidate_details(
+        intervention_candidates,
+        visible_scored_event_ids={
+            cast(str, event["event_id"]) for event in filtered_scored_events
+        },
+        only_matching_interventions=only_matching_interventions,
+    )
     return payload
 
 
@@ -140,9 +211,48 @@ def compare_runs(
     sqlite_path: str,
     left_run_id: int,
     right_run_id: int,
+    dominant_field: str | None = None,
+    min_impact_score: float | None = None,
+    max_impact_score: float | None = None,
+    min_field_attraction: float | None = None,
+    max_field_attraction: float | None = None,
+    min_divergence_score: float | None = None,
+    max_divergence_score: float | None = None,
+    limit_scored_events: int | None = None,
+    only_matching_interventions: bool = False,
+    group_dominant_field: str | None = None,
+    limit_event_groups: int | None = None,
 ) -> dict[str, object] | None:
-    left = get_run_summary(sqlite_path=sqlite_path, run_id=left_run_id)
-    right = get_run_summary(sqlite_path=sqlite_path, run_id=right_run_id)
+    left = get_run_summary(
+        sqlite_path=sqlite_path,
+        run_id=left_run_id,
+        dominant_field=dominant_field,
+        min_impact_score=min_impact_score,
+        max_impact_score=max_impact_score,
+        min_field_attraction=min_field_attraction,
+        max_field_attraction=max_field_attraction,
+        min_divergence_score=min_divergence_score,
+        max_divergence_score=max_divergence_score,
+        limit_scored_events=limit_scored_events,
+        only_matching_interventions=only_matching_interventions,
+        group_dominant_field=group_dominant_field,
+        limit_event_groups=limit_event_groups,
+    )
+    right = get_run_summary(
+        sqlite_path=sqlite_path,
+        run_id=right_run_id,
+        dominant_field=dominant_field,
+        min_impact_score=min_impact_score,
+        max_impact_score=max_impact_score,
+        min_field_attraction=min_field_attraction,
+        max_field_attraction=max_field_attraction,
+        min_divergence_score=min_divergence_score,
+        max_divergence_score=max_divergence_score,
+        limit_scored_events=limit_scored_events,
+        only_matching_interventions=only_matching_interventions,
+        group_dominant_field=group_dominant_field,
+        limit_event_groups=limit_event_groups,
+    )
     if left is None or right is None:
         return None
 
@@ -158,7 +268,7 @@ def compare_runs(
 
 
 def get_latest_run_id(*, sqlite_path: str) -> int | None:
-    with sqlite3.connect(sqlite_path) as connection:
+    with closing(sqlite3.connect(sqlite_path)) as connection:
         row = connection.execute(
             "SELECT id FROM runs ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -171,7 +281,7 @@ def get_latest_run_id(*, sqlite_path: str) -> int | None:
 
 
 def get_latest_run_pair(*, sqlite_path: str) -> tuple[int, int] | None:
-    with sqlite3.connect(sqlite_path) as connection:
+    with closing(sqlite3.connect(sqlite_path)) as connection:
         rows = connection.execute(
             "SELECT id FROM runs ORDER BY id DESC LIMIT 2"
         ).fetchall()
@@ -185,7 +295,7 @@ def get_latest_run_pair(*, sqlite_path: str) -> tuple[int, int] | None:
 
 
 def get_previous_run_id(*, sqlite_path: str, run_id: int) -> int | None:
-    with sqlite3.connect(sqlite_path) as connection:
+    with closing(sqlite3.connect(sqlite_path)) as connection:
         row = connection.execute(
             "SELECT id FROM runs WHERE id < ? ORDER BY id DESC LIMIT 1",
             (run_id,),
@@ -199,7 +309,7 @@ def get_previous_run_id(*, sqlite_path: str, run_id: int) -> int | None:
 
 
 def get_next_run_id(*, sqlite_path: str, run_id: int) -> int | None:
-    with sqlite3.connect(sqlite_path) as connection:
+    with closing(sqlite3.connect(sqlite_path)) as connection:
         row = connection.execute(
             "SELECT id FROM runs WHERE id > ? ORDER BY id ASC LIMIT 1",
             (run_id,),
@@ -448,7 +558,11 @@ def insert_intervention_candidates(
     )
 
 
-def build_run_list_item(row: RunRow) -> dict[str, object]:
+def build_run_list_item(
+    row: RunRow,
+    *,
+    top_scored_event: dict[str, object] | None = None,
+) -> dict[str, object]:
     (
         run_id,
         schema_version,
@@ -459,6 +573,10 @@ def build_run_list_item(row: RunRow) -> dict[str, object]:
     ) = row
     input_summary = json.loads(cast(str, input_summary_json))
     scenario_summary = json.loads(cast(str, scenario_summary_json))
+    event_groups = cast(
+        list[dict[str, object]], scenario_summary.get("event_groups", [])
+    )
+    top_event_group = event_groups[0] if event_groups else None
     return {
         "run_id": run_id,
         "schema_version": schema_version,
@@ -469,7 +587,79 @@ def build_run_list_item(row: RunRow) -> dict[str, object]:
         "dominant_field": scenario_summary.get("dominant_field", "uncategorized"),
         "risk_level": scenario_summary.get("risk_level", "low"),
         "headline": scenario_summary.get("headline", ""),
+        "event_group_count": len(event_groups),
+        "top_event_group_headline_event_id": (
+            top_event_group.get("headline_event_id")
+            if top_event_group is not None
+            else None
+        ),
+        "top_event_group_dominant_field": (
+            top_event_group.get("dominant_field")
+            if top_event_group is not None
+            else None
+        ),
+        "top_event_group_member_count": (
+            top_event_group.get("member_count") if top_event_group is not None else None
+        ),
+        "top_scored_event_id": (
+            top_scored_event.get("event_id") if top_scored_event is not None else None
+        ),
+        "top_scored_event_dominant_field": (
+            top_scored_event.get("dominant_field")
+            if top_scored_event is not None
+            else None
+        ),
+        "top_impact_score": (
+            top_scored_event.get("impact_score")
+            if top_scored_event is not None
+            else None
+        ),
+        "top_field_attraction": (
+            top_scored_event.get("field_attraction")
+            if top_scored_event is not None
+            else None
+        ),
+        "top_divergence_score": (
+            top_scored_event.get("divergence_score")
+            if top_scored_event is not None
+            else None
+        ),
     }
+
+
+def get_top_scored_event_summaries(
+    connection: sqlite3.Connection,
+    run_ids: list[int],
+) -> dict[int, dict[str, object]]:
+    if not run_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in run_ids)
+    rows = connection.execute(
+        f"""
+        SELECT run_id, event_id, dominant_field, impact_score, field_attraction, divergence_score
+        FROM scored_events
+        WHERE run_id IN ({placeholders})
+        ORDER BY run_id ASC, divergence_score DESC, id ASC
+        """,
+        tuple(run_ids),
+    ).fetchall()
+
+    summaries_by_run_id: dict[int, dict[str, object]] = {}
+    for row in rows:
+        run_id = row[0]
+        if not isinstance(run_id, int | str):
+            raise RuntimeError("Unexpected run id type in top scored event summary row")
+        run_id_value = int(run_id)
+        if run_id_value in summaries_by_run_id:
+            continue
+        summaries_by_run_id[run_id_value] = {
+            "event_id": str(row[1]),
+            "dominant_field": str(row[2]),
+            "impact_score": float(row[3]),
+            "field_attraction": float(row[4]),
+            "divergence_score": float(row[5]),
+        }
+    return summaries_by_run_id
 
 
 def build_run_detail(row: RunRow) -> dict[str, object]:
@@ -539,6 +729,107 @@ def build_scored_event_detail(row: ScoredEventRow) -> dict[str, object]:
     }
 
 
+def filter_scored_event_details(
+    scored_events: list[dict[str, object]],
+    *,
+    dominant_field: str | None,
+    min_impact_score: float | None,
+    max_impact_score: float | None,
+    min_field_attraction: float | None,
+    max_field_attraction: float | None,
+    min_divergence_score: float | None,
+    max_divergence_score: float | None,
+    limit_scored_events: int | None,
+) -> list[dict[str, object]]:
+    filtered = list(scored_events)
+    if dominant_field is not None:
+        filtered = [
+            event for event in filtered if event.get("dominant_field") == dominant_field
+        ]
+    if min_impact_score is not None:
+        filtered = [
+            event
+            for event in filtered
+            if is_numeric_run_metric_at_or_above(
+                event.get("impact_score"), min_impact_score
+            )
+        ]
+    if max_impact_score is not None:
+        filtered = [
+            event
+            for event in filtered
+            if is_numeric_run_metric_at_or_below(
+                event.get("impact_score"), max_impact_score
+            )
+        ]
+    if min_field_attraction is not None:
+        filtered = [
+            event
+            for event in filtered
+            if is_numeric_run_metric_at_or_above(
+                event.get("field_attraction"), min_field_attraction
+            )
+        ]
+    if max_field_attraction is not None:
+        filtered = [
+            event
+            for event in filtered
+            if is_numeric_run_metric_at_or_below(
+                event.get("field_attraction"), max_field_attraction
+            )
+        ]
+    if min_divergence_score is not None:
+        filtered = [
+            event
+            for event in filtered
+            if is_numeric_run_metric_at_or_above(
+                event.get("divergence_score"), min_divergence_score
+            )
+        ]
+    if max_divergence_score is not None:
+        filtered = [
+            event
+            for event in filtered
+            if is_numeric_run_metric_at_or_below(
+                event.get("divergence_score"), max_divergence_score
+            )
+        ]
+    if limit_scored_events is not None:
+        return filtered[:limit_scored_events]
+    return filtered
+
+
+def filter_intervention_candidate_details(
+    intervention_candidates: list[dict[str, object]],
+    *,
+    visible_scored_event_ids: set[str],
+    only_matching_interventions: bool,
+) -> list[dict[str, object]]:
+    if not only_matching_interventions:
+        return intervention_candidates
+    return [
+        candidate
+        for candidate in intervention_candidates
+        if candidate.get("event_id") in visible_scored_event_ids
+    ]
+
+
+def filter_event_group_details(
+    event_groups: list[dict[str, object]],
+    *,
+    dominant_field: str | None,
+    limit_event_groups: int | None,
+) -> list[dict[str, object]]:
+    filtered = list(event_groups)
+    if dominant_field is not None:
+        filtered = [
+            group for group in filtered if group.get("dominant_field") == dominant_field
+        ]
+    if limit_event_groups is not None:
+        return filtered[:limit_event_groups]
+    return filtered
+
+
 def build_intervention_candidate_detail(
     row: InterventionCandidateRow,
 ) -> dict[str, object]:
@@ -566,6 +857,9 @@ def build_compare_side(run_payload: dict[str, object]) -> dict[str, object]:
     top_event_group = event_groups[0] if event_groups else None
     top_scored_event = scored_events[0] if scored_events else None
     top_intervention = intervention_candidates[0] if intervention_candidates else None
+    event_group_headline_event_ids = [
+        cast(str, group["headline_event_id"]) for group in event_groups
+    ]
     return {
         "run_id": run_payload["run_id"],
         "schema_version": run_payload["schema_version"],
@@ -576,6 +870,7 @@ def build_compare_side(run_payload: dict[str, object]) -> dict[str, object]:
         "risk_level": scenario_summary.get("risk_level", "low"),
         "headline": scenario_summary.get("headline", ""),
         "event_group_count": len(event_groups),
+        "event_group_headline_event_ids": event_group_headline_event_ids,
         "top_event_group": top_event_group,
         "top_scored_event": top_scored_event,
         "top_intervention": top_intervention,
@@ -617,6 +912,22 @@ def build_compare_diff(
         if right_top_scored_event is not None
         else None
     )
+    left_top_impact_score = get_top_score_metric(left_top_scored_event, "impact_score")
+    right_top_impact_score = get_top_score_metric(
+        right_top_scored_event, "impact_score"
+    )
+    left_top_field_attraction = get_top_score_metric(
+        left_top_scored_event, "field_attraction"
+    )
+    right_top_field_attraction = get_top_score_metric(
+        right_top_scored_event, "field_attraction"
+    )
+    left_top_divergence_score = get_top_score_metric(
+        left_top_scored_event, "divergence_score"
+    )
+    right_top_divergence_score = get_top_score_metric(
+        right_top_scored_event, "divergence_score"
+    )
     left_top_intervention_event_id = (
         cast(str, left_top_intervention["event_id"])
         if left_top_intervention is not None
@@ -626,6 +937,12 @@ def build_compare_diff(
         cast(str, right_top_intervention["event_id"])
         if right_top_intervention is not None
         else None
+    )
+    left_event_group_headline_ids = cast(
+        list[str], left["event_group_headline_event_ids"]
+    )
+    right_event_group_headline_ids = cast(
+        list[str], right["event_group_headline_event_ids"]
     )
     return {
         "raw_item_count_delta": cast(int, right["raw_item_count"])
@@ -642,12 +959,47 @@ def build_compare_diff(
         "right_top_event_group_headline_event_id": right_top_event_group_headline_event_id,
         "top_scored_event_changed": left_top_scored_event_id
         != right_top_scored_event_id,
+        "top_scored_event_comparable": left_top_scored_event_id is not None
+        and right_top_scored_event_id is not None
+        and left_top_scored_event_id == right_top_scored_event_id,
         "top_intervention_changed": left_top_intervention_event_id
         != right_top_intervention_event_id,
         "left_top_scored_event_id": left_top_scored_event_id,
         "right_top_scored_event_id": right_top_scored_event_id,
+        "left_top_impact_score": left_top_impact_score,
+        "right_top_impact_score": right_top_impact_score,
+        "top_impact_score_delta": build_score_delta(
+            left_top_impact_score,
+            right_top_impact_score,
+        ),
+        "left_top_field_attraction": left_top_field_attraction,
+        "right_top_field_attraction": right_top_field_attraction,
+        "top_field_attraction_delta": build_score_delta(
+            left_top_field_attraction,
+            right_top_field_attraction,
+        ),
+        "left_top_divergence_score": left_top_divergence_score,
+        "right_top_divergence_score": right_top_divergence_score,
+        "top_divergence_score_delta": build_score_delta(
+            left_top_divergence_score,
+            right_top_divergence_score,
+        ),
         "left_top_intervention_event_id": left_top_intervention_event_id,
         "right_top_intervention_event_id": right_top_intervention_event_id,
+        "left_only_event_group_headline_event_ids": [
+            event_id
+            for event_id in left_event_group_headline_ids
+            if event_id not in right_event_group_headline_ids
+        ],
+        "right_only_event_group_headline_event_ids": [
+            event_id
+            for event_id in right_event_group_headline_ids
+            if event_id not in left_event_group_headline_ids
+        ],
+        "top_event_group_evidence_diff": build_top_event_group_evidence_diff(
+            left_top_event_group,
+            right_top_event_group,
+        ),
         "left_only_intervention_event_ids": [
             event_id
             for event_id in left_intervention_ids
@@ -661,6 +1013,194 @@ def build_compare_diff(
     }
 
 
+def get_top_score_metric(
+    top_scored_event: dict[str, object] | None,
+    metric_name: str,
+) -> float | None:
+    if top_scored_event is None:
+        return None
+    value = top_scored_event.get(metric_name)
+    if not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def build_score_delta(
+    left_value: float | None, right_value: float | None
+) -> float | None:
+    if left_value is None or right_value is None:
+        return None
+    return round(right_value - left_value, 2)
+
+
+def build_top_event_group_evidence_diff(
+    left_top_event_group: dict[str, object] | None,
+    right_top_event_group: dict[str, object] | None,
+) -> dict[str, object]:
+    left_member_event_ids = sorted(
+        cast(list[str], left_top_event_group.get("member_event_ids", []))
+        if left_top_event_group is not None
+        else []
+    )
+    right_member_event_ids = sorted(
+        cast(list[str], right_top_event_group.get("member_event_ids", []))
+        if right_top_event_group is not None
+        else []
+    )
+    left_shared_keywords = sorted(
+        cast(list[str], left_top_event_group.get("shared_keywords", []))
+        if left_top_event_group is not None
+        else []
+    )
+    right_shared_keywords = sorted(
+        cast(list[str], right_top_event_group.get("shared_keywords", []))
+        if right_top_event_group is not None
+        else []
+    )
+    left_shared_actors = sorted(
+        cast(list[str], left_top_event_group.get("shared_actors", []))
+        if left_top_event_group is not None
+        else []
+    )
+    right_shared_actors = sorted(
+        cast(list[str], right_top_event_group.get("shared_actors", []))
+        if right_top_event_group is not None
+        else []
+    )
+    left_shared_regions = sorted(
+        cast(list[str], left_top_event_group.get("shared_regions", []))
+        if left_top_event_group is not None
+        else []
+    )
+    right_shared_regions = sorted(
+        cast(list[str], right_top_event_group.get("shared_regions", []))
+        if right_top_event_group is not None
+        else []
+    )
+    left_chain_summary = (
+        cast(str, left_top_event_group.get("chain_summary"))
+        if left_top_event_group is not None
+        and left_top_event_group.get("chain_summary")
+        else None
+    )
+    right_chain_summary = (
+        cast(str, right_top_event_group.get("chain_summary"))
+        if right_top_event_group is not None
+        and right_top_event_group.get("chain_summary")
+        else None
+    )
+    left_evidence_links = sorted(
+        [
+            format_evidence_chain_link(link)
+            for link in cast(
+                list[dict[str, object]],
+                left_top_event_group.get("evidence_chain", []),
+            )
+        ]
+        if left_top_event_group is not None
+        else []
+    )
+    right_evidence_links = sorted(
+        [
+            format_evidence_chain_link(link)
+            for link in cast(
+                list[dict[str, object]],
+                right_top_event_group.get("evidence_chain", []),
+            )
+        ]
+        if right_top_event_group is not None
+        else []
+    )
+    left_headline_event_id = (
+        cast(str, left_top_event_group.get("headline_event_id"))
+        if left_top_event_group is not None
+        and left_top_event_group.get("headline_event_id")
+        else None
+    )
+    right_headline_event_id = (
+        cast(str, right_top_event_group.get("headline_event_id"))
+        if right_top_event_group is not None
+        and right_top_event_group.get("headline_event_id")
+        else None
+    )
+
+    return {
+        "comparable": left_headline_event_id is not None
+        and right_headline_event_id is not None
+        and left_headline_event_id == right_headline_event_id,
+        "same_headline_event_id": left_headline_event_id == right_headline_event_id,
+        "member_count_delta": len(right_member_event_ids) - len(left_member_event_ids),
+        "left_member_event_ids": left_member_event_ids,
+        "right_member_event_ids": right_member_event_ids,
+        "left_only_member_event_ids": [
+            event_id
+            for event_id in left_member_event_ids
+            if event_id not in right_member_event_ids
+        ],
+        "right_only_member_event_ids": [
+            event_id
+            for event_id in right_member_event_ids
+            if event_id not in left_member_event_ids
+        ],
+        "shared_keywords_added": [
+            keyword
+            for keyword in right_shared_keywords
+            if keyword not in left_shared_keywords
+        ],
+        "shared_keywords_removed": [
+            keyword
+            for keyword in left_shared_keywords
+            if keyword not in right_shared_keywords
+        ],
+        "shared_actors_added": [
+            actor for actor in right_shared_actors if actor not in left_shared_actors
+        ],
+        "shared_actors_removed": [
+            actor for actor in left_shared_actors if actor not in right_shared_actors
+        ],
+        "shared_regions_added": [
+            region
+            for region in right_shared_regions
+            if region not in left_shared_regions
+        ],
+        "shared_regions_removed": [
+            region
+            for region in left_shared_regions
+            if region not in right_shared_regions
+        ],
+        "evidence_chain_link_count_delta": len(right_evidence_links)
+        - len(left_evidence_links),
+        "left_evidence_chain_links": left_evidence_links,
+        "right_evidence_chain_links": right_evidence_links,
+        "evidence_chain_links_added": [
+            link for link in right_evidence_links if link not in left_evidence_links
+        ],
+        "evidence_chain_links_removed": [
+            link for link in left_evidence_links if link not in right_evidence_links
+        ],
+        "chain_summary_changed": left_chain_summary != right_chain_summary,
+        "left_chain_summary": left_chain_summary,
+        "right_chain_summary": right_chain_summary,
+    }
+
+
+def format_evidence_chain_link(link: dict[str, object]) -> str:
+    shared_keywords = cast(list[str], link.get("shared_keywords", []))
+    shared_actors = cast(list[str], link.get("shared_actors", []))
+    shared_regions = cast(list[str], link.get("shared_regions", []))
+    time_delta_hours = link.get("time_delta_hours")
+    time_delta_text = "unknown"
+    if isinstance(time_delta_hours, int | float):
+        time_delta_text = str(float(time_delta_hours)).rstrip("0").rstrip(".")
+    return (
+        f"{link.get('from_event_id', '?')}->{link.get('to_event_id', '?')}"
+        f"|keywords={','.join(sorted(shared_keywords))}"
+        f"|actors={','.join(sorted(shared_actors))}"
+        f"|regions={','.join(sorted(shared_regions))}"
+        f"|delta_h={time_delta_text}"
+    )
+
+
 def filter_run_list_items(
     items: list[dict[str, object]],
     *,
@@ -669,6 +1209,15 @@ def filter_run_list_items(
     risk_level: str | None,
     since: str | None,
     until: str | None,
+    min_top_impact_score: float | None = None,
+    max_top_impact_score: float | None = None,
+    min_top_field_attraction: float | None = None,
+    max_top_field_attraction: float | None = None,
+    min_top_divergence_score: float | None = None,
+    max_top_divergence_score: float | None = None,
+    top_group_dominant_field: str | None = None,
+    min_event_group_count: int | None = None,
+    max_event_group_count: int | None = None,
 ) -> list[dict[str, object]]:
     filtered = items
     if mode is not None:
@@ -693,7 +1242,89 @@ def filter_run_list_items(
             for item in filtered
             if is_history_timestamp_on_or_before(item.get("generated_at"), until_value)
         ]
+    if min_top_impact_score is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_numeric_run_metric_at_or_above(
+                item.get("top_impact_score"), min_top_impact_score
+            )
+        ]
+    if max_top_impact_score is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_numeric_run_metric_at_or_below(
+                item.get("top_impact_score"), max_top_impact_score
+            )
+        ]
+    if min_top_field_attraction is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_numeric_run_metric_at_or_above(
+                item.get("top_field_attraction"), min_top_field_attraction
+            )
+        ]
+    if max_top_field_attraction is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_numeric_run_metric_at_or_below(
+                item.get("top_field_attraction"), max_top_field_attraction
+            )
+        ]
+    if min_top_divergence_score is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_numeric_run_metric_at_or_above(
+                item.get("top_divergence_score"), min_top_divergence_score
+            )
+        ]
+    if max_top_divergence_score is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_numeric_run_metric_at_or_below(
+                item.get("top_divergence_score"), max_top_divergence_score
+            )
+        ]
+    if top_group_dominant_field is not None:
+        filtered = [
+            item
+            for item in filtered
+            if item.get("top_event_group_dominant_field") == top_group_dominant_field
+        ]
+    if min_event_group_count is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_numeric_run_metric_at_or_above(
+                item.get("event_group_count"), float(min_event_group_count)
+            )
+        ]
+    if max_event_group_count is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_numeric_run_metric_at_or_below(
+                item.get("event_group_count"), float(max_event_group_count)
+            )
+        ]
     return filtered
+
+
+def is_numeric_run_metric_at_or_above(value: object, threshold: float) -> bool:
+    if not isinstance(value, int | float):
+        return False
+    return float(value) >= threshold
+
+
+def is_numeric_run_metric_at_or_below(value: object, threshold: float) -> bool:
+    if not isinstance(value, int | float):
+        return False
+    return float(value) <= threshold
 
 
 def parse_history_timestamp(value: str | None) -> datetime | None:
