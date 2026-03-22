@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .fetch import TianJiInputError
 from .pipeline import run_pipeline
 
 
@@ -141,13 +142,16 @@ def main(argv: list[str] | None = None) -> int:
                 "--fetch requires at least one source from --source-url or --source-config."
             )
 
-        artifact = run_pipeline(
-            fixture_paths=args.fixture,
-            fetch=args.fetch,
-            source_urls=resolved_source_urls,
-            output_path=args.output,
-            sqlite_path=args.sqlite_path,
-        )
+        try:
+            artifact = run_pipeline(
+                fixture_paths=args.fixture,
+                fetch=args.fetch,
+                source_urls=resolved_source_urls,
+                output_path=args.output,
+                sqlite_path=args.sqlite_path,
+            )
+        except TianJiInputError as error:
+            parser.error(str(error))
         print(json.dumps(artifact.to_dict(), ensure_ascii=False, indent=2))
         print(f"\nArtifact written to: {Path(args.output)}")
         return 0

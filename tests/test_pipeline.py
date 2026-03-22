@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import contextlib
 import json
 from pathlib import Path
 import sqlite3
@@ -9,6 +11,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from tianji.cli import main
+from tianji.fetch import TianJiInputError
 from tianji.pipeline import run_pipeline
 
 
@@ -228,6 +231,38 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             payload = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["input_summary"]["raw_item_count"], 3)
+
+    def test_run_pipeline_reports_malformed_fixture_cleanly(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            bad_fixture = Path(tmpdir) / "bad.xml"
+            bad_fixture.write_text("<rss><channel><item>", encoding="utf-8")
+
+            with self.assertRaises(TianJiInputError) as context:
+                run_pipeline(
+                    fixture_paths=[str(bad_fixture)],
+                    fetch=False,
+                    source_urls=[],
+                    output_path=None,
+                )
+
+            self.assertIn("Failed to parse feed", str(context.exception))
+            self.assertIn("bad.xml", str(context.exception))
+
+    def test_cli_reports_fetch_failure_cleanly(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as context:
+                main(
+                    [
+                        "run",
+                        "--fetch",
+                        "--source-url",
+                        "http://127.0.0.1:9/feed.xml",
+                    ]
+                )
+
+        self.assertNotEqual(context.exception.code, 0)
+        self.assertIn("Failed to fetch source URL", stderr.getvalue())
 
     def test_cli_requires_input_source(self) -> None:
         with self.assertRaises(SystemExit) as context:

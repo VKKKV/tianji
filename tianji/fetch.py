@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
@@ -12,14 +13,27 @@ USER_AGENT = "TianJi/0.1 (+local-first one-shot MVP)"
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 
+class TianJiInputError(ValueError):
+    pass
+
+
 def read_fixture(path: str | Path) -> str:
-    return Path(path).read_text(encoding="utf-8")
+    fixture_path = Path(path)
+    try:
+        return fixture_path.read_text(encoding="utf-8")
+    except (FileNotFoundError, PermissionError, UnicodeDecodeError, OSError) as error:
+        raise TianJiInputError(
+            f"Failed to read fixture file: {fixture_path}"
+        ) from error
 
 
 def fetch_url(url: str, timeout: float = 15.0) -> str:
     request = Request(url, headers={"User-Agent": USER_AGENT})
-    with urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", errors="replace")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except (HTTPError, URLError, TimeoutError, UnicodeDecodeError, OSError) as error:
+        raise TianJiInputError(f"Failed to fetch source URL: {url}") from error
 
 
 def source_name_from_url(url: str) -> str:
@@ -28,7 +42,10 @@ def source_name_from_url(url: str) -> str:
 
 
 def parse_feed(feed_text: str, source: str) -> list[RawItem]:
-    root = ET.fromstring(feed_text)
+    try:
+        root = ET.fromstring(feed_text)
+    except ET.ParseError as error:
+        raise TianJiInputError(f"Failed to parse feed for source: {source}") from error
 
     channel = root.find("channel")
     if channel is not None:
@@ -37,7 +54,9 @@ def parse_feed(feed_text: str, source: str) -> list[RawItem]:
     if root.tag.endswith("feed"):
         return _parse_atom(root, source)
 
-    raise ValueError("Unsupported feed format: expected RSS or Atom")
+    raise TianJiInputError(
+        f"Unsupported feed format for source {source}: expected RSS or Atom"
+    )
 
 
 def _text(element: ET.Element | None, tag: str) -> str:
