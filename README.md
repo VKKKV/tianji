@@ -26,6 +26,7 @@ It supports:
 - comparing two persisted runs from SQLite
 - filtering persisted runs by mode, dominant field, or risk level
 - filtering persisted runs by mode, dominant field, risk level, or generated time range
+- comparing grouped-analysis changes between persisted runs
 - surfacing clean CLI errors for malformed feeds and failed fetches
 
 This keeps the first version testable, local, and reproducible.
@@ -119,7 +120,7 @@ The current MVP flow is:
    Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, or generated-at range, and inspect one stored run's summaries, scored events, and intervention candidates with `history-show`.
 
 8. **Compare Persisted Runs (Optional)**  
-   Compare two stored runs with `history-compare` to inspect count deltas, dominant-field/risk changes, and intervention differences.
+   Compare two stored runs with `history-compare` to inspect count deltas, dominant-field/risk changes, grouped-analysis changes, and intervention differences.
 
 ## Output Artifact
 
@@ -135,7 +136,7 @@ The artifact includes:
 
 Persisted run history now exposes both compact run summaries and per-run drill-down over stored scored events and intervention candidates.
 
-Persisted comparison currently exposes left/right run summaries plus explicit diff fields for counts, dominant-field/risk changes, and top/intervention deltas.
+Persisted comparison currently exposes left/right run summaries plus explicit diff fields for counts, dominant-field/risk changes, top/intervention deltas, and grouped-analysis deltas such as event-group count and top-group identity changes.
 
 ## Repository Layout
 
@@ -199,6 +200,7 @@ These are reference inputs, not part of the initial TianJi repo history.
 - filtered run-history queries by mode, dominant field, risk level, and time range
 - richer `history-show` drill-down over stored scored events and interventions
 - persisted run comparison via `history-compare`
+- grouped-analysis diffs inside `history-compare`
 - deterministic scoring and backtracking JSON report
 - schema-versioned artifacts
 - hardened input and fetch failure handling

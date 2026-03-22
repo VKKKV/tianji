@@ -29,7 +29,7 @@ tianji/
 | Change ingestion | `tianji/fetch.py` | RSS/Atom fixture loading and one-time URL fetch |
 | Change source selection | `tianji/cli.py` | Source registry parsing and URL selection live here today |
 | Change persistence | `tianji/storage.py` | Optional SQLite persistence boundary |
-| Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` lists runs; `history-show` drills into one run; `history-compare` contrasts two stored runs |
+| Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` lists/filters runs; `history-show` drills into one run; `history-compare` contrasts runs including grouped-analysis changes |
 | Change heuristics | `tianji/normalize.py`, `tianji/scoring.py`, `tianji/backtrack.py` | Deterministic first |
 | Verify changes | `tests/test_pipeline.py`, `tests/fixtures/sample_feed.xml` | Local fixture + local HTTP server |
 | Plan future divergence ideas | `DivergenceMeter/`, `DEV_PLAN.md` | Use as concept source, not owned runtime |
@@ -81,6 +81,7 @@ python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/lat
 python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
 python3 -m tianji run --fetch --source-url https://example.com/feed.xml
 python3 -m tianji history --sqlite-path runs/tianji.sqlite3
+python3 -m tianji history --sqlite-path runs/tianji.sqlite3 --since 2026-03-22T10:00:00+00:00 --until 2026-03-22T12:00:00+00:00
 python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
 python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
 python3 -m unittest discover -s tests -v

@@ -10,7 +10,7 @@ Owned TianJi runtime: one-shot Python pipeline from feed input to JSON artifact.
 | End-to-end flow | `pipeline.py` | Read this first for control flow |
 | Input parsing | `fetch.py` | Fixture and live feed loading |
 | Optional persistence | `storage.py` | SQLite schema and per-run persistence |
-| Run history reads | `storage.py`, `cli.py` | `history`, `history-show`, and `history-compare` are read-only SQLite entrypoints |
+| Run history reads | `storage.py`, `cli.py` | `history`, `history-show`, and `history-compare` are read-only SQLite entrypoints with filtering and grouped compare support |
 | Event extraction | `normalize.py` | Keywords, actors, regions, field scores |
 | Heuristic ranking | `scoring.py` | Impact, field attraction, scenario summary |
 | Reverse inference | `backtrack.py` | Intervention candidate generation |
@@ -36,4 +36,4 @@ Owned TianJi runtime: one-shot Python pipeline from feed input to JSON artifact.
 ## NOTES
 - The current package has no shared `utils/` hub; stage files are the module boundaries.
 - Persistence already lives in `storage.py`; continue extending it there instead of widening unrelated modules.
-- History inspection and comparison should stay in `storage.py`; keep `cli.py` as the thin operator surface.
+- History inspection, filtering, and comparison should stay in `storage.py`; keep `cli.py` as the thin operator surface.
