@@ -60,7 +60,10 @@ def run_pipeline(
     scored_events = score_events(normalized_events)
     scenario_summary = summarize_scenario(scored_events)
     scenario_summary["event_groups"] = group_events(scored_events)
-    interventions = backtrack_candidates(scored_events)
+    interventions = backtrack_candidates(
+        scored_events,
+        event_groups=scenario_summary["event_groups"],
+    )
     artifact = RunArtifact(
         mode="fetch+fixture"
         if fetch and fixture_paths

@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+from typing import TypedDict
+
 from .models import InterventionCandidate, ScoredEvent
 
 
+class EventGroupSummary(TypedDict):
+    group_id: str
+    headline_event_id: str
+    member_event_ids: list[str]
+    dominant_field: str
+    shared_actors: list[str]
+    shared_regions: list[str]
+    group_score: float
+
+
 def backtrack_candidates(
-    scored_events: list[ScoredEvent], limit: int = 5
+    scored_events: list[ScoredEvent],
+    limit: int = 5,
+    event_groups: list[EventGroupSummary] | None = None,
 ) -> list[InterventionCandidate]:
     candidates: list[InterventionCandidate] = []
-    for index, event in enumerate(scored_events[:limit], start=1):
+    selected_events = select_backtrack_events(scored_events, limit, event_groups)
+    for index, event in enumerate(selected_events, start=1):
         target = (
             event.actors[0]
             if event.actors
@@ -29,6 +44,39 @@ def backtrack_candidates(
             )
         )
     return candidates
+
+
+def select_backtrack_events(
+    scored_events: list[ScoredEvent],
+    limit: int,
+    event_groups: list[EventGroupSummary] | None,
+) -> list[ScoredEvent]:
+    if not event_groups:
+        return scored_events[:limit]
+
+    events_by_id = {event.event_id: event for event in scored_events}
+    selected: list[ScoredEvent] = []
+    seen_event_ids: set[str] = set()
+
+    for group in event_groups:
+        headline_event_id = group["headline_event_id"]
+        member_event_ids = group["member_event_ids"]
+        headline_event = events_by_id.get(headline_event_id)
+        if headline_event is None:
+            continue
+        selected.append(headline_event)
+        seen_event_ids.update(member_event_ids)
+        if len(selected) >= limit:
+            return selected[:limit]
+
+    for event in scored_events:
+        if event.event_id in seen_event_ids:
+            continue
+        selected.append(event)
+        if len(selected) >= limit:
+            break
+
+    return selected[:limit]
 
 
 def infer_intervention_type(event: ScoredEvent) -> str:
