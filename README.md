@@ -185,6 +185,8 @@ Grouped event summaries now also carry lightweight evidence-chain metadata so in
 
 Grouped event summaries now also carry additive causal-cluster metadata such as `causal_ordered_event_ids`, `causal_span_hours`, and `causal_summary`, so operators can distinguish simple shared-signal overlap from a linked reinforcing chain. That causal order reflects the group admission path, not necessarily strict timestamp order. `causal_span_hours` is computed from the earliest and latest known timestamps inside the group when at least two timestamps are available; otherwise it stays `null`, and the summary text falls back to non-span wording.
 
+Scoring-contract coverage now also includes isolated `Im` checks for actor weighting, region weighting, and raw keyword-density cap behavior, so future scoring changes can be caught at the additive-term level instead of only through full aggregate snapshots.
+
 ## Repository Layout
 
 ```text
