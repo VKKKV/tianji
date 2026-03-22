@@ -6,7 +6,13 @@ from pathlib import Path
 
 from .fetch import TianJiInputError
 from .pipeline import run_pipeline
-from .storage import compare_runs, get_run_summary, list_runs
+from .storage import (
+    compare_runs,
+    get_latest_run_id,
+    get_latest_run_pair,
+    get_run_summary,
+    list_runs,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -100,9 +106,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     history_show_parser.add_argument(
         "--run-id",
-        required=True,
         type=int,
         help="Run identifier to inspect",
+    )
+    history_show_parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="Show the latest persisted run instead of specifying --run-id",
     )
 
     history_compare_parser = subparsers.add_parser(
@@ -115,15 +125,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     history_compare_parser.add_argument(
         "--left-run-id",
-        required=True,
         type=int,
         help="Left-side run identifier for comparison",
     )
     history_compare_parser.add_argument(
         "--right-run-id",
-        required=True,
         type=int,
         help="Right-side run identifier for comparison",
+    )
+    history_compare_parser.add_argument(
+        "--latest-pair",
+        action="store_true",
+        help="Compare the two latest persisted runs instead of specifying run ids",
     )
     return parser
 
@@ -247,21 +260,50 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "history-show":
-        payload = get_run_summary(sqlite_path=args.sqlite_path, run_id=args.run_id)
+        if args.latest and args.run_id is not None:
+            parser.error("Use either --run-id or --latest for history-show, not both.")
+        if not args.latest and args.run_id is None:
+            parser.error("history-show requires either --run-id or --latest.")
+        run_id = args.run_id
+        if args.latest:
+            run_id = get_latest_run_id(sqlite_path=args.sqlite_path)
+            if run_id is None:
+                parser.error("No persisted runs are available.")
+        payload = get_run_summary(sqlite_path=args.sqlite_path, run_id=run_id)
         if payload is None:
-            parser.error(f"Run not found: {args.run_id}")
+            parser.error(f"Run not found: {run_id}")
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "history-compare":
+        if args.latest_pair and (
+            args.left_run_id is not None or args.right_run_id is not None
+        ):
+            parser.error(
+                "Use either --latest-pair or explicit --left-run-id/--right-run-id, not both."
+            )
+        if args.latest_pair:
+            pair = get_latest_run_pair(sqlite_path=args.sqlite_path)
+            if pair is None:
+                parser.error(
+                    "At least two persisted runs are required for --latest-pair."
+                )
+            left_run_id, right_run_id = pair
+        else:
+            if args.left_run_id is None or args.right_run_id is None:
+                parser.error(
+                    "history-compare requires --latest-pair or both --left-run-id and --right-run-id."
+                )
+            left_run_id = args.left_run_id
+            right_run_id = args.right_run_id
         payload = compare_runs(
             sqlite_path=args.sqlite_path,
-            left_run_id=args.left_run_id,
-            right_run_id=args.right_run_id,
+            left_run_id=left_run_id,
+            right_run_id=right_run_id,
         )
         if payload is None:
             parser.error(
-                f"Run not found for comparison: {args.left_run_id} vs {args.right_run_id}"
+                f"Run not found for comparison: {left_run_id} vs {right_run_id}"
             )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0

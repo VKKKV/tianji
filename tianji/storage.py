@@ -157,6 +157,33 @@ def compare_runs(
     }
 
 
+def get_latest_run_id(*, sqlite_path: str) -> int | None:
+    with sqlite3.connect(sqlite_path) as connection:
+        row = connection.execute(
+            "SELECT id FROM runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    if row is None:
+        return None
+    run_id = row[0]
+    if not isinstance(run_id, int | str):
+        raise RuntimeError("Unexpected run id type in latest-run query")
+    return int(run_id)
+
+
+def get_latest_run_pair(*, sqlite_path: str) -> tuple[int, int] | None:
+    with sqlite3.connect(sqlite_path) as connection:
+        rows = connection.execute(
+            "SELECT id FROM runs ORDER BY id DESC LIMIT 2"
+        ).fetchall()
+    if len(rows) < 2:
+        return None
+    newer = rows[0][0]
+    older = rows[1][0]
+    if not isinstance(newer, int | str) or not isinstance(older, int | str):
+        raise RuntimeError("Unexpected run id type in latest-run pair query")
+    return int(older), int(newer)
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
