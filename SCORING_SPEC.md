@@ -23,6 +23,7 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
   - In the current slice, it starts from the strongest normalized field score and then adds:
     - a small dominance-margin bonus over the second-best field
     - a small coherence bonus based on how much of the total scored field mass belongs to the dominant field
+    - a small bounded near-tie ambiguity penalty when the top two fields are almost tied
 
 - **`divergence_score`**
   - TianJi's current ranking score derived from explicit `Im` and `Fa` intermediates.
@@ -124,6 +125,48 @@ Out of scope for this slice:
 - persistence-schema changes
 - grouped-analysis changes
 - CLI/history surface expansion unrelated to score validation
+
+## Current Near-Tie Fa Refinement
+
+The current Phase 2 scoring slice now also includes:
+
+- **a bounded near-tie ambiguity penalty inside `Fa`**
+
+Intent:
+
+- reduce `field_attraction` modestly when the dominant field barely leads the
+  runner-up field
+- keep `Fa` aligned with “belongs to one dominant attractor field” rather than
+  rewarding almost-tied top-two distributions too generously
+- preserve the existing split where `Fa` remains field-alignment-only and `Im`
+  remains branch-moving force
+
+Constraints implemented in this slice:
+
+- dominant field strength remains the base of `Fa`
+- the existing margin bonus and coherence bonus remain in place
+- the new adjustment is a small bounded subtraction driven only by the margin
+  between the top two fields
+- in the current implementation, that bounded subtraction applies when the
+  rounded top-two margin is below `1.0`
+- broad contradiction/corroboration logic is still deferred
+
+Current implementation shape:
+
+- when the top-two field margin is comfortably clear, `Fa` behaves like the
+  prior shipped formula
+- when that margin becomes a near tie, `Fa` subtracts a small bounded ambiguity
+  penalty
+- the penalty is intentionally smaller than the dominant-field base and remains a
+  surgical ambiguity adjustment rather than a formula rewrite
+
+Recommended verification for this slice:
+
+- paired synthetic-event tests where `Im` inputs stay fixed and only the top-two
+  field spread changes
+- a near-tie case such as `6.5 vs 6.4` should score lower `Fa` than a more
+  clearly dominant case such as `6.5 vs 5.8`
+- a clearly dominant case such as `6.5 vs 2.0` should remain stable
 
 ## Current Implementation Boundary
 

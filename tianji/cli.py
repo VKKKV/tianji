@@ -576,6 +576,10 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error(
                     "Use only one comparison preset: --against-latest or --against-previous."
                 )
+            if args.left_run_id is not None or args.right_run_id is not None:
+                parser.error(
+                    "Use either --latest-pair, --run-id with --against-latest, --run-id with --against-previous, or explicit --left-run-id/--right-run-id, not a mix."
+                )
             if args.run_id is None:
                 parser.error("history-compare with --against-latest requires --run-id.")
             latest_run_id = get_latest_run_id(sqlite_path=args.sqlite_path)
@@ -584,6 +588,10 @@ def main(argv: list[str] | None = None) -> int:
             left_run_id = args.run_id
             right_run_id = latest_run_id
         elif args.against_previous:
+            if args.left_run_id is not None or args.right_run_id is not None:
+                parser.error(
+                    "Use either --latest-pair, --run-id with --against-latest, --run-id with --against-previous, or explicit --left-run-id/--right-run-id, not a mix."
+                )
             if args.run_id is None:
                 parser.error(
                     "history-compare with --against-previous requires --run-id."

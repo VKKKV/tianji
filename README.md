@@ -171,7 +171,9 @@ History list items now also expose grouped-run triage fields such as `event_grou
 
 `history-show` now also supports group-aware drill-down over persisted `scenario_summary.event_groups` via `--group-dominant-field` and `--limit-event-groups`, so single-run grouped analysis can be narrowed without changing the stored scenario summary itself.
 
-`history-compare` now supports those same scored-event and event-group projections on both compared runs, including optional intervention alignment to the final visible scored-event set, so compare output can stay focused on one operator lens instead of always diffing the full stored run payload.
+`history-compare` now supports those same scored-event and event-group projections on both compared runs, including optional intervention alignment to the final visible scored-event set, so compare output can stay focused on one operator lens instead of always diffing the full stored run payload. Those projections affect compare-side projected fields such as `top_scored_event`, `intervention_event_ids`, `event_group_count`, and `top_event_group`, but stored run-summary fields like `headline`, `dominant_field`, and `risk_level` still describe the persisted run itself rather than the filtered lens.
+
+`history-compare` preset selection is intentionally exclusive: use exactly one of explicit `--left-run-id/--right-run-id`, `--latest-pair`, `--run-id ... --against-latest`, or `--run-id ... --against-previous`. Mixed preset combinations and negative per-side compare limits are rejected at parse time so the compare surface stays unambiguous.
 
 Persisted comparison currently exposes left/right run summaries plus explicit diff fields for counts, dominant-field/risk changes, top/intervention deltas, top scored-event score deltas, and grouped-analysis deltas such as event-group count, top-group identity changes, and top-group evidence/member/link changes. Group detail now stays nested under each side's `top_event_group`, while `top_event_group_evidence_diff` carries the operator-facing evidence/member/link comparison instead of duplicating those fields in flattened side-level keys.
 

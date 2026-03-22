@@ -31,6 +31,9 @@ FIELD_ATTRACTION_WEIGHT = 1.35
 FA_MARGIN_WEIGHT = 0.15
 FA_MAX_MARGIN_BONUS = 1.0
 FA_COHERENCE_WEIGHT = 0.75
+FA_NEAR_TIE_MARGIN_THRESHOLD = 1.0
+FA_NEAR_TIE_WEIGHT = 0.35
+FA_MAX_NEAR_TIE_PENALTY = 0.3
 IM_DOMINANT_FIELD_WEIGHT = 0.25
 IM_NONZERO_FIELD_WEIGHT = 0.2
 IM_TEXT_SIGNAL_KEYWORD_WEIGHT = 0.12
@@ -171,11 +174,14 @@ def select_dominant_field(event: NormalizedEvent) -> tuple[str, float]:
 
 def compute_fa(event: NormalizedEvent, dominant_field_strength: float) -> float:
     ordered_scores = sorted(event.field_scores.values(), reverse=True)
-    second_best_strength = ordered_scores[1] if len(ordered_scores) > 1 else 0.0
+    second_best_strength = (
+        round(ordered_scores[1], 2) if len(ordered_scores) > 1 else 0.0
+    )
     total_strength = sum(score for score in event.field_scores.values() if score > 0)
+    dominant_margin = max(dominant_field_strength - second_best_strength, 0.0)
 
     margin_bonus = min(
-        max(dominant_field_strength - second_best_strength, 0.0) * FA_MARGIN_WEIGHT,
+        dominant_margin * FA_MARGIN_WEIGHT,
         FA_MAX_MARGIN_BONUS,
     )
     coherence_bonus = 0.0
@@ -183,8 +189,15 @@ def compute_fa(event: NormalizedEvent, dominant_field_strength: float) -> float:
         coherence_bonus = (
             dominant_field_strength / total_strength
         ) * FA_COHERENCE_WEIGHT
+    near_tie_penalty = min(
+        max(FA_NEAR_TIE_MARGIN_THRESHOLD - dominant_margin, 0.0) * FA_NEAR_TIE_WEIGHT,
+        FA_MAX_NEAR_TIE_PENALTY,
+    )
 
-    return round(dominant_field_strength + margin_bonus + coherence_bonus, 2)
+    return round(
+        dominant_field_strength + margin_bonus + coherence_bonus - near_tie_penalty,
+        2,
+    )
 
 
 def compute_divergence_score(im_score: float, fa_score: float) -> float:

@@ -2103,6 +2103,106 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(payload["left_run_id"], 2)
             self.assertEqual(payload["right_run_id"], 3)
 
+    def test_cli_history_compare_rejects_negative_scored_event_limit(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                        "--limit-scored-events",
+                        "-1",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--limit-scored-events must be zero or greater.", stderr.getvalue()
+        )
+
+    def test_cli_history_compare_rejects_negative_event_group_limit(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                        "--limit-event-groups",
+                        "-1",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--limit-event-groups must be zero or greater.", stderr.getvalue()
+        )
+
+    def test_cli_history_compare_rejects_mixed_explicit_pair_and_against_latest(
+        self,
+    ) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                        "--run-id",
+                        "3",
+                        "--against-latest",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "Use either --latest-pair, --run-id with --against-latest, --run-id with --against-previous, or explicit --left-run-id/--right-run-id, not a mix.",
+            stderr.getvalue(),
+        )
+
+    def test_cli_history_compare_rejects_mixed_explicit_pair_and_against_previous(
+        self,
+    ) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                        "--run-id",
+                        "3",
+                        "--against-previous",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "Use either --latest-pair, --run-id with --against-latest, --run-id with --against-previous, or explicit --left-run-id/--right-run-id, not a mix.",
+            stderr.getvalue(),
+        )
+
     def test_cli_history_compare_surfaces_top_group_evidence_diff(self) -> None:
         grouped_feed_left = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -2910,6 +3010,81 @@ class PipelineTests(unittest.TestCase):
         self.assertGreater(
             clearer_scored.divergence_score, ambiguous_scored.divergence_score
         )
+
+    def test_score_event_penalizes_near_tie_field_alignment_in_fa(self) -> None:
+        moderately_ambiguous_event = NormalizedEvent(
+            event_id="evt-moderately-ambiguous",
+            source="fixture:test",
+            title="Shared field ambiguity case",
+            summary="Shared event text for top-two field ambiguity checks.",
+            link="https://example.com/moderately-ambiguous",
+            published_at="2026-03-22T12:06:00Z",
+            keywords=["chip", "cyber", "talks", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 5.8,
+                "economy": 0.5,
+                "conflict": 0.0,
+            },
+        )
+        near_tie_event = NormalizedEvent(
+            event_id="evt-near-tie",
+            source="fixture:test",
+            title="Shared field ambiguity case",
+            summary="Shared event text for top-two field ambiguity checks.",
+            link="https://example.com/near-tie",
+            published_at="2026-03-22T12:07:00Z",
+            keywords=["chip", "cyber", "talks", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 6.4,
+                "economy": 0.5,
+                "conflict": 0.0,
+            },
+        )
+
+        moderately_ambiguous_scored = score_event(moderately_ambiguous_event)
+        near_tie_scored = score_event(near_tie_event)
+
+        self.assertGreater(
+            moderately_ambiguous_scored.field_attraction,
+            near_tie_scored.field_attraction,
+        )
+        self.assertEqual(
+            moderately_ambiguous_scored.impact_score,
+            near_tie_scored.impact_score,
+        )
+        self.assertGreater(
+            moderately_ambiguous_scored.divergence_score,
+            near_tie_scored.divergence_score,
+        )
+
+    def test_score_event_keeps_clear_field_alignment_semantics_stable(self) -> None:
+        clear_event = NormalizedEvent(
+            event_id="evt-clear-stable",
+            source="fixture:test",
+            title="Clear technology signal",
+            summary="A strong single-field technology event.",
+            link="https://example.com/clear-stable",
+            published_at="2026-03-22T12:08:00Z",
+            keywords=["chip", "cyber", "controls", "sanctions"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 2.0,
+                "economy": 1.5,
+                "conflict": 0.0,
+            },
+        )
+
+        clear_scored = score_event(clear_event)
+
+        self.assertEqual(clear_scored.field_attraction, 7.66)
 
     def test_score_event_rewards_stronger_weighted_field_intensity_in_im(self) -> None:
         lower_intensity_event = NormalizedEvent(
