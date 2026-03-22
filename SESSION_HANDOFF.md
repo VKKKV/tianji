@@ -174,6 +174,12 @@ slices have also landed. The next session should default to a **small doc/spec
 cleanup or a fresh scoring issue only if a new concrete weakness is found**, not
 to reopening already-shipped tie-handling or residual-noise work.
 
+Phase 5 planning has now started at the contract layer:
+
+- `TUI_CONTRACT.md` now exists as a read-only persisted-analysis TUI draft
+- it reuses current `history`, `history-show`, and `history-compare` semantics
+- it does **not** imply any shipped TUI runtime or daemon/API dependency
+
 Given the current branch stack, the default resume path should be:
 
 1. start from `feat/scoring-fa-threshold-boundaries` if continuing scoring work
@@ -186,14 +192,14 @@ Best next milestone:
 1. **Refine the first-party scoring model from the now-shipped Candidate A base**
    - only if a fresh concrete scoring weakness appears after the now-shipped determinism cleanup
    - keep the next step narrow and deterministic
-    - strongest likely next target is either:
-      - a small follow-up to the shipped `Fa` ambiguity refinements only if a new mixed-field weakness remains after the pinned threshold tests, or
-      - one more tightly bounded text-signal edge-case pass only if a real cue-boundary bug appears,
-    - likely files: `tianji/scoring.py`, `SCORING_SPEC.md`, `tests/test_pipeline.py`
-    - preserve current branch guardrails:
-      - no persistence or schema changes
-      - no CLI/history surface expansion unless a score-driven test truly requires it
-      - no novelty/baseline scoring yet
+   - strongest likely next target is either:
+     - a small follow-up to the shipped `Fa` ambiguity refinements only if a new mixed-field weakness remains after the pinned threshold tests, or
+     - one more tightly bounded text-signal edge-case pass only if a real cue-boundary bug appears,
+   - likely files: `tianji/scoring.py`, `SCORING_SPEC.md`, `tests/test_pipeline.py`
+   - preserve current branch guardrails:
+     - no persistence or schema changes
+     - no CLI/history surface expansion unless a score-driven test truly requires it
+     - no novelty/baseline scoring yet
 
 Best smaller default next step:
 
@@ -204,8 +210,9 @@ Best smaller default next step:
 Best larger next branch after scoring:
 
 3. **Start TUI contract planning**
-   - only after deciding CLI ergonomics are sufficiently mature
-   - keep it contract-only, not implementation yet
+   - first contract-only draft now exists in `TUI_CONTRACT.md`
+   - next work here should refine the read-only list/detail/compare contract only if operator workflow gaps appear
+   - do not start TUI implementation until CLI/storage semantics feel stable enough to freeze
 
 ## Suggested Commands For The Next Session
 

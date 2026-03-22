@@ -263,14 +263,15 @@ These are reference inputs, not part of the initial TianJi repo history.
 - schema-versioned artifacts
 - hardened input and fetch failure handling
 
-Future local API contract now lives in `LOCAL_API_CONTRACT.md`; it is a draft contract only, not a shipped server.
+Future contract drafts now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; they are planning artifacts only, not shipped server/TUI implementations.
 
 ### Next
 
 - more formalized `Im` / `Fa`-style scoring model
 - richer backtracking and causal grouping
 - finish the CLI-first operator workflow for persisted analysis
-- design and implement a Vim-motion TUI on top of stable local contracts
+- keep the new Vim-motion TUI planning work contract-only until the persisted read workflow is stable enough to implement
+- later design and implement a Vim-motion TUI on top of the stable local contracts documented in `TUI_CONTRACT.md`
 - future local API implementation only when a real local service boundary is chosen
 
 ### Later
