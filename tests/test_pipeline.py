@@ -321,6 +321,61 @@ class PipelineTests(unittest.TestCase):
                 "capability-control",
             )
 
+    def test_cli_history_compare_reads_two_persisted_runs(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            empty_feed = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Empty TianJi Feed</title></channel></rss>
+"""
+            empty_fixture = Path(tmpdir) / "empty.xml"
+            empty_fixture.write_text(empty_feed, encoding="utf-8")
+            run_pipeline(
+                fixture_paths=[str(empty_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["left_run_id"], 1)
+            self.assertEqual(payload["right_run_id"], 2)
+            self.assertEqual(payload["left"]["dominant_field"], "technology")
+            self.assertEqual(payload["right"]["dominant_field"], "uncategorized")
+            self.assertEqual(payload["diff"]["raw_item_count_delta"], -3)
+            self.assertEqual(
+                payload["diff"]["left_only_intervention_event_ids"],
+                [
+                    payload["left"]["intervention_event_ids"][0],
+                    payload["left"]["intervention_event_ids"][1],
+                    payload["left"]["intervention_event_ids"][2],
+                ],
+            )
+            self.assertEqual(payload["diff"]["right_only_intervention_event_ids"], [])
+
     def test_fixture_pipeline_has_stable_scoring_and_backtrack_order(self) -> None:
         artifact = run_pipeline(
             fixture_paths=[str(FIXTURE_PATH)],

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .fetch import TianJiInputError
 from .pipeline import run_pipeline
-from .storage import get_run_summary, list_runs
+from .storage import compare_runs, get_run_summary, list_runs
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,6 +78,27 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         type=int,
         help="Run identifier to inspect",
+    )
+
+    history_compare_parser = subparsers.add_parser(
+        "history-compare", help="Compare two persisted TianJi runs from SQLite"
+    )
+    history_compare_parser.add_argument(
+        "--sqlite-path",
+        required=True,
+        help="SQLite database path containing persisted TianJi runs",
+    )
+    history_compare_parser.add_argument(
+        "--left-run-id",
+        required=True,
+        type=int,
+        help="Left-side run identifier for comparison",
+    )
+    history_compare_parser.add_argument(
+        "--right-run-id",
+        required=True,
+        type=int,
+        help="Right-side run identifier for comparison",
     )
     return parser
 
@@ -196,6 +217,19 @@ def main(argv: list[str] | None = None) -> int:
         payload = get_run_summary(sqlite_path=args.sqlite_path, run_id=args.run_id)
         if payload is None:
             parser.error(f"Run not found: {args.run_id}")
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "history-compare":
+        payload = compare_runs(
+            sqlite_path=args.sqlite_path,
+            left_run_id=args.left_run_id,
+            right_run_id=args.right_run_id,
+        )
+        if payload is None:
+            parser.error(
+                f"Run not found for comparison: {args.left_run_id} vs {args.right_run_id}"
+            )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 

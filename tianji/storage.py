@@ -117,6 +117,28 @@ def get_run_summary(*, sqlite_path: str, run_id: int) -> dict[str, object] | Non
     return payload
 
 
+def compare_runs(
+    *,
+    sqlite_path: str,
+    left_run_id: int,
+    right_run_id: int,
+) -> dict[str, object] | None:
+    left = get_run_summary(sqlite_path=sqlite_path, run_id=left_run_id)
+    right = get_run_summary(sqlite_path=sqlite_path, run_id=right_run_id)
+    if left is None or right is None:
+        return None
+
+    left_summary = build_compare_side(left)
+    right_summary = build_compare_side(right)
+    return {
+        "left_run_id": left_run_id,
+        "right_run_id": right_run_id,
+        "left": left_summary,
+        "right": right_summary,
+        "diff": build_compare_diff(left_summary, right_summary),
+    }
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -455,6 +477,58 @@ def build_intervention_candidate_detail(
         "intervention_type": intervention_type,
         "reason": reason,
         "expected_effect": expected_effect,
+    }
+
+
+def build_compare_side(run_payload: dict[str, object]) -> dict[str, object]:
+    input_summary = cast(dict[str, object], run_payload["input_summary"])
+    scenario_summary = cast(dict[str, object], run_payload["scenario_summary"])
+    scored_events = cast(list[dict[str, object]], run_payload["scored_events"])
+    intervention_candidates = cast(
+        list[dict[str, object]], run_payload["intervention_candidates"]
+    )
+    top_scored_event = scored_events[0] if scored_events else None
+    top_intervention = intervention_candidates[0] if intervention_candidates else None
+    return {
+        "run_id": run_payload["run_id"],
+        "schema_version": run_payload["schema_version"],
+        "mode": run_payload["mode"],
+        "raw_item_count": input_summary.get("raw_item_count", 0),
+        "normalized_event_count": input_summary.get("normalized_event_count", 0),
+        "dominant_field": scenario_summary.get("dominant_field", "uncategorized"),
+        "risk_level": scenario_summary.get("risk_level", "low"),
+        "headline": scenario_summary.get("headline", ""),
+        "top_scored_event": top_scored_event,
+        "top_intervention": top_intervention,
+        "intervention_event_ids": [
+            cast(str, candidate["event_id"]) for candidate in intervention_candidates
+        ],
+    }
+
+
+def build_compare_diff(
+    left: dict[str, object],
+    right: dict[str, object],
+) -> dict[str, object]:
+    left_intervention_ids = cast(list[str], left["intervention_event_ids"])
+    right_intervention_ids = cast(list[str], right["intervention_event_ids"])
+    return {
+        "raw_item_count_delta": cast(int, right["raw_item_count"])
+        - cast(int, left["raw_item_count"]),
+        "normalized_event_count_delta": cast(int, right["normalized_event_count"])
+        - cast(int, left["normalized_event_count"]),
+        "dominant_field_changed": left["dominant_field"] != right["dominant_field"],
+        "risk_level_changed": left["risk_level"] != right["risk_level"],
+        "left_only_intervention_event_ids": [
+            event_id
+            for event_id in left_intervention_ids
+            if event_id not in right_intervention_ids
+        ],
+        "right_only_intervention_event_ids": [
+            event_id
+            for event_id in right_intervention_ids
+            if event_id not in left_intervention_ids
+        ],
     }
 
 
