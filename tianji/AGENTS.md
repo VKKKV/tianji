@@ -10,6 +10,7 @@ Owned TianJi runtime: one-shot Python pipeline from feed input to JSON artifact.
 | End-to-end flow | `pipeline.py` | Read this first for control flow |
 | Input parsing | `fetch.py` | Fixture and live feed loading |
 | Optional persistence | `storage.py` | SQLite schema and per-run persistence |
+| Run history reads | `storage.py`, `cli.py` | `history` and `history-show` are read-only SQLite entrypoints |
 | Event extraction | `normalize.py` | Keywords, actors, regions, field scores |
 | Heuristic ranking | `scoring.py` | Impact, field attraction, scenario summary |
 | Reverse inference | `backtrack.py` | Intervention candidate generation |
@@ -20,6 +21,7 @@ Owned TianJi runtime: one-shot Python pipeline from feed input to JSON artifact.
 - New behavior should land in the stage it belongs to, not inside `cli.py` or `__main__.py`.
 - `pipeline.py` orchestrates; subordinate modules stay single-purpose.
 - `cli.py` currently owns source-config resolution because that logic is still operator-surface policy.
+- `cli.py` also owns lightweight operator-facing history commands; keep them read-only unless a broader service layer appears.
 - Preserve deterministic behavior unless a change explicitly introduces an optional model-assisted layer.
 - Maintain artifact stability through `RunArtifact.to_dict()`.
 
@@ -34,3 +36,4 @@ Owned TianJi runtime: one-shot Python pipeline from feed input to JSON artifact.
 ## NOTES
 - The current package has no shared `utils/` hub; stage files are the module boundaries.
 - Persistence already lives in `storage.py`; continue extending it there instead of widening unrelated modules.
+- History inspection currently reads only the `runs` table; deeper stored-event drill-down should stay in `storage.py`, not leak into `cli.py`.

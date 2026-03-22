@@ -35,7 +35,6 @@ Shipped in the current branch:
 Still open before Phase 1 is fully closed:
 
 - explicit no-signal / empty-valid-feed handling path
-- run-history inspection command on top of persisted SQLite data
 - final doc/examples pass whenever the CLI surface changes again
 
 Exit criteria:
@@ -159,11 +158,11 @@ Retirement trigger:
 ## Immediate Backlog
 
 1. define first-party TianJi `Im` / `Fa` spec
-2. add run-history inspection command
-3. formalize richer event grouping and causal clustering
-4. draft the future local API contract that a web UI would consume
-5. add explicit empty-valid-feed / no-signal handling semantics
-6. document the first persisted-run query workflow
+2. formalize richer event grouping and causal clustering
+3. draft the future local API contract that a web UI would consume
+4. add richer persisted run drill-down over scored events and interventions
+5. document the first persisted-run query workflow
+6. tighten remaining doc/examples drift as commands evolve
 
 ## Guardrails
 

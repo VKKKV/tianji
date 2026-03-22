@@ -29,6 +29,7 @@ tianji/
 | Change ingestion | `tianji/fetch.py` | RSS/Atom fixture loading and one-time URL fetch |
 | Change source selection | `tianji/cli.py` | Source registry parsing and URL selection live here today |
 | Change persistence | `tianji/storage.py` | Optional SQLite persistence boundary |
+| Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` and `history-show` read from the `runs` table |
 | Change heuristics | `tianji/normalize.py`, `tianji/scoring.py`, `tianji/backtrack.py` | Deterministic first |
 | Verify changes | `tests/test_pipeline.py`, `tests/fixtures/sample_feed.xml` | Local fixture + local HTTP server |
 | Plan future divergence ideas | `DivergenceMeter/`, `DEV_PLAN.md` | Use as concept source, not owned runtime |
@@ -51,7 +52,7 @@ tianji/
 - Prefer module execution: `python3 -m tianji`.
 - Python 3.12+; stdlib-first; no heavy framework implied by current code.
 - Verification is `unittest`-based even though `pyproject.toml` includes a minimal pytest stanza.
-- Current CLI also supports `--source-config`, `--source-name`, and `--sqlite-path`.
+- Current CLI also supports `--source-config`, `--source-name`, `--sqlite-path`, `history`, and `history-show`.
 - `runs/` contains generated artifacts and is not source.
 - `worldmonitor/`, `oh-my-openagent/`, `MiroFish/`, and `DivergenceMeter/` are workspace references, not the default edit target.
 
@@ -79,6 +80,8 @@ python3 -m tianji run --fixture tests/fixtures/sample_feed.xml
 python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/latest-run.json
 python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
 python3 -m tianji run --fetch --source-url https://example.com/feed.xml
+python3 -m tianji history --sqlite-path runs/tianji.sqlite3
+python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
 python3 -m unittest discover -s tests -v
 ```
 

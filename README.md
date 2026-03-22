@@ -18,6 +18,7 @@ It supports:
 - producing ranked intervention candidates
 - writing a structured JSON artifact
 - optionally persisting runs to local SQLite
+- listing persisted runs and inspecting a stored run summary from SQLite
 - surfacing clean CLI errors for malformed feeds and failed fetches
 
 This keeps the first version testable, local, and reproducible.
@@ -69,6 +70,13 @@ Then run:
 python3 -m tianji run --fetch --source-config /path/to/sources.json --source-name example-feed
 ```
 
+### Inspect persisted run history
+
+```bash
+python3 -m tianji history --sqlite-path runs/tianji.sqlite3
+python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
+```
+
 ### Run tests
 
 ```bash
@@ -97,6 +105,9 @@ The current MVP flow is:
 6. **Persist Run (Optional)**  
    Store run metadata plus raw, normalized, scored, and intervention rows in SQLite when `--sqlite-path` is provided.
 
+7. **Inspect Run History (Optional)**  
+   Query persisted run summaries later with `history` and `history-show` commands over the same SQLite database.
+
 ## Output Artifact
 
 By default, the CLI writes to `runs/latest-run.json`.
@@ -108,6 +119,8 @@ The artifact includes:
 - `scenario_summary`: dominant field, top actors, top regions, risk level, and a short headline
 - `scored_events`: normalized events with impact score, field attraction, divergence score, and rationale
 - `intervention_candidates`: ranked backtracked actions derived from the top events
+
+Persisted run history currently exposes run-level summaries, not full stored scored-event drill-down.
 
 ## Repository Layout
 
@@ -166,6 +179,7 @@ These are reference inputs, not part of the initial TianJi repo history.
 - optional one-time live fetch
 - config-driven source registry
 - optional SQLite persistence
+- SQLite-backed run history inspection
 - deterministic scoring and backtracking JSON report
 - schema-versioned artifacts
 - hardened input and fetch failure handling
@@ -174,7 +188,7 @@ These are reference inputs, not part of the initial TianJi repo history.
 
 - more formalized `Im` / `Fa`-style scoring model
 - richer backtracking and causal grouping
-- run-history inspection commands over persisted SQLite data
+- richer persisted run drill-down over scored events and interventions
 
 ### Later
 
