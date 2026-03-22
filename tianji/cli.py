@@ -15,6 +15,7 @@ from .storage import (
     get_run_summary,
     list_runs,
 )
+from .tui import launch_history_tui
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -343,6 +344,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional maximum number of persisted event groups to return for each compared run",
+    )
+
+    tui_parser = subparsers.add_parser(
+        "tui", help="Open read-only TianJi history browser"
+    )
+    tui_parser.add_argument(
+        "--sqlite-path",
+        required=True,
+        help="SQLite database path containing persisted TianJi runs",
+    )
+    tui_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of runs to load into the history browser (default: 20)",
     )
     return parser
 
@@ -726,6 +742,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
+
+    if args.command == "tui":
+        if args.limit < 0:
+            parser.error("--limit must be zero or greater.")
+        return launch_history_tui(sqlite_path=args.sqlite_path, limit=args.limit)
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
