@@ -15,7 +15,7 @@ Primary verification command:
 Latest verified state in this session:
 
 - full unittest suite passes
-- current count: `79` tests
+- current count: `81` tests
 - history/history-show/history-compare operator workflows are substantially richer than at the start of the branch
 - Candidate A scoring slice is now shipped: `Im` includes a bounded text-signal-intensity bonus while `Fa` remains field-alignment-only
 
@@ -45,8 +45,9 @@ Latest verified state in this session:
   - dominant field strength
   - dominance margin over the second-best field
   - coherence share of dominant-field mass
-- current text-signal-intensity behavior is **cross-surface dominant-field cue concentration**, not historical novelty and not grouped corroboration
 - current text-signal-intensity behavior is **boundary-aware cross-surface dominant-field cue concentration**, not historical novelty and not grouped corroboration
+- title/summary cue matching now uses cached compiled regexes, so the boundary-aware rule stays cheap in the scoring loop
+- `score_event()` now computes dominant field and text-signal intensity once and reuses them for both `impact_score` and rationale construction
 - score rationale now includes `im_text_signal_intensity=...` so the new `Im` factor stays inspectable
 
 ### Grouping and causal logic
@@ -142,8 +143,8 @@ Best next milestone:
 1. **Refine the first-party scoring model from the now-shipped Candidate A base**
    - keep the next step narrow and deterministic
    - strongest likely next target is either:
-     - sharper text-signal semantics in `Im` without duplicating keyword density, or
-     - a small `Fa` ambiguity-handling refinement if a concrete mixed-field weakness appears
+     - a small `Fa` ambiguity-handling refinement if a concrete mixed-field weakness appears, or
+     - one more tightly bounded text-signal edge-case pass only if a real cue-boundary bug appears,
    - likely files: `tianji/scoring.py`, `SCORING_SPEC.md`, `tests/test_pipeline.py`
    - preserve current branch guardrails:
      - no persistence or schema changes
@@ -190,6 +191,8 @@ Current scoring-focused tests worth reading first:
 - `test_score_event_exposes_explicit_im_fa_semantics`
 - `test_score_event_rewards_stronger_text_signal_intensity_in_im`
 - `test_score_event_text_signal_intensity_does_not_reward_generic_keyword_mass`
+- `test_score_event_text_signal_intensity_ignores_incidental_substrings`
+- `test_score_event_text_signal_intensity_matches_punctuation_adjacent_cues`
 - `test_score_event_text_signal_intensity_respects_cap`
 
 ## Guardrails For The Next Session

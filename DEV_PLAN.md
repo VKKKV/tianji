@@ -555,6 +555,23 @@ Recommended choice:
 - if the team wants the smallest possible slice, combine **Candidate A** with the
   test additions from the verification plan and defer all other scoring changes
 
+Current status:
+
+- **Candidate A is now shipped** in first-party code, tests, and docs
+- title/summary cue matching is now boundary-aware, so short cues like `ai` do
+  not gain accidental credit inside unrelated larger words
+- text-signal cue matching now uses cached compiled regexes to avoid repeated
+  pattern compilation in the scoring loop
+- `score_event()` now computes dominant field and text-signal intensity once and
+  reuses those values for both `impact_score` and rationale construction
+
+What this means for the next scoring branch:
+
+- do not reopen the original Candidate A design work unless a concrete bug shows
+  the current boundary-aware cue model is still wrong
+- the next most likely worthwhile scoring branch is now **Candidate B** or
+  another similarly narrow deterministic refinement
+
 ### Candidate A concrete proposal
 
 The first implementation-ready version of Candidate A should stay narrow:
@@ -664,6 +681,16 @@ Suggested exact Candidate A test cases:
     branch-relevant cues
   - assert the new `Im` subcomponent saturates rather than growing unbounded
 
+- **`test_score_event_text_signal_intensity_ignores_incidental_substrings`**
+  - prove short cues like `ai` do not receive credit inside unrelated larger
+    words such as `air` or `fair`
+  - keep actor/region/field structure fixed so only boundary behavior is tested
+
+- **`test_score_event_text_signal_intensity_matches_punctuation_adjacent_cues`**
+  - prove punctuation-adjacent cues like `chip,` and `cyber,` still count as
+    real dominant-field evidence
+  - keep `field_attraction` unchanged so the test isolates `Im`
+
 - **update `test_score_event_exposes_explicit_im_fa_semantics`**
   - keep it as the pinned exact-value formula test
   - update expected `impact_score`, `divergence_score`, and rationale entries if
@@ -695,6 +722,17 @@ Abort conditions for the branch:
 - if `Fa` starts changing for reasons unrelated to field alignment
 - if the rationale becomes less interpretable after the change instead of more
   interpretable
+
+Recommended next branch after Candidate A hardening:
+
+- prefer a narrow **Candidate B** exploration over more Candidate A churn
+  unless a real text-boundary bug is observed
+- if pursuing Candidate B, start with one mixed-field synthetic-event pair that
+  exposes a concrete `Fa` ambiguity before changing formula constants
+- keep the same discipline used for Candidate A:
+  - spec/document the intended semantics first
+  - add one or two factor-isolation tests
+  - keep persistence, CLI, grouping, and schema unchanged
 
 ## Phase Boundary Notes
 
