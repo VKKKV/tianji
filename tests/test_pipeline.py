@@ -11,10 +11,10 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from tianji.cli import main
+from tianji.backtrack import EventGroupSummary, backtrack_candidates
 from tianji.fetch import TianJiInputError
 from tianji.models import NormalizedEvent, ScoredEvent
 from tianji import pipeline as pipeline_module
-from tianji.backtrack import backtrack_candidates
 from tianji.pipeline import run_pipeline
 from tianji.scoring import score_event
 
@@ -441,11 +441,17 @@ class PipelineTests(unittest.TestCase):
             rationale=["Im=11.67", "Fa=6.17"],
         )
 
-        groups = pipeline_module.group_events([related_a, related_b, unrelated])
+        groups: list[EventGroupSummary] = pipeline_module.group_events(
+            [related_a, related_b, unrelated]
+        )
 
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0]["headline_event_id"], "evt-a")
+        self.assertEqual(
+            groups[0]["headline_title"], "China and USA expand chip controls"
+        )
         self.assertEqual(groups[0]["member_event_ids"], ["evt-a", "evt-b"])
+        self.assertEqual(groups[0]["shared_keywords"], ["chip", "controls", "export"])
         self.assertEqual(groups[0]["dominant_field"], "technology")
         self.assertEqual(groups[0]["shared_actors"], ["china", "usa"])
         self.assertEqual(groups[0]["shared_regions"], ["east-asia", "united-states"])
@@ -482,7 +488,9 @@ class PipelineTests(unittest.TestCase):
             rationale=["Im=13.5", "Fa=7.1"],
         )
 
-        groups = pipeline_module.group_events([early_event, late_event])
+        groups: list[EventGroupSummary] = pipeline_module.group_events(
+            [early_event, late_event]
+        )
 
         self.assertEqual(groups, [])
 
@@ -518,7 +526,9 @@ class PipelineTests(unittest.TestCase):
             rationale=["Im=13.5", "Fa=7.1"],
         )
 
-        groups = pipeline_module.group_events([unknown_time_a, unknown_time_b])
+        groups: list[EventGroupSummary] = pipeline_module.group_events(
+            [unknown_time_a, unknown_time_b]
+        )
 
         self.assertEqual(len(groups), 1)
 
@@ -532,6 +542,9 @@ class PipelineTests(unittest.TestCase):
 
         self.assertIn("event_groups", artifact.scenario_summary)
         self.assertIsInstance(artifact.scenario_summary["event_groups"], list)
+        for group in artifact.scenario_summary["event_groups"]:
+            self.assertIn("headline_title", group)
+            self.assertIn("shared_keywords", group)
 
     def test_backtrack_candidates_collapse_grouped_duplicate_events(self) -> None:
         grouped_a = ScoredEvent(
@@ -579,7 +592,9 @@ class PipelineTests(unittest.TestCase):
             divergence_score=15.92,
             rationale=["Im=11.67", "Fa=6.17"],
         )
-        groups = pipeline_module.group_events([grouped_a, grouped_b, unrelated])
+        groups: list[EventGroupSummary] = pipeline_module.group_events(
+            [grouped_a, grouped_b, unrelated]
+        )
 
         candidates = backtrack_candidates(
             [grouped_a, grouped_b, unrelated],
@@ -636,7 +651,9 @@ class PipelineTests(unittest.TestCase):
             divergence_score=15.92,
             rationale=["Im=11.67", "Fa=6.17"],
         )
-        groups = pipeline_module.group_events([fixture_a, fixture_b, unrelated])
+        groups: list[EventGroupSummary] = pipeline_module.group_events(
+            [fixture_a, fixture_b, unrelated]
+        )
 
         candidates = backtrack_candidates(
             [fixture_a, fixture_b, unrelated],

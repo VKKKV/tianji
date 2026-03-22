@@ -5,9 +5,8 @@ from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 import json
 from pathlib import Path
-from typing import TypedDict
 
-from .backtrack import backtrack_candidates
+from .backtrack import EventGroupSummary, backtrack_candidates
 from .fetch import fetch_url, parse_feed, read_fixture, source_name_from_url
 from .models import RawItem, RunArtifact, ScoredEvent
 from .normalize import normalize_items
@@ -17,16 +16,6 @@ from .storage import persist_run
 
 MIN_SHARED_KEYWORDS = 2
 MAX_GROUP_TIME_DELTA = timedelta(hours=24)
-
-
-class EventGroupSummary(TypedDict):
-    group_id: str
-    headline_event_id: str
-    member_event_ids: list[str]
-    dominant_field: str
-    shared_actors: list[str]
-    shared_regions: list[str]
-    group_score: float
 
 
 def run_pipeline(
@@ -147,13 +136,17 @@ def summarize_group(group: list[ScoredEvent]) -> EventGroupSummary:
         group, key=lambda event: (-event.divergence_score, event.event_id)
     )
     anchor = ordered_group[0]
+    shared_keywords = shared_values(event.keywords for event in ordered_group)
     shared_actors = shared_values(event.actors for event in ordered_group)
     shared_regions = shared_values(event.regions for event in ordered_group)
     return {
         "group_id": f"group:{anchor.event_id}",
         "headline_event_id": anchor.event_id,
+        "headline_title": anchor.title,
         "member_event_ids": [event.event_id for event in ordered_group],
+        "member_count": len(ordered_group),
         "dominant_field": anchor.dominant_field,
+        "shared_keywords": shared_keywords,
         "shared_actors": shared_actors,
         "shared_regions": shared_regions,
         "group_score": round(sum(event.divergence_score for event in ordered_group), 2),

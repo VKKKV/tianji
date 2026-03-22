@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TypedDict
 
 from .models import InterventionCandidate, ScoredEvent
@@ -8,8 +9,11 @@ from .models import InterventionCandidate, ScoredEvent
 class EventGroupSummary(TypedDict):
     group_id: str
     headline_event_id: str
+    headline_title: str
     member_event_ids: list[str]
+    member_count: int
     dominant_field: str
+    shared_keywords: list[str]
     shared_actors: list[str]
     shared_regions: list[str]
     group_score: float
@@ -18,7 +22,7 @@ class EventGroupSummary(TypedDict):
 def backtrack_candidates(
     scored_events: list[ScoredEvent],
     limit: int = 5,
-    event_groups: list[EventGroupSummary] | None = None,
+    event_groups: Sequence[EventGroupSummary] | None = None,
 ) -> list[InterventionCandidate]:
     candidates: list[InterventionCandidate] = []
     selected_events = select_backtrack_events(scored_events, limit, event_groups)
@@ -49,7 +53,7 @@ def backtrack_candidates(
 def select_backtrack_events(
     scored_events: list[ScoredEvent],
     limit: int,
-    event_groups: list[EventGroupSummary] | None,
+    event_groups: Sequence[EventGroupSummary] | None,
 ) -> list[ScoredEvent]:
     if not event_groups:
         return scored_events[:limit]
