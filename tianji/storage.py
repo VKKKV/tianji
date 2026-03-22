@@ -475,6 +475,15 @@ def coerce_scored_event_row(
     ) = row
     if published_at is not None and not isinstance(published_at, str):
         raise RuntimeError("Unexpected published_at type in scored event row")
+    if not isinstance(impact_score, int | float | str):
+        raise RuntimeError("Unexpected impact_score type in scored event row")
+    if not isinstance(field_attraction, int | float | str):
+        raise RuntimeError("Unexpected field_attraction type in scored event row")
+    if not isinstance(divergence_score, int | float | str):
+        raise RuntimeError("Unexpected divergence_score type in scored event row")
+    impact_score_value = cast(int | float | str, impact_score)
+    field_attraction_value = cast(int | float | str, field_attraction)
+    divergence_score_value = cast(int | float | str, divergence_score)
     return (
         str(event_id),
         str(title),
@@ -482,9 +491,9 @@ def coerce_scored_event_row(
         str(link),
         published_at,
         str(dominant_field),
-        float(impact_score),
-        float(field_attraction),
-        float(divergence_score),
+        float(impact_score_value),
+        float(field_attraction_value),
+        float(divergence_score_value),
         str(rationale_json),
     )
 
