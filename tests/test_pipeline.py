@@ -3377,6 +3377,164 @@ class PipelineTests(unittest.TestCase):
 
         self.assertEqual(clear_scored.field_attraction, 7.66)
 
+    def test_score_event_applies_actor_weight_inside_im(self) -> None:
+        baseline_event = NormalizedEvent(
+            event_id="evt-actor-baseline",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/actor-baseline",
+            published_at="2026-03-22T12:09:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        weighted_actor_event = NormalizedEvent(
+            event_id="evt-actor-weighted",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/actor-weighted",
+            published_at="2026-03-22T12:10:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["usa"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+
+        baseline_scored = score_event(baseline_event)
+        weighted_scored = score_event(weighted_actor_event)
+
+        self.assertEqual(
+            baseline_scored.field_attraction, weighted_scored.field_attraction
+        )
+        self.assertAlmostEqual(
+            weighted_scored.impact_score - baseline_scored.impact_score, 0.9, places=2
+        )
+
+    def test_score_event_applies_region_weight_inside_im(self) -> None:
+        baseline_event = NormalizedEvent(
+            event_id="evt-region-baseline",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/region-baseline",
+            published_at="2026-03-22T12:11:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        weighted_region_event = NormalizedEvent(
+            event_id="evt-region-weighted",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/region-weighted",
+            published_at="2026-03-22T12:12:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["east-asia"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+
+        baseline_scored = score_event(baseline_event)
+        weighted_scored = score_event(weighted_region_event)
+
+        self.assertEqual(
+            baseline_scored.field_attraction, weighted_scored.field_attraction
+        )
+        self.assertAlmostEqual(
+            weighted_scored.impact_score - baseline_scored.impact_score, 1.5, places=2
+        )
+
+    def test_score_event_caps_raw_keyword_density_inside_im(self) -> None:
+        over_cap_keywords = [
+            "alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "epsilon",
+            "zeta",
+            "eta",
+            "theta",
+            "iota",
+            "kappa",
+            "lambda",
+            "mu",
+        ]
+        much_more_keywords = over_cap_keywords + [
+            "nu",
+            "xi",
+            "omicron",
+            "pi",
+            "rho",
+            "sigma",
+        ]
+        capped_event = NormalizedEvent(
+            event_id="evt-keyword-cap-1",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/keyword-cap-1",
+            published_at="2026-03-22T12:13:00Z",
+            keywords=over_cap_keywords,
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        still_capped_event = NormalizedEvent(
+            event_id="evt-keyword-cap-2",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/keyword-cap-2",
+            published_at="2026-03-22T12:14:00Z",
+            keywords=much_more_keywords,
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+
+        capped_scored = score_event(capped_event)
+        still_capped_scored = score_event(still_capped_event)
+
+        self.assertEqual(
+            capped_scored.field_attraction, still_capped_scored.field_attraction
+        )
+        self.assertEqual(capped_scored.impact_score, still_capped_scored.impact_score)
+
     def test_score_event_rewards_stronger_weighted_field_intensity_in_im(self) -> None:
         lower_intensity_event = NormalizedEvent(
             event_id="evt-low-im",
