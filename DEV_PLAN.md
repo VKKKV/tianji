@@ -419,12 +419,14 @@ Out of scope for that branch:
 
 Smaller fallback slice if the next session stays in CLI/docs work:
 
-- add parser-error tests for `history-compare` negative limits and mixed preset
-  misuse
-- add one explicit documentation note explaining that compare projections affect
-  projected fields like `top_scored_event`, `intervention_event_ids`,
-  `event_group_count`, and `top_event_group`, while stored summary fields such as
-  `dominant_field`, `risk_level`, and `headline` still describe the stored run
+- this fallback is now largely shipped:
+  - `history-compare` rejects negative compare limits and mixed preset misuse
+  - README/hand-off text now explains projected compare fields versus stored
+    run-summary fields
+  - inverted score windows are now rejected consistently across `history`,
+    `history-show`, and `history-compare`
+- remaining CLI/docs fallback work should now be limited to small wording polish
+  only if operator confusion still appears in practice
 
 ## Next Session Checklist
 
@@ -734,6 +736,14 @@ Recommended next branch after Candidate A hardening:
   - add one or two factor-isolation tests
   - keep persistence, CLI, grouping, and schema unchanged
 
+Current status after the first Candidate B slice:
+
+- a bounded near-tie `Fa` ambiguity penalty is now shipped
+- compare preset misuse, negative compare limits, and inverted persisted score
+  windows are now parser-rejected across the read-only operator surface
+- the next likely useful work is either a further narrow `Fa` refinement with a
+  concrete mixed-field case or a return to pure scoring-model depth inside `Im`
+
 ## Phase Boundary Notes
 
 To keep future sessions from reopening already-mostly-solved branches, use these
@@ -741,8 +751,8 @@ working boundaries:
 
 - **Phase 2 next work** = deepen first-party deterministic scoring semantics
   inside the existing pipeline shape
-- **Phase 4 remaining work** = validation and clarity cleanup for the already
-  shipped persisted operator surface
+- **Phase 4 remaining work** = only small operator-wording polish unless a new
+  persisted-analysis gap appears
 - **Phase 5 start condition** = scoring semantics and CLI operator workflows feel
   stable enough that a TUI can reuse them without forcing contract churn
 - **Local API work** stays contract-only until a real process boundary exists;
