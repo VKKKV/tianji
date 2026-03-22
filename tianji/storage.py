@@ -16,6 +16,19 @@ from .models import (
 
 
 RunRow: TypeAlias = tuple[int, str, str, str, str, str]
+ScoredEventRow: TypeAlias = tuple[
+    str,
+    str,
+    str,
+    str,
+    str | None,
+    str,
+    float,
+    float,
+    float,
+    str,
+]
+InterventionCandidateRow: TypeAlias = tuple[int, str, str, str, str, str]
 
 
 def persist_run(
@@ -67,11 +80,41 @@ def get_run_summary(*, sqlite_path: str, run_id: int) -> dict[str, object] | Non
             """,
             (run_id,),
         ).fetchone()
+        scored_event_rows = connection.execute(
+            """
+            SELECT event_id, title, source, link, published_at, dominant_field,
+                   impact_score, field_attraction, divergence_score, rationale_json
+            FROM scored_events
+            WHERE run_id = ?
+            ORDER BY divergence_score DESC, id ASC
+            """,
+            (run_id,),
+        ).fetchall()
+        intervention_rows = connection.execute(
+            """
+            SELECT priority, event_id, target, intervention_type, reason, expected_effect
+            FROM intervention_candidates
+            WHERE run_id = ?
+            ORDER BY priority ASC, id ASC
+            """,
+            (run_id,),
+        ).fetchall()
 
     if row is None:
         return None
 
-    return build_run_detail(coerce_run_row(row))
+    payload = build_run_detail(coerce_run_row(row))
+    payload["scored_events"] = [
+        build_scored_event_detail(coerce_scored_event_row(event_row))
+        for event_row in scored_event_rows
+    ]
+    payload["intervention_candidates"] = [
+        build_intervention_candidate_detail(
+            coerce_intervention_candidate_row(intervention_row)
+        )
+        for intervention_row in intervention_rows
+    ]
+    return payload
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -371,4 +414,92 @@ def coerce_run_row(row: sqlite3.Row | tuple[object, ...]) -> RunRow:
         str(generated_at),
         str(input_summary_json),
         str(scenario_summary_json),
+    )
+
+
+def build_scored_event_detail(row: ScoredEventRow) -> dict[str, object]:
+    (
+        event_id,
+        title,
+        source,
+        link,
+        published_at,
+        dominant_field,
+        impact_score,
+        field_attraction,
+        divergence_score,
+        rationale_json,
+    ) = row
+    return {
+        "event_id": event_id,
+        "title": title,
+        "source": source,
+        "link": link,
+        "published_at": published_at,
+        "dominant_field": dominant_field,
+        "impact_score": impact_score,
+        "field_attraction": field_attraction,
+        "divergence_score": divergence_score,
+        "rationale": json.loads(rationale_json),
+    }
+
+
+def build_intervention_candidate_detail(
+    row: InterventionCandidateRow,
+) -> dict[str, object]:
+    priority, event_id, target, intervention_type, reason, expected_effect = row
+    return {
+        "priority": priority,
+        "event_id": event_id,
+        "target": target,
+        "intervention_type": intervention_type,
+        "reason": reason,
+        "expected_effect": expected_effect,
+    }
+
+
+def coerce_scored_event_row(
+    row: sqlite3.Row | tuple[object, ...],
+) -> ScoredEventRow:
+    (
+        event_id,
+        title,
+        source,
+        link,
+        published_at,
+        dominant_field,
+        impact_score,
+        field_attraction,
+        divergence_score,
+        rationale_json,
+    ) = row
+    if published_at is not None and not isinstance(published_at, str):
+        raise RuntimeError("Unexpected published_at type in scored event row")
+    return (
+        str(event_id),
+        str(title),
+        str(source),
+        str(link),
+        published_at,
+        str(dominant_field),
+        float(impact_score),
+        float(field_attraction),
+        float(divergence_score),
+        str(rationale_json),
+    )
+
+
+def coerce_intervention_candidate_row(
+    row: sqlite3.Row | tuple[object, ...],
+) -> InterventionCandidateRow:
+    priority, event_id, target, intervention_type, reason, expected_effect = row
+    if not isinstance(priority, int | str):
+        raise RuntimeError("Unexpected priority type in intervention candidate row")
+    return (
+        int(priority),
+        str(event_id),
+        str(target),
+        str(intervention_type),
+        str(reason),
+        str(expected_effect),
     )

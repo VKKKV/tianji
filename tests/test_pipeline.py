@@ -310,6 +310,16 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(
                 payload["scenario_summary"]["dominant_field"], "technology"
             )
+            self.assertEqual(len(payload["scored_events"]), 3)
+            self.assertEqual(len(payload["intervention_candidates"]), 3)
+            self.assertEqual(
+                payload["scored_events"][0]["dominant_field"],
+                "technology",
+            )
+            self.assertEqual(
+                payload["intervention_candidates"][0]["intervention_type"],
+                "capability-control",
+            )
 
     def test_fixture_pipeline_has_stable_scoring_and_backtrack_order(self) -> None:
         artifact = run_pipeline(
