@@ -160,7 +160,7 @@ Retirement trigger:
 2. formalize richer event grouping and causal clustering
 3. draft the future local API contract that a web UI would consume
 4. begin actual local API implementation only when a real process boundary is chosen
-5. document the first persisted-run query workflow
+5. extend persisted comparison/query workflows beyond the first history slice
 6. tighten remaining doc/examples drift as commands evolve
 
 Draft contract note now lives in `LOCAL_API_CONTRACT.md`; implementation remains future work.
