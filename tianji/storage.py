@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 from pathlib import Path
 import sqlite3
@@ -61,6 +62,8 @@ def list_runs(
     mode: str | None = None,
     dominant_field: str | None = None,
     risk_level: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> list[dict[str, object]]:
     with sqlite3.connect(sqlite_path) as connection:
         rows = connection.execute(
@@ -80,6 +83,8 @@ def list_runs(
         mode=mode,
         dominant_field=dominant_field,
         risk_level=risk_level,
+        since=since,
+        until=until,
     )
 
 
@@ -583,6 +588,8 @@ def filter_run_list_items(
     mode: str | None,
     dominant_field: str | None,
     risk_level: str | None,
+    since: str | None,
+    until: str | None,
 ) -> list[dict[str, object]]:
     filtered = items
     if mode is not None:
@@ -593,7 +600,41 @@ def filter_run_list_items(
         ]
     if risk_level is not None:
         filtered = [item for item in filtered if item.get("risk_level") == risk_level]
+    since_value = parse_history_timestamp(since)
+    if since_value is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_history_timestamp_on_or_after(item.get("generated_at"), since_value)
+        ]
+    until_value = parse_history_timestamp(until)
+    if until_value is not None:
+        filtered = [
+            item
+            for item in filtered
+            if is_history_timestamp_on_or_before(item.get("generated_at"), until_value)
+        ]
     return filtered
+
+
+def parse_history_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def is_history_timestamp_on_or_after(value: object, threshold: datetime) -> bool:
+    if not isinstance(value, str):
+        return False
+    parsed = parse_history_timestamp(value)
+    return parsed is not None and parsed >= threshold
+
+
+def is_history_timestamp_on_or_before(value: object, threshold: datetime) -> bool:
+    if not isinstance(value, str):
+        return False
+    parsed = parse_history_timestamp(value)
+    return parsed is not None and parsed <= threshold
 
 
 def coerce_scored_event_row(

@@ -79,6 +79,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional risk level filter for persisted runs",
     )
+    history_parser.add_argument(
+        "--since",
+        default=None,
+        help="Optional inclusive lower bound for generated_at (ISO timestamp)",
+    )
+    history_parser.add_argument(
+        "--until",
+        default=None,
+        help="Optional inclusive upper bound for generated_at (ISO timestamp)",
+    )
 
     history_show_parser = subparsers.add_parser(
         "history-show", help="Show one persisted TianJi run summary from SQLite"
@@ -230,6 +240,8 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode,
             dominant_field=args.dominant_field,
             risk_level=args.risk_level,
+            since=args.since,
+            until=args.until,
         )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
