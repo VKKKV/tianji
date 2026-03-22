@@ -241,10 +241,10 @@ class PipelineTests(unittest.TestCase):
         scored = score_event(event)
 
         self.assertEqual(scored.dominant_field, "technology")
-        self.assertEqual(scored.impact_score, 17.0)
+        self.assertEqual(scored.impact_score, 12.72)
         self.assertEqual(scored.field_attraction, 7.66)
-        self.assertEqual(scored.divergence_score, 21.39)
-        self.assertIn("Im=17.0", scored.rationale)
+        self.assertEqual(scored.divergence_score, 18.61)
+        self.assertIn("Im=12.72", scored.rationale)
         self.assertIn("Fa=7.66", scored.rationale)
         self.assertIn("dominant_field=technology:7.66", scored.rationale)
 
@@ -293,6 +293,47 @@ class PipelineTests(unittest.TestCase):
         self.assertGreater(
             clearer_scored.divergence_score, ambiguous_scored.divergence_score
         )
+
+    def test_score_event_rewards_stronger_weighted_field_intensity_in_im(self) -> None:
+        lower_intensity_event = NormalizedEvent(
+            event_id="evt-low-im",
+            source="fixture:test",
+            title="Moderate technology escalation",
+            summary="Moderate event with limited weighted field intensity.",
+            link="https://example.com/low-im",
+            published_at="2026-03-22T12:10:00Z",
+            keywords=["chip", "cyber", "talks", "tariff"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        higher_intensity_event = NormalizedEvent(
+            event_id="evt-high-im",
+            source="fixture:test",
+            title="Severe technology escalation",
+            summary="Severe event with stronger weighted field intensity.",
+            link="https://example.com/high-im",
+            published_at="2026-03-22T12:15:00Z",
+            keywords=["chip", "cyber", "talks", "tariff"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 3.5,
+                "economy": 3.0,
+                "conflict": 0.0,
+            },
+        )
+
+        lower_scored = score_event(lower_intensity_event)
+        higher_scored = score_event(higher_intensity_event)
+
+        self.assertGreater(higher_scored.impact_score, lower_scored.impact_score)
 
     def test_cli_can_fetch_using_source_config(self) -> None:
         fixture_bytes = FIXTURE_PATH.read_bytes()

@@ -29,6 +29,8 @@ FIELD_ATTRACTION_WEIGHT = 1.35
 FA_MARGIN_WEIGHT = 0.15
 FA_MAX_MARGIN_BONUS = 1.0
 FA_COHERENCE_WEIGHT = 0.75
+IM_DOMINANT_FIELD_WEIGHT = 0.25
+IM_NONZERO_FIELD_WEIGHT = 0.2
 
 
 def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
@@ -39,7 +41,7 @@ def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
 def score_event(event: NormalizedEvent) -> ScoredEvent:
     dominant_field, dominant_field_strength = select_dominant_field(event)
     fa_score = compute_fa(event, dominant_field_strength)
-    im_score = compute_im(event, dominant_field_strength)
+    im_score = compute_im(event, dominant_field_strength, event.field_scores)
     divergence_score = compute_divergence_score(im_score, fa_score)
     rationale = build_rationale(
         event=event,
@@ -64,11 +66,21 @@ def score_event(event: NormalizedEvent) -> ScoredEvent:
     )
 
 
-def compute_im(event: NormalizedEvent, fa_score: float) -> float:
+def compute_im(
+    event: NormalizedEvent,
+    dominant_field_strength: float,
+    field_scores: dict[str, float],
+) -> float:
     actor_weight = sum(ACTOR_WEIGHTS.get(actor, 0.6) for actor in event.actors)
     region_weight = sum(REGION_WEIGHTS.get(region, 0.5) for region in event.regions)
     keyword_density = min(len(event.keywords) * 0.25, 3.0)
-    return round(3.0 + actor_weight + region_weight + keyword_density + fa_score, 2)
+    nonzero_field_count = sum(1 for score in field_scores.values() if score > 0)
+    evidence_bonus = (dominant_field_strength * IM_DOMINANT_FIELD_WEIGHT) + (
+        nonzero_field_count * IM_NONZERO_FIELD_WEIGHT
+    )
+    return round(
+        3.0 + actor_weight + region_weight + keyword_density + evidence_bonus, 2
+    )
 
 
 def select_dominant_field(event: NormalizedEvent) -> tuple[str, float]:

@@ -14,7 +14,8 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
     - actor weight
     - region weight
     - keyword density
-    - the event's current field-attraction strength
+    - a small dominant-field evidence bonus
+    - a small nonzero-field diversity bonus
 
 - **`Fa` (Field Attraction)**
   - TianJi's deterministic estimate of how strongly an event belongs to its dominant attractor field.
@@ -44,6 +45,7 @@ It only makes the existing deterministic scoring language explicit and testable 
 Still deferred after this slice:
 
 - richer `Fa` from corroboration and contradiction handling beyond field-score concentration
+- richer `Im` from novelty/spike and baseline deviation signals
 - richer `Im` from novelty/spike and baseline deviation signals
 - event grouping and causal clustering
 - evidence-chain backtracking
