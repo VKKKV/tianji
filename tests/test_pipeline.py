@@ -278,6 +278,91 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(payload[0]["raw_item_count"], 3)
             self.assertEqual(payload[0]["dominant_field"], "technology")
 
+    def test_cli_history_filters_runs_by_mode_and_dominant_field(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            empty_feed = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Empty TianJi Feed</title></channel></rss>
+"""
+            empty_fixture = Path(tmpdir) / "empty.xml"
+            empty_fixture.write_text(empty_feed, encoding="utf-8")
+            run_pipeline(
+                fixture_paths=[str(empty_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "history",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--mode",
+                        "fixture",
+                        "--dominant-field",
+                        "technology",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["mode"], "fixture")
+            self.assertEqual(payload[0]["dominant_field"], "technology")
+
+    def test_cli_history_filters_runs_by_risk_level(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            empty_feed = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Empty TianJi Feed</title></channel></rss>
+"""
+            empty_fixture = Path(tmpdir) / "empty.xml"
+            empty_fixture.write_text(empty_feed, encoding="utf-8")
+            run_pipeline(
+                fixture_paths=[str(empty_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "history",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--risk-level",
+                        "low",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["risk_level"], "low")
+
     def test_cli_history_show_reads_single_persisted_run(self) -> None:
         with TemporaryDirectory() as tmpdir:
             sqlite_path = Path(tmpdir) / "tianji.sqlite3"

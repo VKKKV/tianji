@@ -4,6 +4,10 @@ TianJi is a local-first intelligence prototype aimed at one core loop: fetch sig
 
 The repository currently ships a **one-shot CLI MVP**, not the full daemonized "God Engine" yet. The near-term goal is to prove the end-to-end value of `单次数据获取 -> 推演 -> 反推` with deterministic, inspectable output before expanding into a long-running orchestration system.
 
+![TianJi concept diagram](img/Gemini_Generated_Image_h1wiykh1wiykh1wi.png)
+
+_Concept illustration for TianJi's long-term direction. The currently shipped product surface is still the CLI-first MVP described below._
+
 ## Current Reality
 
 The implemented slice is a Python CLI pipeline under `tianji/`.
@@ -20,6 +24,7 @@ It supports:
 - optionally persisting runs to local SQLite
 - listing persisted runs and inspecting stored run details from SQLite
 - comparing two persisted runs from SQLite
+- filtering persisted runs by mode, dominant field, or risk level
 - surfacing clean CLI errors for malformed feeds and failed fetches
 
 This keeps the first version testable, local, and reproducible.
@@ -75,6 +80,7 @@ python3 -m tianji run --fetch --source-config /path/to/sources.json --source-nam
 
 ```bash
 python3 -m tianji history --sqlite-path runs/tianji.sqlite3
+python3 -m tianji history --sqlite-path runs/tianji.sqlite3 --dominant-field technology --risk-level high
 python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
 python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
 ```
@@ -108,7 +114,7 @@ The current MVP flow is:
    Store run metadata plus raw, normalized, scored, and intervention rows in SQLite when `--sqlite-path` is provided.
 
 7. **Inspect Run History (Optional)**  
-   Query persisted run summaries later with `history` and inspect one stored run's summaries, scored events, and intervention candidates with `history-show`.
+   Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, or risk level, and inspect one stored run's summaries, scored events, and intervention candidates with `history-show`.
 
 8. **Compare Persisted Runs (Optional)**  
    Compare two stored runs with `history-compare` to inspect count deltas, dominant-field/risk changes, and intervention differences.
@@ -187,6 +193,7 @@ These are reference inputs, not part of the initial TianJi repo history.
 - config-driven source registry
 - optional SQLite persistence
 - SQLite-backed run history inspection
+- filtered run-history queries by mode, dominant field, and risk level
 - richer `history-show` drill-down over stored scored events and interventions
 - persisted run comparison via `history-compare`
 - deterministic scoring and backtracking JSON report

@@ -54,7 +54,14 @@ def persist_run(
         connection.commit()
 
 
-def list_runs(*, sqlite_path: str, limit: int = 20) -> list[dict[str, object]]:
+def list_runs(
+    *,
+    sqlite_path: str,
+    limit: int = 20,
+    mode: str | None = None,
+    dominant_field: str | None = None,
+    risk_level: str | None = None,
+) -> list[dict[str, object]]:
     with sqlite3.connect(sqlite_path) as connection:
         rows = connection.execute(
             """
@@ -67,7 +74,13 @@ def list_runs(*, sqlite_path: str, limit: int = 20) -> list[dict[str, object]]:
         ).fetchall()
 
     typed_rows = [coerce_run_row(row) for row in rows]
-    return [build_run_list_item(row) for row in typed_rows]
+    items = [build_run_list_item(row) for row in typed_rows]
+    return filter_run_list_items(
+        items,
+        mode=mode,
+        dominant_field=dominant_field,
+        risk_level=risk_level,
+    )
 
 
 def get_run_summary(*, sqlite_path: str, run_id: int) -> dict[str, object] | None:
@@ -562,6 +575,25 @@ def build_compare_diff(
             if event_id not in left_intervention_ids
         ],
     }
+
+
+def filter_run_list_items(
+    items: list[dict[str, object]],
+    *,
+    mode: str | None,
+    dominant_field: str | None,
+    risk_level: str | None,
+) -> list[dict[str, object]]:
+    filtered = items
+    if mode is not None:
+        filtered = [item for item in filtered if item.get("mode") == mode]
+    if dominant_field is not None:
+        filtered = [
+            item for item in filtered if item.get("dominant_field") == dominant_field
+        ]
+    if risk_level is not None:
+        filtered = [item for item in filtered if item.get("risk_level") == risk_level]
+    return filtered
 
 
 def coerce_scored_event_row(

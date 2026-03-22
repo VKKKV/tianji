@@ -64,6 +64,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=20,
         help="Maximum number of runs to list (default: 20)",
     )
+    history_parser.add_argument(
+        "--mode",
+        default=None,
+        help="Optional run mode filter (for example: fixture, fetch, fetch+fixture)",
+    )
+    history_parser.add_argument(
+        "--dominant-field",
+        default=None,
+        help="Optional dominant field filter for persisted runs",
+    )
+    history_parser.add_argument(
+        "--risk-level",
+        default=None,
+        help="Optional risk level filter for persisted runs",
+    )
 
     history_show_parser = subparsers.add_parser(
         "history-show", help="Show one persisted TianJi run summary from SQLite"
@@ -209,7 +224,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "history":
-        payload = list_runs(sqlite_path=args.sqlite_path, limit=args.limit)
+        payload = list_runs(
+            sqlite_path=args.sqlite_path,
+            limit=args.limit,
+            mode=args.mode,
+            dominant_field=args.dominant_field,
+            risk_level=args.risk_level,
+        )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
