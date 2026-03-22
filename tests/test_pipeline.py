@@ -242,11 +242,57 @@ class PipelineTests(unittest.TestCase):
 
         self.assertEqual(scored.dominant_field, "technology")
         self.assertEqual(scored.impact_score, 17.0)
-        self.assertEqual(scored.field_attraction, 6.5)
-        self.assertEqual(scored.divergence_score, 19.83)
+        self.assertEqual(scored.field_attraction, 7.66)
+        self.assertEqual(scored.divergence_score, 21.39)
         self.assertIn("Im=17.0", scored.rationale)
-        self.assertIn("Fa=6.5", scored.rationale)
-        self.assertIn("dominant_field=technology:6.5", scored.rationale)
+        self.assertIn("Fa=7.66", scored.rationale)
+        self.assertIn("dominant_field=technology:7.66", scored.rationale)
+
+    def test_score_event_rewards_clearer_field_alignment_in_fa(self) -> None:
+        clearer_event = NormalizedEvent(
+            event_id="evt-clear",
+            source="fixture:test",
+            title="Clear technology signal",
+            summary="A strong single-field technology event.",
+            link="https://example.com/clear",
+            published_at="2026-03-22T12:00:00Z",
+            keywords=["chip", "cyber", "controls", "sanctions"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 2.0,
+                "economy": 1.5,
+                "conflict": 0.0,
+            },
+        )
+        ambiguous_event = NormalizedEvent(
+            event_id="evt-ambiguous",
+            source="fixture:test",
+            title="Ambiguous technology signal",
+            summary="An event split across multiple attractor fields.",
+            link="https://example.com/ambiguous",
+            published_at="2026-03-22T12:05:00Z",
+            keywords=["chip", "cyber", "talks", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 5.8,
+                "economy": 5.2,
+                "conflict": 0.0,
+            },
+        )
+
+        clearer_scored = score_event(clearer_event)
+        ambiguous_scored = score_event(ambiguous_event)
+
+        self.assertGreater(
+            clearer_scored.field_attraction, ambiguous_scored.field_attraction
+        )
+        self.assertGreater(
+            clearer_scored.divergence_score, ambiguous_scored.divergence_score
+        )
 
     def test_cli_can_fetch_using_source_config(self) -> None:
         fixture_bytes = FIXTURE_PATH.read_bytes()

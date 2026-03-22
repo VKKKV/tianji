@@ -26,6 +26,9 @@ ACTOR_WEIGHTS = {
 
 IMPACT_WEIGHT = 0.65
 FIELD_ATTRACTION_WEIGHT = 1.35
+FA_MARGIN_WEIGHT = 0.15
+FA_MAX_MARGIN_BONUS = 1.0
+FA_COHERENCE_WEIGHT = 0.75
 
 
 def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
@@ -34,8 +37,9 @@ def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
 
 
 def score_event(event: NormalizedEvent) -> ScoredEvent:
-    dominant_field, fa_score = compute_fa(event)
-    im_score = compute_im(event, fa_score)
+    dominant_field, dominant_field_strength = select_dominant_field(event)
+    fa_score = compute_fa(event, dominant_field_strength)
+    im_score = compute_im(event, dominant_field_strength)
     divergence_score = compute_divergence_score(im_score, fa_score)
     rationale = build_rationale(
         event=event,
@@ -67,13 +71,31 @@ def compute_im(event: NormalizedEvent, fa_score: float) -> float:
     return round(3.0 + actor_weight + region_weight + keyword_density + fa_score, 2)
 
 
-def compute_fa(event: NormalizedEvent) -> tuple[str, float]:
+def select_dominant_field(event: NormalizedEvent) -> tuple[str, float]:
     dominant_field, field_strength = max(
         event.field_scores.items(),
         key=lambda item: item[1],
         default=("uncategorized", 0.0),
     )
     return dominant_field, round(field_strength, 2)
+
+
+def compute_fa(event: NormalizedEvent, dominant_field_strength: float) -> float:
+    ordered_scores = sorted(event.field_scores.values(), reverse=True)
+    second_best_strength = ordered_scores[1] if len(ordered_scores) > 1 else 0.0
+    total_strength = sum(score for score in event.field_scores.values() if score > 0)
+
+    margin_bonus = min(
+        max(dominant_field_strength - second_best_strength, 0.0) * FA_MARGIN_WEIGHT,
+        FA_MAX_MARGIN_BONUS,
+    )
+    coherence_bonus = 0.0
+    if total_strength > 0:
+        coherence_bonus = (
+            dominant_field_strength / total_strength
+        ) * FA_COHERENCE_WEIGHT
+
+    return round(dominant_field_strength + margin_bonus + coherence_bonus, 2)
 
 
 def compute_divergence_score(im_score: float, fa_score: float) -> float:

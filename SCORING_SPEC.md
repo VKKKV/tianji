@@ -18,7 +18,9 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
 
 - **`Fa` (Field Attraction)**
   - TianJi's deterministic estimate of how strongly an event belongs to its dominant attractor field.
-  - In the current slice, it is the strongest normalized field score already produced by `normalize.py`.
+  - In the current slice, it starts from the strongest normalized field score and then adds:
+    - a small dominance-margin bonus over the second-best field
+    - a small coherence bonus based on how much of the total scored field mass belongs to the dominant field
 
 - **`divergence_score`**
   - TianJi's current ranking score derived from explicit `Im` and `Fa` intermediates.
@@ -41,7 +43,7 @@ It only makes the existing deterministic scoring language explicit and testable 
 
 Still deferred after this slice:
 
-- richer `Fa` from dominance margin, corroboration, and contradiction handling
+- richer `Fa` from corroboration and contradiction handling beyond field-score concentration
 - richer `Im` from novelty/spike and baseline deviation signals
 - event grouping and causal clustering
 - evidence-chain backtracking
