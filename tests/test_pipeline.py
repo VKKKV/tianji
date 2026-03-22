@@ -12,7 +12,8 @@ import unittest
 
 from tianji.cli import main
 from tianji.fetch import TianJiInputError
-from tianji.models import NormalizedEvent
+from tianji.models import NormalizedEvent, ScoredEvent
+from tianji import pipeline as pipeline_module
 from tianji.pipeline import run_pipeline
 from tianji.scoring import score_event
 
@@ -171,6 +172,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(artifact.input_summary["raw_item_count"], 0)
         self.assertEqual(artifact.scored_events, [])
         self.assertEqual(artifact.intervention_candidates, [])
+        self.assertEqual(artifact.scenario_summary["event_groups"], [])
 
     def test_pipeline_marks_mixed_fixture_and_fetch_mode(self) -> None:
         fixture_bytes = FIXTURE_PATH.read_bytes()
@@ -390,6 +392,73 @@ class PipelineTests(unittest.TestCase):
         higher_scored = score_event(higher_intensity_event)
 
         self.assertGreater(higher_scored.impact_score, lower_scored.impact_score)
+
+    def test_group_events_clusters_obviously_related_events(self) -> None:
+        related_a = ScoredEvent(
+            event_id="evt-a",
+            title="China and USA expand chip controls",
+            source="fixture:test",
+            link="https://example.com/a",
+            published_at="2026-03-22T08:00:00Z",
+            actors=["china", "usa"],
+            regions=["east-asia", "united-states"],
+            keywords=["chip", "controls", "export", "dispute"],
+            dominant_field="technology",
+            impact_score=14.03,
+            field_attraction=7.75,
+            divergence_score=19.58,
+            rationale=["Im=14.03", "Fa=7.75"],
+        )
+        related_b = ScoredEvent(
+            event_id="evt-b",
+            title="USA and China deepen export chip restrictions",
+            source="fixture:test",
+            link="https://example.com/b",
+            published_at="2026-03-22T09:00:00Z",
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            keywords=["chip", "restrictions", "export", "controls"],
+            dominant_field="technology",
+            impact_score=13.5,
+            field_attraction=7.1,
+            divergence_score=18.31,
+            rationale=["Im=13.5", "Fa=7.1"],
+        )
+        unrelated = ScoredEvent(
+            event_id="evt-c",
+            title="Iran diplomacy channel reopens",
+            source="fixture:test",
+            link="https://example.com/c",
+            published_at="2026-03-22T10:00:00Z",
+            actors=["iran"],
+            regions=["middle-east"],
+            keywords=["talks", "diplomacy", "channel", "iran"],
+            dominant_field="diplomacy",
+            impact_score=11.67,
+            field_attraction=6.17,
+            divergence_score=15.92,
+            rationale=["Im=11.67", "Fa=6.17"],
+        )
+
+        groups = pipeline_module.group_events([related_a, related_b, unrelated])
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["headline_event_id"], "evt-a")
+        self.assertEqual(groups[0]["member_event_ids"], ["evt-a", "evt-b"])
+        self.assertEqual(groups[0]["dominant_field"], "technology")
+        self.assertEqual(groups[0]["shared_actors"], ["china", "usa"])
+        self.assertEqual(groups[0]["shared_regions"], ["east-asia", "united-states"])
+
+    def test_pipeline_surfaces_event_groups_in_scenario_summary(self) -> None:
+        artifact = run_pipeline(
+            fixture_paths=[str(FIXTURE_PATH)],
+            fetch=False,
+            source_urls=[],
+            output_path=None,
+        )
+
+        self.assertIn("event_groups", artifact.scenario_summary)
+        self.assertIsInstance(artifact.scenario_summary["event_groups"], list)
 
     def test_cli_can_fetch_using_source_config(self) -> None:
         fixture_bytes = FIXTURE_PATH.read_bytes()
