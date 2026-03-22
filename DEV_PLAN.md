@@ -164,6 +164,8 @@ Retirement trigger:
 5. document the first persisted-run query workflow
 6. tighten remaining doc/examples drift as commands evolve
 
+Draft contract note now lives in `LOCAL_API_CONTRACT.md`; implementation remains future work.
+
 ## Guardrails
 
 - keep first-party source under `tianji/` and `tests/`
