@@ -10,6 +10,7 @@ from .storage import (
     compare_runs,
     get_latest_run_id,
     get_latest_run_pair,
+    get_next_run_id,
     get_previous_run_id,
     get_run_summary,
     list_runs,
@@ -114,6 +115,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--latest",
         action="store_true",
         help="Show the latest persisted run instead of specifying --run-id",
+    )
+    history_show_parser.add_argument(
+        "--previous",
+        action="store_true",
+        help="Show the persisted run immediately before --run-id",
+    )
+    history_show_parser.add_argument(
+        "--next",
+        action="store_true",
+        help="Show the persisted run immediately after --run-id",
     )
 
     history_compare_parser = subparsers.add_parser(
@@ -276,15 +287,44 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "history-show":
+        if sum([bool(args.latest), bool(args.previous), bool(args.next)]) > 1:
+            parser.error(
+                "Use only one history-show navigation mode: --latest, --previous, or --next."
+            )
         if args.latest and args.run_id is not None:
             parser.error("Use either --run-id or --latest for history-show, not both.")
-        if not args.latest and args.run_id is None:
-            parser.error("history-show requires either --run-id or --latest.")
+        if (args.previous or args.next) and args.run_id is None:
+            parser.error("history-show with --previous/--next requires --run-id.")
+        if (
+            not args.latest
+            and not args.previous
+            and not args.next
+            and args.run_id is None
+        ):
+            parser.error(
+                "history-show requires --run-id, --latest, --previous, or --next."
+            )
         run_id = args.run_id
         if args.latest:
             run_id = get_latest_run_id(sqlite_path=args.sqlite_path)
             if run_id is None:
                 parser.error("No persisted runs are available.")
+        elif args.previous:
+            previous_run_id = get_previous_run_id(
+                sqlite_path=args.sqlite_path, run_id=args.run_id
+            )
+            if previous_run_id is None:
+                parser.error(
+                    f"No previous persisted run exists before run {args.run_id}."
+                )
+            run_id = previous_run_id
+        elif args.next:
+            next_run_id = get_next_run_id(
+                sqlite_path=args.sqlite_path, run_id=args.run_id
+            )
+            if next_run_id is None:
+                parser.error(f"No next persisted run exists after run {args.run_id}.")
+            run_id = next_run_id
         payload = get_run_summary(sqlite_path=args.sqlite_path, run_id=run_id)
         if payload is None:
             parser.error(f"Run not found: {run_id}")

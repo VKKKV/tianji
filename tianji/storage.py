@@ -198,6 +198,20 @@ def get_previous_run_id(*, sqlite_path: str, run_id: int) -> int | None:
     return int(previous_run_id)
 
 
+def get_next_run_id(*, sqlite_path: str, run_id: int) -> int | None:
+    with sqlite3.connect(sqlite_path) as connection:
+        row = connection.execute(
+            "SELECT id FROM runs WHERE id > ? ORDER BY id ASC LIMIT 1",
+            (run_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    next_run_id = row[0]
+    if not isinstance(next_run_id, int | str):
+        raise RuntimeError("Unexpected run id type in next-run query")
+    return int(next_run_id)
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
