@@ -15,7 +15,7 @@ Primary verification command:
 Latest verified state in this session:
 
 - full unittest suite passes
-- current count: `103` tests
+- current count: `105` tests
 - history/history-show/history-compare operator workflows are substantially richer than at the start of the branch
 - Candidate A scoring slice is now shipped: `Im` includes a bounded text-signal-intensity bonus while `Fa` remains field-alignment-only
 - Candidate B has now started in a narrow shipped form: `Fa` includes a bounded near-tie ambiguity penalty when the top two fields nearly tie
@@ -23,7 +23,7 @@ Latest verified state in this session:
 - inverted score windows are now rejected consistently across `history`, `history-show`, and `history-compare`
 - negative `history --limit` values are now parser-rejected instead of silently changing slice behavior
 - non-positive explicit persisted run ids are now parser-rejected for `history-show` and explicit/preset `history-compare` paths
-- scoring coverage now includes isolated `Im` tests for actor weighting, region weighting, and raw keyword-density cap behavior
+- scoring coverage now includes isolated `Im` tests for actor weighting, region weighting, raw keyword-density cap behavior, dominant-field-strength bonus behavior, and nonzero-field-count bonus behavior
 
 ## What Ships Now
 
@@ -201,6 +201,8 @@ Current scoring-focused tests worth reading first:
 
 - `test_score_event_exposes_explicit_im_fa_semantics`
 - `test_score_event_applies_actor_weight_inside_im`
+- `test_score_event_applies_dominant_field_strength_inside_im`
+- `test_score_event_applies_nonzero_field_count_inside_im`
 - `test_score_event_applies_region_weight_inside_im`
 - `test_score_event_caps_raw_keyword_density_inside_im`
 - `test_score_event_rewards_clearer_field_alignment_in_fa`
