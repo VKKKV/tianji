@@ -6,7 +6,15 @@ Small fixture-first verification layer for the owned Python MVP.
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Main coverage | `test_pipeline.py` | End-to-end owned suite |
+| Pipeline integration | `test_pipeline.py` | Core end-to-end pipeline and persistence checks |
+| TUI coverage | `test_tui.py` | Read-only terminal browser state, formatting, and launch flow |
+| History list coverage | `test_history_list.py` | `history` list/read filtering surface |
+| History show coverage | `test_history_show.py` | `history-show` detail and projection surface |
+| History compare coverage | `test_history_compare.py` | `history-compare` presets, projections, and diff semantics |
+| Scoring coverage | `test_scoring.py` | `Im` / `Fa` scoring semantics and summary tie rules |
+| Grouping coverage | `test_grouping.py` | grouping, causal clustering, and grouped backtracking |
+| CLI input coverage | `test_cli_inputs.py` | source-config and operator-facing failure paths |
+| Shared test helpers | `support.py` | test-only fixture/constants/import hub; not a test module |
 | Stable input | `fixtures/sample_feed.xml` | Canonical deterministic feed sample |
 
 ## CONVENTIONS
@@ -23,3 +31,5 @@ Small fixture-first verification layer for the owned Python MVP.
 ## NOTES
 - `python3 -m unittest discover -s tests -v` is the current source-of-truth command.
 - The pytest stanza in `pyproject.toml` is not the operational test contract yet.
+- Keep the `tests/` layout flat unless unittest discovery/package rules are revisited explicitly.
+- Import shared helpers from `support.py`, not from sibling test modules.
