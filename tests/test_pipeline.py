@@ -366,6 +366,18 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(payload["left"]["dominant_field"], "technology")
             self.assertEqual(payload["right"]["dominant_field"], "uncategorized")
             self.assertEqual(payload["diff"]["raw_item_count_delta"], -3)
+            self.assertTrue(payload["diff"]["top_scored_event_changed"])
+            self.assertTrue(payload["diff"]["top_intervention_changed"])
+            self.assertEqual(
+                payload["diff"]["left_top_scored_event_id"],
+                payload["left"]["top_scored_event"]["event_id"],
+            )
+            self.assertIsNone(payload["diff"]["right_top_scored_event_id"])
+            self.assertEqual(
+                payload["diff"]["left_top_intervention_event_id"],
+                payload["left"]["top_intervention"]["event_id"],
+            )
+            self.assertIsNone(payload["diff"]["right_top_intervention_event_id"])
             self.assertEqual(
                 payload["diff"]["left_only_intervention_event_ids"],
                 [

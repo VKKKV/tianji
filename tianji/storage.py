@@ -512,6 +512,30 @@ def build_compare_diff(
 ) -> dict[str, object]:
     left_intervention_ids = cast(list[str], left["intervention_event_ids"])
     right_intervention_ids = cast(list[str], right["intervention_event_ids"])
+    left_top_scored_event = cast(dict[str, object] | None, left["top_scored_event"])
+    right_top_scored_event = cast(dict[str, object] | None, right["top_scored_event"])
+    left_top_intervention = cast(dict[str, object] | None, left["top_intervention"])
+    right_top_intervention = cast(dict[str, object] | None, right["top_intervention"])
+    left_top_scored_event_id = (
+        cast(str, left_top_scored_event["event_id"])
+        if left_top_scored_event is not None
+        else None
+    )
+    right_top_scored_event_id = (
+        cast(str, right_top_scored_event["event_id"])
+        if right_top_scored_event is not None
+        else None
+    )
+    left_top_intervention_event_id = (
+        cast(str, left_top_intervention["event_id"])
+        if left_top_intervention is not None
+        else None
+    )
+    right_top_intervention_event_id = (
+        cast(str, right_top_intervention["event_id"])
+        if right_top_intervention is not None
+        else None
+    )
     return {
         "raw_item_count_delta": cast(int, right["raw_item_count"])
         - cast(int, left["raw_item_count"]),
@@ -519,6 +543,14 @@ def build_compare_diff(
         - cast(int, left["normalized_event_count"]),
         "dominant_field_changed": left["dominant_field"] != right["dominant_field"],
         "risk_level_changed": left["risk_level"] != right["risk_level"],
+        "top_scored_event_changed": left_top_scored_event_id
+        != right_top_scored_event_id,
+        "top_intervention_changed": left_top_intervention_event_id
+        != right_top_intervention_event_id,
+        "left_top_scored_event_id": left_top_scored_event_id,
+        "right_top_scored_event_id": right_top_scored_event_id,
+        "left_top_intervention_event_id": left_top_intervention_event_id,
+        "right_top_intervention_event_id": right_top_intervention_event_id,
         "left_only_intervention_event_ids": [
             event_id
             for event_id in left_intervention_ids

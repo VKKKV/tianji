@@ -19,6 +19,7 @@ It supports:
 - writing a structured JSON artifact
 - optionally persisting runs to local SQLite
 - listing persisted runs and inspecting stored run details from SQLite
+- comparing two persisted runs from SQLite
 - surfacing clean CLI errors for malformed feeds and failed fetches
 
 This keeps the first version testable, local, and reproducible.
@@ -75,6 +76,7 @@ python3 -m tianji run --fetch --source-config /path/to/sources.json --source-nam
 ```bash
 python3 -m tianji history --sqlite-path runs/tianji.sqlite3
 python3 -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
+python3 -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
 ```
 
 ### Run tests
@@ -108,6 +110,9 @@ The current MVP flow is:
 7. **Inspect Run History (Optional)**  
    Query persisted run summaries later with `history` and inspect one stored run's summaries, scored events, and intervention candidates with `history-show`.
 
+8. **Compare Persisted Runs (Optional)**  
+   Compare two stored runs with `history-compare` to inspect count deltas, dominant-field/risk changes, and intervention differences.
+
 ## Output Artifact
 
 By default, the CLI writes to `runs/latest-run.json`.
@@ -121,6 +126,8 @@ The artifact includes:
 - `intervention_candidates`: ranked backtracked actions derived from the top events
 
 Persisted run history now exposes both compact run summaries and per-run drill-down over stored scored events and intervention candidates.
+
+Persisted comparison currently exposes left/right run summaries plus explicit diff fields for counts, dominant-field/risk changes, and top/intervention deltas.
 
 ## Repository Layout
 
@@ -181,6 +188,7 @@ These are reference inputs, not part of the initial TianJi repo history.
 - optional SQLite persistence
 - SQLite-backed run history inspection
 - richer `history-show` drill-down over stored scored events and interventions
+- persisted run comparison via `history-compare`
 - deterministic scoring and backtracking JSON report
 - schema-versioned artifacts
 - hardened input and fetch failure handling
