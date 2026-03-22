@@ -1478,6 +1478,78 @@ class PipelineTests(unittest.TestCase):
             "--limit-scored-events must be zero or greater.", stderr.getvalue()
         )
 
+    def test_cli_history_show_rejects_inverted_impact_score_range(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-show",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--run-id",
+                        "1",
+                        "--min-impact-score",
+                        "5",
+                        "--max-impact-score",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-impact-score cannot be greater than --max-impact-score.",
+            stderr.getvalue(),
+        )
+
+    def test_cli_history_show_rejects_inverted_field_attraction_range(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-show",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--run-id",
+                        "1",
+                        "--min-field-attraction",
+                        "5",
+                        "--max-field-attraction",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-field-attraction cannot be greater than --max-field-attraction.",
+            stderr.getvalue(),
+        )
+
+    def test_cli_history_show_rejects_inverted_divergence_score_range(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-show",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--run-id",
+                        "1",
+                        "--min-divergence-score",
+                        "5",
+                        "--max-divergence-score",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-divergence-score cannot be greater than --max-divergence-score.",
+            stderr.getvalue(),
+        )
+
     def test_cli_history_show_preserves_group_evidence_chain_metadata(self) -> None:
         grouped_feed = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -2147,6 +2219,88 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 2)
         self.assertIn(
             "--limit-event-groups must be zero or greater.", stderr.getvalue()
+        )
+
+    def test_cli_history_compare_rejects_inverted_impact_score_range(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                        "--min-impact-score",
+                        "5",
+                        "--max-impact-score",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-impact-score cannot be greater than --max-impact-score.",
+            stderr.getvalue(),
+        )
+
+    def test_cli_history_compare_rejects_inverted_field_attraction_range(
+        self,
+    ) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                        "--min-field-attraction",
+                        "5",
+                        "--max-field-attraction",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-field-attraction cannot be greater than --max-field-attraction.",
+            stderr.getvalue(),
+        )
+
+    def test_cli_history_compare_rejects_inverted_divergence_score_range(
+        self,
+    ) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                        "--min-divergence-score",
+                        "5",
+                        "--max-divergence-score",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-divergence-score cannot be greater than --max-divergence-score.",
+            stderr.getvalue(),
         )
 
     def test_cli_history_compare_rejects_mixed_explicit_pair_and_against_latest(

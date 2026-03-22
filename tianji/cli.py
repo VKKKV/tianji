@@ -405,6 +405,18 @@ def dedupe_urls(urls: list[str]) -> list[str]:
     return deduped
 
 
+def validate_score_range(
+    parser: argparse.ArgumentParser,
+    *,
+    min_value: float | None,
+    max_value: float | None,
+    min_flag: str,
+    max_flag: str,
+) -> None:
+    if min_value is not None and max_value is not None and min_value > max_value:
+        parser.error(f"{min_flag} cannot be greater than {max_flag}.")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -495,6 +507,27 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--limit-scored-events must be zero or greater.")
         if args.limit_event_groups is not None and args.limit_event_groups < 0:
             parser.error("--limit-event-groups must be zero or greater.")
+        validate_score_range(
+            parser,
+            min_value=args.min_impact_score,
+            max_value=args.max_impact_score,
+            min_flag="--min-impact-score",
+            max_flag="--max-impact-score",
+        )
+        validate_score_range(
+            parser,
+            min_value=args.min_field_attraction,
+            max_value=args.max_field_attraction,
+            min_flag="--min-field-attraction",
+            max_flag="--max-field-attraction",
+        )
+        validate_score_range(
+            parser,
+            min_value=args.min_divergence_score,
+            max_value=args.max_divergence_score,
+            min_flag="--min-divergence-score",
+            max_flag="--max-divergence-score",
+        )
         if args.latest and args.run_id is not None:
             parser.error("Use either --run-id or --latest for history-show, not both.")
         if (args.previous or args.next) and args.run_id is None:
@@ -554,6 +587,27 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--limit-scored-events must be zero or greater.")
         if args.limit_event_groups is not None and args.limit_event_groups < 0:
             parser.error("--limit-event-groups must be zero or greater.")
+        validate_score_range(
+            parser,
+            min_value=args.min_impact_score,
+            max_value=args.max_impact_score,
+            min_flag="--min-impact-score",
+            max_flag="--max-impact-score",
+        )
+        validate_score_range(
+            parser,
+            min_value=args.min_field_attraction,
+            max_value=args.max_field_attraction,
+            min_flag="--min-field-attraction",
+            max_flag="--max-field-attraction",
+        )
+        validate_score_range(
+            parser,
+            min_value=args.min_divergence_score,
+            max_value=args.max_divergence_score,
+            min_flag="--min-divergence-score",
+            max_flag="--max-divergence-score",
+        )
         if args.latest_pair and (
             args.left_run_id is not None
             or args.right_run_id is not None
