@@ -168,6 +168,46 @@ Recommended verification for this slice:
   clearly dominant case such as `6.5 vs 5.8`
 - a clearly dominant case such as `6.5 vs 2.0` should remain stable
 
+## Current Diffuse Mixed-Field Fa Refinement
+
+The current Phase 2 scoring slice now also includes:
+
+- **a bounded diffuse mixed-field penalty inside `Fa` when the top-two margin is already clear**
+
+Intent:
+
+- reduce `field_attraction` modestly for broadly split three-field cases that are
+  not near ties but still retain unusually strong third-field support
+- keep cleaner two-field structures from scoring too close to materially more
+  diffuse mixed-field distributions with the same `Im`
+- preserve the current split where `Fa` remains field-alignment-only and `Im`
+  remains branch-moving force
+
+Constraints implemented in this slice:
+
+- the near-tie penalty remains the primary top-two ambiguity adjustment
+- the new diffuse penalty only applies when the rounded top-two margin is already
+  at least `1.0`
+- the new diffuse penalty is driven by unusually strong third-field support, not
+  by any persistence, history, or grouped context
+- the penalty stays bounded and smaller than the dominant-field base
+
+Current implementation shape:
+
+- cleaner two-field cases with a clear dominant margin still behave like the
+  prior shipped formula
+- when a strong third field remains after the top-two margin is already clear,
+  `Fa` subtracts a small bounded diffuse-support penalty
+- this remains a surgical ambiguity adjustment rather than a broad contradiction
+  model
+
+Recommended verification for this slice:
+
+- paired synthetic-event tests where `Im` inputs stay fixed and the top-two
+  margin remains clear
+- a diffuse three-field case such as `6.5 / 4.9 / 4.8` should score lower `Fa`
+  than a cleaner two-field case such as `6.5 / 4.9 / 0.2`
+
 ## Current Implementation Boundary
 
 - `tianji/scoring.py` owns the explicit `Im` and `Fa` computations for now.

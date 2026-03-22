@@ -34,6 +34,9 @@ FA_COHERENCE_WEIGHT = 0.75
 FA_NEAR_TIE_MARGIN_THRESHOLD = 1.0
 FA_NEAR_TIE_WEIGHT = 0.35
 FA_MAX_NEAR_TIE_PENALTY = 0.3
+FA_DIFFUSE_THIRD_FIELD_THRESHOLD = 2.5
+FA_DIFFUSE_THIRD_FIELD_WEIGHT = 0.08
+FA_MAX_DIFFUSE_THIRD_FIELD_PENALTY = 0.2
 IM_DOMINANT_FIELD_WEIGHT = 0.25
 IM_NONZERO_FIELD_WEIGHT = 0.2
 IM_TEXT_SIGNAL_KEYWORD_WEIGHT = 0.12
@@ -177,6 +180,9 @@ def compute_fa(event: NormalizedEvent, dominant_field_strength: float) -> float:
     second_best_strength = (
         round(ordered_scores[1], 2) if len(ordered_scores) > 1 else 0.0
     )
+    third_best_strength = (
+        round(ordered_scores[2], 2) if len(ordered_scores) > 2 else 0.0
+    )
     total_strength = sum(score for score in event.field_scores.values() if score > 0)
     dominant_margin = max(dominant_field_strength - second_best_strength, 0.0)
 
@@ -193,9 +199,20 @@ def compute_fa(event: NormalizedEvent, dominant_field_strength: float) -> float:
         max(FA_NEAR_TIE_MARGIN_THRESHOLD - dominant_margin, 0.0) * FA_NEAR_TIE_WEIGHT,
         FA_MAX_NEAR_TIE_PENALTY,
     )
+    diffuse_third_field_penalty = 0.0
+    if dominant_margin >= FA_NEAR_TIE_MARGIN_THRESHOLD:
+        diffuse_third_field_penalty = min(
+            max(third_best_strength - FA_DIFFUSE_THIRD_FIELD_THRESHOLD, 0.0)
+            * FA_DIFFUSE_THIRD_FIELD_WEIGHT,
+            FA_MAX_DIFFUSE_THIRD_FIELD_PENALTY,
+        )
 
     return round(
-        dominant_field_strength + margin_bonus + coherence_bonus - near_tie_penalty,
+        dominant_field_strength
+        + margin_bonus
+        + coherence_bonus
+        - near_tie_penalty
+        - diffuse_third_field_penalty,
         2,
     )
 

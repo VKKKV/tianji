@@ -3465,6 +3465,54 @@ class PipelineTests(unittest.TestCase):
             tighter_scored.field_attraction, diffuse_scored.field_attraction
         )
 
+    def test_score_event_penalizes_diffuse_mixed_field_support_in_fa(self) -> None:
+        clearer_two_field_event = NormalizedEvent(
+            event_id="evt-fa-diffuse-clearer",
+            source="fixture:test",
+            title="Shared field structure",
+            summary="Shared field structure summary.",
+            link="https://example.com/fa-diffuse-clearer",
+            published_at="2026-03-22T12:08:34Z",
+            keywords=["chip", "cyber", "controls", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 4.9,
+                "economy": 0.2,
+                "conflict": 0.0,
+            },
+        )
+        diffuse_three_field_event = NormalizedEvent(
+            event_id="evt-fa-diffuse-three-field",
+            source="fixture:test",
+            title="Shared field structure",
+            summary="Shared field structure summary.",
+            link="https://example.com/fa-diffuse-three-field",
+            published_at="2026-03-22T12:08:35Z",
+            keywords=["chip", "cyber", "controls", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.5,
+                "diplomacy": 4.9,
+                "economy": 4.8,
+                "conflict": 0.0,
+            },
+        )
+
+        clearer_scored = score_event(clearer_two_field_event)
+        diffuse_scored = score_event(diffuse_three_field_event)
+
+        self.assertEqual(clearer_scored.impact_score, diffuse_scored.impact_score)
+        self.assertGreaterEqual(
+            clearer_scored.field_attraction - diffuse_scored.field_attraction,
+            0.25,
+        )
+        self.assertGreater(
+            clearer_scored.divergence_score, diffuse_scored.divergence_score
+        )
+
     def test_score_event_applies_actor_weight_inside_im(self) -> None:
         baseline_event = NormalizedEvent(
             event_id="evt-actor-baseline",
