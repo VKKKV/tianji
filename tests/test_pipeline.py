@@ -3377,6 +3377,94 @@ class PipelineTests(unittest.TestCase):
 
         self.assertEqual(clear_scored.field_attraction, 7.66)
 
+    def test_score_event_applies_dominance_margin_inside_fa(self) -> None:
+        narrower_margin_event = NormalizedEvent(
+            event_id="evt-fa-margin-narrow",
+            source="fixture:test",
+            title="Shared field structure",
+            summary="Shared field structure summary.",
+            link="https://example.com/fa-margin-narrow",
+            published_at="2026-03-22T12:08:30Z",
+            keywords=["chip", "cyber", "controls", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.0,
+                "diplomacy": 3.0,
+                "economy": 1.0,
+                "conflict": 0.0,
+            },
+        )
+        wider_margin_event = NormalizedEvent(
+            event_id="evt-fa-margin-wide",
+            source="fixture:test",
+            title="Shared field structure",
+            summary="Shared field structure summary.",
+            link="https://example.com/fa-margin-wide",
+            published_at="2026-03-22T12:08:31Z",
+            keywords=["chip", "cyber", "controls", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.0,
+                "diplomacy": 2.0,
+                "economy": 2.0,
+                "conflict": 0.0,
+            },
+        )
+
+        narrower_scored = score_event(narrower_margin_event)
+        wider_scored = score_event(wider_margin_event)
+
+        self.assertEqual(narrower_scored.impact_score, wider_scored.impact_score)
+        self.assertGreater(
+            wider_scored.field_attraction, narrower_scored.field_attraction
+        )
+
+    def test_score_event_applies_coherence_inside_fa(self) -> None:
+        tighter_coherence_event = NormalizedEvent(
+            event_id="evt-fa-coherence-tight",
+            source="fixture:test",
+            title="Shared field structure",
+            summary="Shared field structure summary.",
+            link="https://example.com/fa-coherence-tight",
+            published_at="2026-03-22T12:08:32Z",
+            keywords=["chip", "cyber", "controls", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.0,
+                "diplomacy": 2.0,
+                "economy": 1.0,
+                "conflict": 0.5,
+            },
+        )
+        more_diffuse_event = NormalizedEvent(
+            event_id="evt-fa-coherence-diffuse",
+            source="fixture:test",
+            title="Shared field structure",
+            summary="Shared field structure summary.",
+            link="https://example.com/fa-coherence-diffuse",
+            published_at="2026-03-22T12:08:33Z",
+            keywords=["chip", "cyber", "controls", "trade"],
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            field_scores={
+                "technology": 6.0,
+                "diplomacy": 2.0,
+                "economy": 1.5,
+                "conflict": 1.0,
+            },
+        )
+
+        tighter_scored = score_event(tighter_coherence_event)
+        diffuse_scored = score_event(more_diffuse_event)
+
+        self.assertEqual(tighter_scored.impact_score, diffuse_scored.impact_score)
+        self.assertGreater(
+            tighter_scored.field_attraction, diffuse_scored.field_attraction
+        )
+
     def test_score_event_applies_actor_weight_inside_im(self) -> None:
         baseline_event = NormalizedEvent(
             event_id="evt-actor-baseline",
