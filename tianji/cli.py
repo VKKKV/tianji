@@ -465,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "history":
+        if args.limit < 0:
+            parser.error("--limit must be zero or greater.")
         if args.min_event_group_count is not None and args.min_event_group_count < 0:
             parser.error("--min-event-group-count must be zero or greater.")
         if args.max_event_group_count is not None and args.max_event_group_count < 0:

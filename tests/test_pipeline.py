@@ -543,6 +543,23 @@ class PipelineTests(unittest.TestCase):
             stderr.getvalue(),
         )
 
+    def test_cli_history_rejects_negative_limit(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--limit",
+                        "-1",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("--limit must be zero or greater.", stderr.getvalue())
+
     def test_cli_history_filters_runs_by_mode_and_dominant_field(self) -> None:
         with TemporaryDirectory() as tmpdir:
             sqlite_path = Path(tmpdir) / "tianji.sqlite3"
