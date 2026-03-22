@@ -21,21 +21,22 @@ def run_pipeline(
     sqlite_path: str | None = None,
 ) -> RunArtifact:
     raw_items: list[RawItem] = []
+    loaded_sources: list[str] = []
 
     for fixture_path in fixture_paths:
+        source = f"fixture:{Path(fixture_path).name}"
         feed_text = read_fixture(fixture_path)
-        raw_items.extend(
-            parse_feed(feed_text, source=f"fixture:{Path(fixture_path).name}")
-        )
+        loaded_sources.append(source)
+        raw_items.extend(parse_feed(feed_text, source=source))
 
     if fetch:
         for source_url in source_urls:
+            source = source_name_from_url(source_url)
             feed_text = fetch_url(source_url)
-            raw_items.extend(
-                parse_feed(feed_text, source=source_name_from_url(source_url))
-            )
+            loaded_sources.append(source)
+            raw_items.extend(parse_feed(feed_text, source=source))
 
-    if not raw_items:
+    if not loaded_sources:
         raise ValueError(
             "No input items were loaded. Provide --fixture and/or --fetch --source-url."
         )
@@ -54,7 +55,7 @@ def run_pipeline(
         input_summary={
             "raw_item_count": len(raw_items),
             "normalized_event_count": len(normalized_events),
-            "sources": sorted({item.source for item in raw_items}),
+            "sources": sorted({item.source for item in raw_items}) if raw_items else [],
         },
         scenario_summary=scenario_summary,
         scored_events=scored_events,

@@ -116,6 +116,62 @@ class PipelineTests(unittest.TestCase):
             "EU opens new negotiation channel after cyber dispute",
         )
 
+    def test_pipeline_emits_empty_artifact_for_empty_rss_feed(self) -> None:
+        empty_feed = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Empty TianJi Feed</title>
+  </channel>
+</rss>
+"""
+
+        with TemporaryDirectory() as tmpdir:
+            fixture_path = Path(tmpdir) / "empty_feed.xml"
+            fixture_path.write_text(empty_feed, encoding="utf-8")
+
+            artifact = run_pipeline(
+                fixture_paths=[str(fixture_path)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+            )
+
+        self.assertEqual(artifact.mode, "fixture")
+        self.assertEqual(artifact.input_summary["raw_item_count"], 0)
+        self.assertEqual(artifact.input_summary["normalized_event_count"], 0)
+        self.assertEqual(artifact.input_summary["sources"], [])
+        self.assertEqual(
+            artifact.scenario_summary["headline"],
+            "No high-signal events were available for inference.",
+        )
+        self.assertEqual(artifact.scenario_summary["dominant_field"], "uncategorized")
+        self.assertEqual(artifact.scenario_summary["risk_level"], "low")
+        self.assertEqual(artifact.scored_events, [])
+        self.assertEqual(artifact.intervention_candidates, [])
+
+    def test_pipeline_emits_empty_artifact_for_empty_atom_feed(self) -> None:
+        empty_feed = """<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Empty Atom Feed</title>
+</feed>
+"""
+
+        with TemporaryDirectory() as tmpdir:
+            fixture_path = Path(tmpdir) / "empty_atom.xml"
+            fixture_path.write_text(empty_feed, encoding="utf-8")
+
+            artifact = run_pipeline(
+                fixture_paths=[str(fixture_path)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+            )
+
+        self.assertEqual(artifact.mode, "fixture")
+        self.assertEqual(artifact.input_summary["raw_item_count"], 0)
+        self.assertEqual(artifact.scored_events, [])
+        self.assertEqual(artifact.intervention_candidates, [])
+
     def test_pipeline_marks_mixed_fixture_and_fetch_mode(self) -> None:
         fixture_bytes = FIXTURE_PATH.read_bytes()
 
