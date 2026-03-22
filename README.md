@@ -163,7 +163,7 @@ The artifact includes:
 
 Persisted run history now exposes both compact run summaries and per-run drill-down over stored scored events and intervention candidates.
 
-History list items now also expose the persisted run's top scored-event identity plus its `impact_score`, `field_attraction`, and `divergence_score`, so operators can query stored runs by the strongest scored branch signal without opening each run individually. These score filters operate on that single persisted top scored event for each run, and runs with no scored events expose `null` top metrics that do not satisfy numeric thresholds. Inverted score windows such as `--min-top-impact-score` greater than `--max-top-impact-score` are rejected at parse time.
+History list items now also expose the persisted run's top scored-event identity plus its `impact_score`, `field_attraction`, and `divergence_score`, so operators can query stored runs by the strongest scored branch signal without opening each run individually. These score filters operate on that single persisted top scored event for each run, and runs with no scored events expose `null` top metrics that do not satisfy numeric thresholds. Negative `--limit` values and inverted score windows such as `--min-top-impact-score` greater than `--max-top-impact-score` are rejected at parse time.
 
 History list items now also expose grouped-run triage fields such as `event_group_count`, `top_event_group_headline_event_id`, `top_event_group_dominant_field`, and `top_event_group_member_count`, so operators can query stored runs by whether grouped scenarios emerged at all and what kind of top group led the run. Runs with no event groups report `event_group_count=0` and `null` top-group fields.
 

@@ -15,12 +15,13 @@ Primary verification command:
 Latest verified state in this session:
 
 - full unittest suite passes
-- current count: `96` tests
+- current count: `97` tests
 - history/history-show/history-compare operator workflows are substantially richer than at the start of the branch
 - Candidate A scoring slice is now shipped: `Im` includes a bounded text-signal-intensity bonus while `Fa` remains field-alignment-only
 - Candidate B has now started in a narrow shipped form: `Fa` includes a bounded near-tie ambiguity penalty when the top two fields nearly tie
 - history-compare parser coverage now includes negative compare limits and mixed-preset misuse, and the CLI rejects explicit-pair ids mixed with `--against-latest` / `--against-previous`
 - inverted score windows are now rejected consistently across `history`, `history-show`, and `history-compare`
+- negative `history --limit` values are now parser-rejected instead of silently changing slice behavior
 
 ## What Ships Now
 
@@ -72,6 +73,7 @@ Latest verified state in this session:
   - top scored-event score filters
   - top event-group dominant-field and event-group count filters
   - grouped-run triage fields in list output
+  - parser rejection for negative list limits
   - parser rejection for inverted top-score windows
 - `history-show` supports:
   - latest / previous / next navigation
