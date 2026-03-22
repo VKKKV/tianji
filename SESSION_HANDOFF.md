@@ -15,13 +15,14 @@ Primary verification command:
 Latest verified state in this session:
 
 - full unittest suite passes
-- current count: `97` tests
+- current count: `100` tests
 - history/history-show/history-compare operator workflows are substantially richer than at the start of the branch
 - Candidate A scoring slice is now shipped: `Im` includes a bounded text-signal-intensity bonus while `Fa` remains field-alignment-only
 - Candidate B has now started in a narrow shipped form: `Fa` includes a bounded near-tie ambiguity penalty when the top two fields nearly tie
 - history-compare parser coverage now includes negative compare limits and mixed-preset misuse, and the CLI rejects explicit-pair ids mixed with `--against-latest` / `--against-previous`
 - inverted score windows are now rejected consistently across `history`, `history-show`, and `history-compare`
 - negative `history --limit` values are now parser-rejected instead of silently changing slice behavior
+- non-positive explicit persisted run ids are now parser-rejected for `history-show` and explicit/preset `history-compare` paths
 
 ## What Ships Now
 
@@ -81,6 +82,7 @@ Latest verified state in this session:
   - scored-event limits
   - optional intervention alignment to visible scored events
   - event-group dominant-field and limit filters
+  - parser rejection for non-positive explicit `--run-id`
   - parser rejection for inverted score windows
 - `history-compare` supports:
   - explicit pair / latest pair / against latest / against previous presets
@@ -88,7 +90,7 @@ Latest verified state in this session:
   - top scored-event score deltas
   - the same scored-event and event-group projection filters as `history-show`
   - compare-side summaries remain summaries, not full `history-show` payloads
-  - parser rejection for inverted compare score windows and mixed preset misuse
+  - parser rejection for non-positive explicit run ids, inverted compare score windows, and mixed preset misuse
 
 ## Important Contracts
 
