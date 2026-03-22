@@ -39,6 +39,7 @@ FA_DIFFUSE_THIRD_FIELD_WEIGHT = 0.08
 FA_MAX_DIFFUSE_THIRD_FIELD_PENALTY = 0.2
 IM_DOMINANT_FIELD_WEIGHT = 0.25
 IM_NONZERO_FIELD_WEIGHT = 0.2
+IM_NONZERO_FIELD_MIN_SCORE = 1.0
 IM_TEXT_SIGNAL_KEYWORD_WEIGHT = 0.12
 IM_TEXT_SIGNAL_TITLE_WEIGHT = 0.2
 IM_TEXT_SIGNAL_SUMMARY_WEIGHT = 0.1
@@ -98,7 +99,11 @@ def compute_im(
     actor_weight = sum(ACTOR_WEIGHTS.get(actor, 0.6) for actor in event.actors)
     region_weight = sum(REGION_WEIGHTS.get(region, 0.5) for region in event.regions)
     keyword_density = min(len(event.keywords) * 0.25, 3.0)
-    nonzero_field_count = sum(1 for score in field_scores.values() if score > 0)
+    nonzero_field_count = sum(
+        1 for score in field_scores.values() if score >= IM_NONZERO_FIELD_MIN_SCORE
+    )
+    if nonzero_field_count == 0 and dominant_field_strength > 0:
+        nonzero_field_count = 1
     evidence_bonus = (dominant_field_strength * IM_DOMINANT_FIELD_WEIGHT) + (
         nonzero_field_count * IM_NONZERO_FIELD_WEIGHT
     )
@@ -167,12 +172,18 @@ def get_text_signal_pattern(keyword: str) -> re.Pattern[str]:
 
 
 def select_dominant_field(event: NormalizedEvent) -> tuple[str, float]:
-    dominant_field, field_strength = max(
-        event.field_scores.items(),
-        key=lambda item: item[1],
-        default=("uncategorized", 0.0),
+    total_strength = sum(score for score in event.field_scores.values() if score > 0)
+    if total_strength <= 0:
+        return "uncategorized", 0.0
+    max_strength = max(event.field_scores.values(), default=0.0)
+    tied_fields = sorted(
+        field_name
+        for field_name, field_strength in event.field_scores.items()
+        if field_strength == max_strength and field_strength > 0
     )
-    return dominant_field, round(field_strength, 2)
+    if not tied_fields:
+        return "uncategorized", 0.0
+    return tied_fields[0], round(max_strength, 2)
 
 
 def compute_fa(event: NormalizedEvent, dominant_field_strength: float) -> float:
@@ -184,6 +195,8 @@ def compute_fa(event: NormalizedEvent, dominant_field_strength: float) -> float:
         round(ordered_scores[2], 2) if len(ordered_scores) > 2 else 0.0
     )
     total_strength = sum(score for score in event.field_scores.values() if score > 0)
+    if total_strength <= 0:
+        return 0.0
     dominant_margin = max(dominant_field_strength - second_best_strength, 0.0)
 
     margin_bonus = min(
@@ -264,7 +277,24 @@ def summarize_scenario(scored_events: list[ScoredEvent]) -> dict[str, object]:
     risk_level = (
         "high" if average_score >= 9 else "medium" if average_score >= 6 else "low"
     )
-    dominant_field = field_counts.most_common(1)[0][0]
+    max_field_count = max(field_counts.values(), default=0)
+    tied_fields = [
+        field_name
+        for field_name, field_count in field_counts.items()
+        if field_count == max_field_count
+    ]
+    best_field_divergence = {
+        field_name: max(
+            event.divergence_score
+            for event in scored_events
+            if event.dominant_field == field_name
+        )
+        for field_name in tied_fields
+    }
+    dominant_field = sorted(
+        tied_fields,
+        key=lambda field_name: (-best_field_divergence[field_name], field_name),
+    )[0]
     headline = (
         f"The strongest current branch is {dominant_field}, driven by "
         f"{top_events[0].title.lower()} and {len(top_events) - 1} additional high-signal events."

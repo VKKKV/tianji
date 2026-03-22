@@ -18,7 +18,7 @@ from tianji.models import NormalizedEvent, ScoredEvent
 from tianji import pipeline as pipeline_module
 from tianji import storage
 from tianji.pipeline import run_pipeline
-from tianji.scoring import score_event
+from tianji.scoring import score_event, summarize_scenario
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_feed.xml"
@@ -3426,6 +3426,191 @@ class PipelineTests(unittest.TestCase):
 
         self.assertEqual(clear_scored.field_attraction, 7.66)
 
+    def test_score_event_treats_zero_field_mass_as_uncategorized(self) -> None:
+        event = NormalizedEvent(
+            event_id="evt-zero-field-mass",
+            source="fixture:test",
+            title="Neutral update without field cues",
+            summary="Officials issue a general process update without branch-specific cues.",
+            link="https://example.com/zero-field-mass",
+            published_at="2026-03-22T12:08:15Z",
+            keywords=["neutral", "update", "officials", "process"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 0.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+
+        scored = score_event(event)
+
+        self.assertEqual(scored.dominant_field, "uncategorized")
+        self.assertEqual(scored.field_attraction, 0.0)
+        self.assertEqual(scored.impact_score, 5.1)
+        self.assertEqual(scored.divergence_score, 3.31)
+        self.assertNotIn("im_text_signal_intensity=0.0", scored.rationale)
+        self.assertIn("dominant_field=uncategorized:0", scored.rationale)
+
+    def test_score_event_zero_field_mass_does_not_produce_negative_fa(self) -> None:
+        uncategorized_event = NormalizedEvent(
+            event_id="evt-zero-field-fa",
+            source="fixture:test",
+            title="Neutral update without field cues",
+            summary="Officials issue a general process update without branch-specific cues.",
+            link="https://example.com/zero-field-fa",
+            published_at="2026-03-22T12:08:16Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 0.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        weakly_categorized_event = NormalizedEvent(
+            event_id="evt-weak-field-fa",
+            source="fixture:test",
+            title="Weak technology cue",
+            summary="A light chip-related update.",
+            link="https://example.com/weak-field-fa",
+            published_at="2026-03-22T12:08:17Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 0.2,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+
+        uncategorized_scored = score_event(uncategorized_event)
+        weakly_categorized_scored = score_event(weakly_categorized_event)
+
+        self.assertGreaterEqual(uncategorized_scored.field_attraction, 0.0)
+        self.assertGreater(
+            weakly_categorized_scored.field_attraction,
+            uncategorized_scored.field_attraction,
+        )
+
+    def test_score_event_exact_top_field_tie_is_order_independent(self) -> None:
+        technology_first_event = NormalizedEvent(
+            event_id="evt-tie-tech-first",
+            source="fixture:test",
+            title="Chip controls and talks advance together",
+            summary="Officials discuss chip controls while talks continue.",
+            link="https://example.com/tie-tech-first",
+            published_at="2026-03-22T12:08:18Z",
+            keywords=["chip", "controls", "talks", "officials"],
+            actors=["usa"],
+            regions=["east-asia"],
+            field_scores={
+                "technology": 6.0,
+                "diplomacy": 6.0,
+                "economy": 1.0,
+                "conflict": 0.0,
+            },
+        )
+        diplomacy_first_event = NormalizedEvent(
+            event_id="evt-tie-diplomacy-first",
+            source="fixture:test",
+            title="Chip controls and talks advance together",
+            summary="Officials discuss chip controls while talks continue.",
+            link="https://example.com/tie-diplomacy-first",
+            published_at="2026-03-22T12:08:19Z",
+            keywords=["chip", "controls", "talks", "officials"],
+            actors=["usa"],
+            regions=["east-asia"],
+            field_scores={
+                "diplomacy": 6.0,
+                "technology": 6.0,
+                "economy": 1.0,
+                "conflict": 0.0,
+            },
+        )
+
+        technology_first_scored = score_event(technology_first_event)
+        diplomacy_first_scored = score_event(diplomacy_first_event)
+
+        self.assertEqual(technology_first_scored.dominant_field, "diplomacy")
+        self.assertEqual(
+            technology_first_scored.dominant_field,
+            diplomacy_first_scored.dominant_field,
+        )
+        self.assertEqual(
+            technology_first_scored.impact_score,
+            diplomacy_first_scored.impact_score,
+        )
+        self.assertEqual(
+            technology_first_scored.field_attraction,
+            diplomacy_first_scored.field_attraction,
+        )
+        self.assertEqual(
+            technology_first_scored.divergence_score,
+            diplomacy_first_scored.divergence_score,
+        )
+        self.assertIn(
+            "dominant_field=diplomacy:6.05", technology_first_scored.rationale
+        )
+        self.assertIn("dominant_field=diplomacy:6.05", diplomacy_first_scored.rationale)
+        self.assertIn(
+            "im_text_signal_intensity=0.42", technology_first_scored.rationale
+        )
+        self.assertIn("im_text_signal_intensity=0.42", diplomacy_first_scored.rationale)
+
+    def test_summarize_scenario_resolves_dominant_field_ties_independently_of_event_order(
+        self,
+    ) -> None:
+        diplomacy_event = ScoredEvent(
+            event_id="evt-summary-diplomacy",
+            title="Diplomatic channel hardens",
+            source="fixture:test",
+            link="https://example.com/summary-diplomacy",
+            published_at="2026-03-22T12:08:20Z",
+            actors=["usa"],
+            regions=["east-asia"],
+            keywords=["talks", "sanction"],
+            dominant_field="diplomacy",
+            impact_score=10.0,
+            field_attraction=5.0,
+            divergence_score=13.25,
+            rationale=["Im=10.0", "Fa=5.0", "dominant_field=diplomacy:5.0"],
+        )
+        technology_event = ScoredEvent(
+            event_id="evt-summary-technology",
+            title="Technology channel hardens",
+            source="fixture:test",
+            link="https://example.com/summary-technology",
+            published_at="2026-03-22T12:08:21Z",
+            actors=["china"],
+            regions=["united-states"],
+            keywords=["chip", "cyber"],
+            dominant_field="technology",
+            impact_score=10.0,
+            field_attraction=5.0,
+            divergence_score=13.25,
+            rationale=["Im=10.0", "Fa=5.0", "dominant_field=technology:5.0"],
+        )
+
+        diplomacy_first_summary = summarize_scenario(
+            [diplomacy_event, technology_event]
+        )
+        technology_first_summary = summarize_scenario(
+            [technology_event, diplomacy_event]
+        )
+
+        self.assertEqual(
+            diplomacy_first_summary["dominant_field"],
+            technology_first_summary["dominant_field"],
+        )
+        self.assertEqual(diplomacy_first_summary["dominant_field"], "diplomacy")
+
     def test_score_event_applies_dominance_margin_inside_fa(self) -> None:
         narrower_margin_event = NormalizedEvent(
             event_id="evt-fa-margin-narrow",
@@ -3502,7 +3687,7 @@ class PipelineTests(unittest.TestCase):
                 "technology": 6.0,
                 "diplomacy": 2.0,
                 "economy": 1.5,
-                "conflict": 1.0,
+                "conflict": 0.5,
             },
         )
 
@@ -3528,7 +3713,7 @@ class PipelineTests(unittest.TestCase):
             field_scores={
                 "technology": 6.5,
                 "diplomacy": 4.9,
-                "economy": 0.2,
+                "economy": 1.0,
                 "conflict": 0.0,
             },
         )
@@ -3816,13 +4001,13 @@ class PipelineTests(unittest.TestCase):
             places=2,
         )
 
-    def test_score_event_applies_nonzero_field_count_inside_im(self) -> None:
-        lower_count_event = NormalizedEvent(
-            event_id="evt-nonzero-low",
+    def test_score_event_ignores_subthreshold_field_noise_inside_im(self) -> None:
+        baseline_event = NormalizedEvent(
+            event_id="evt-nonzero-baseline",
             source="fixture:test",
             title="Neutral update",
             summary="Neutral summary language.",
-            link="https://example.com/nonzero-low",
+            link="https://example.com/nonzero-baseline",
             published_at="2026-03-22T12:17:00Z",
             keywords=["neutral", "update", "brief"],
             actors=["observer"],
@@ -3834,12 +4019,12 @@ class PipelineTests(unittest.TestCase):
                 "conflict": 0.0,
             },
         )
-        higher_count_event = NormalizedEvent(
-            event_id="evt-nonzero-high",
+        noisy_extra_field_event = NormalizedEvent(
+            event_id="evt-nonzero-noisy",
             source="fixture:test",
             title="Neutral update",
             summary="Neutral summary language.",
-            link="https://example.com/nonzero-high",
+            link="https://example.com/nonzero-noisy",
             published_at="2026-03-22T12:18:00Z",
             keywords=["neutral", "update", "brief"],
             actors=["observer"],
@@ -3852,11 +4037,52 @@ class PipelineTests(unittest.TestCase):
             },
         )
 
-        lower_scored = score_event(lower_count_event)
-        higher_scored = score_event(higher_count_event)
+        baseline_scored = score_event(baseline_event)
+        noisy_scored = score_event(noisy_extra_field_event)
+
+        self.assertEqual(baseline_scored.impact_score, noisy_scored.impact_score)
+
+    def test_score_event_rewards_meaningful_field_diversity_inside_im(self) -> None:
+        baseline_event = NormalizedEvent(
+            event_id="evt-nonzero-threshold-baseline",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/nonzero-threshold-baseline",
+            published_at="2026-03-22T12:18:30Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 0.0,
+                "economy": 0.0,
+                "conflict": 0.0,
+            },
+        )
+        meaningful_extra_field_event = NormalizedEvent(
+            event_id="evt-nonzero-threshold-meaningful",
+            source="fixture:test",
+            title="Neutral update",
+            summary="Neutral summary language.",
+            link="https://example.com/nonzero-threshold-meaningful",
+            published_at="2026-03-22T12:19:00Z",
+            keywords=["neutral", "update", "brief"],
+            actors=["observer"],
+            regions=["unknown-region"],
+            field_scores={
+                "technology": 4.0,
+                "diplomacy": 1.0,
+                "economy": 1.0,
+                "conflict": 0.0,
+            },
+        )
+
+        baseline_scored = score_event(baseline_event)
+        meaningful_scored = score_event(meaningful_extra_field_event)
 
         self.assertAlmostEqual(
-            higher_scored.impact_score - lower_scored.impact_score,
+            meaningful_scored.impact_score - baseline_scored.impact_score,
             0.4,
             places=2,
         )
