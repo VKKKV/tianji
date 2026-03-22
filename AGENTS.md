@@ -27,6 +27,8 @@ tianji/
 | Understand orchestration | `tianji/pipeline.py` | Stage spine for the owned MVP |
 | Understand data model | `tianji/models.py` | Raw item -> normalized event -> scored event -> artifact |
 | Change ingestion | `tianji/fetch.py` | RSS/Atom fixture loading and one-time URL fetch |
+| Change source selection | `tianji/cli.py` | Source registry parsing and URL selection live here today |
+| Change persistence | `tianji/storage.py` | Optional SQLite persistence boundary |
 | Change heuristics | `tianji/normalize.py`, `tianji/scoring.py`, `tianji/backtrack.py` | Deterministic first |
 | Verify changes | `tests/test_pipeline.py`, `tests/fixtures/sample_feed.xml` | Local fixture + local HTTP server |
 | Plan future divergence ideas | `DivergenceMeter/`, `DEV_PLAN.md` | Use as concept source, not owned runtime |
@@ -49,6 +51,7 @@ tianji/
 - Prefer module execution: `python3 -m tianji`.
 - Python 3.12+; stdlib-first; no heavy framework implied by current code.
 - Verification is `unittest`-based even though `pyproject.toml` includes a minimal pytest stanza.
+- Current CLI also supports `--source-config`, `--source-name`, and `--sqlite-path`.
 - `runs/` contains generated artifacts and is not source.
 - `worldmonitor/`, `oh-my-openagent/`, `MiroFish/`, and `DivergenceMeter/` are workspace references, not the default edit target.
 
@@ -57,7 +60,7 @@ tianji/
 - Do not design for daemon/IPC/web UI before the one-shot flow stays correct.
 - Do not replace deterministic logic with opaque model-driven behavior prematurely.
 - Do not add cloud-required dependencies to the owned MVP.
-- Do not bypass CLI input rules: no run without `--fixture` or `--fetch --source-url`.
+- Do not bypass CLI input rules: no run without `--fixture` or `--fetch` plus at least one resolved source.
 
 ## UNIQUE STYLES
 - Flat owned package: `fetch.py`, `normalize.py`, `scoring.py`, `backtrack.py`, `pipeline.py` stay as explicit stages.
@@ -74,6 +77,7 @@ tianji/
 ```bash
 python3 -m tianji run --fixture tests/fixtures/sample_feed.xml
 python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/latest-run.json
+python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
 python3 -m tianji run --fetch --source-url https://example.com/feed.xml
 python3 -m unittest discover -s tests -v
 ```

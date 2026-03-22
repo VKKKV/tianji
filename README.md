@@ -12,10 +12,13 @@ It supports:
 
 - loading one or more local RSS/Atom fixtures
 - optionally fetching one or more live feeds once
+- loading named fetch targets from a JSON source registry
 - normalizing events into a deterministic internal model
 - scoring events with rule-based divergence-style heuristics
 - producing ranked intervention candidates
 - writing a structured JSON artifact
+- optionally persisting runs to local SQLite
+- surfacing clean CLI errors for malformed feeds and failed fetches
 
 This keeps the first version testable, local, and reproducible.
 
@@ -37,6 +40,33 @@ python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/lat
 
 ```bash
 python3 -m tianji run --fetch --source-url https://example.com/feed.xml
+```
+
+### Run with optional SQLite persistence
+
+```bash
+python3 -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
+```
+
+### Run with a source registry
+
+Create a JSON file shaped like:
+
+```json
+{
+  "sources": [
+    {
+      "name": "example-feed",
+      "url": "https://example.com/feed.xml"
+    }
+  ]
+}
+```
+
+Then run:
+
+```bash
+python3 -m tianji run --fetch --source-config /path/to/sources.json --source-name example-feed
 ```
 
 ### Run tests
@@ -64,12 +94,16 @@ The current MVP flow is:
 5. **Emit Artifact**  
    Write a JSON report with input summary, scenario summary, scored events, and intervention candidates.
 
+6. **Persist Run (Optional)**  
+   Store run metadata plus raw, normalized, scored, and intervention rows in SQLite when `--sqlite-path` is provided.
+
 ## Output Artifact
 
 By default, the CLI writes to `runs/latest-run.json`.
 
 The artifact includes:
 
+- `schema_version`: stable top-level artifact contract version
 - `input_summary`: item counts and source list
 - `scenario_summary`: dominant field, top actors, top regions, risk level, and a short headline
 - `scored_events`: normalized events with impact score, field attraction, divergence score, and rationale
@@ -98,7 +132,7 @@ The artifact includes:
 
 - **Language:** Python first, to keep the MVP small and fast to iterate
 - **Style:** stdlib-first, deterministic where possible
-- **Verification:** fixture-first tests plus an optional fetch path
+- **Verification:** fixture-first tests plus fetch, Atom, mixed-input, config, and failure-path coverage
 - **Current scope:** one-shot execution only; no daemon, scheduler, IPC bus, or web UI yet
 
 ## Long-Term Vision
@@ -130,14 +164,17 @@ These are reference inputs, not part of the initial TianJi repo history.
 - one-shot CLI
 - local fixture-first execution
 - optional one-time live fetch
+- config-driven source registry
+- optional SQLite persistence
 - deterministic scoring and backtracking JSON report
+- schema-versioned artifacts
+- hardened input and fetch failure handling
 
 ### Next
 
-- SQLite persistence for raw and normalized events
-- configurable source list
 - more formalized `Im` / `Fa`-style scoring model
 - richer backtracking and causal grouping
+- run-history inspection commands over persisted SQLite data
 
 ### Later
 

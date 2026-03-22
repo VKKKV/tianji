@@ -24,13 +24,19 @@ TianJi should grow in this order:
 
 Goal: turn the current MVP into a dependable local tool.
 
-Deliverables:
+Shipped in the current branch:
 
 - configurable source list instead of only ad hoc CLI URLs
 - SQLite persistence for raw items, normalized events, and run artifacts
 - stable artifact schema versioning
 - more explicit error handling for malformed feeds and fetch failures
-- broader deterministic tests for RSS, Atom, mixed-source runs, and empty-input edge cases
+- broader deterministic tests for RSS, Atom, mixed-source runs, and core config/error branches
+
+Still open before Phase 1 is fully closed:
+
+- explicit no-signal / empty-valid-feed handling path
+- run-history inspection command on top of persisted SQLite data
+- final doc/examples pass whenever the CLI surface changes again
 
 Exit criteria:
 
@@ -152,12 +158,12 @@ Retirement trigger:
 
 ## Immediate Backlog
 
-1. add SQLite storage
-2. add source config file and source registry
-3. expand deterministic scoring and backtracking tests
-4. define first-party TianJi `Im` / `Fa` spec
-5. add run-history inspection command
-6. draft the future local API contract that a web UI would consume
+1. define first-party TianJi `Im` / `Fa` spec
+2. add run-history inspection command
+3. formalize richer event grouping and causal clustering
+4. draft the future local API contract that a web UI would consume
+5. add explicit empty-valid-feed / no-signal handling semantics
+6. document the first persisted-run query workflow
 
 ## Guardrails
 
