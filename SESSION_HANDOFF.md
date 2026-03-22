@@ -15,7 +15,7 @@ Primary verification command:
 Latest verified state in this session:
 
 - full unittest suite passes
-- current count: `110` tests
+- current count: `112` tests
 - history/history-show/history-compare operator workflows are substantially richer than at the start of the branch
 - Candidate A scoring slice is now shipped: `Im` includes a bounded text-signal-intensity bonus while `Fa` remains field-alignment-only
 - Candidate B has now advanced through two narrow shipped refinements: `Fa` includes a bounded near-tie ambiguity penalty when the top two fields nearly tie and a bounded diffuse mixed-field penalty when a strong third field remains after the top-two margin is already clear
@@ -24,6 +24,7 @@ Latest verified state in this session:
 - negative `history --limit` values are now parser-rejected instead of silently changing slice behavior
 - non-positive explicit persisted run ids are now parser-rejected for `history-show` and explicit/preset `history-compare` paths
 - scoring coverage now includes isolated `Im` tests for actor weighting, region weighting, raw keyword-density cap behavior, dominant-field-strength bonus behavior, nonzero-field-count bonus behavior, direct text-signal surface contributions, and isolated `Fa` tests for dominance-margin and coherence behavior
+- `Fa` threshold-boundary coverage now explicitly pins both ambiguity gates: the near-tie penalty starts below the `1.0` top-two margin threshold and the diffuse-third-field penalty starts above the `2.5` third-field threshold
 
 ## What Ships Now
 
@@ -211,6 +212,8 @@ Current scoring-focused tests worth reading first:
 - `test_score_event_applies_dominance_margin_inside_fa`
 - `test_score_event_applies_coherence_inside_fa`
 - `test_score_event_penalizes_diffuse_mixed_field_support_in_fa`
+- `test_score_event_near_tie_penalty_starts_below_margin_threshold`
+- `test_score_event_diffuse_third_field_penalty_starts_above_threshold`
 - `test_score_event_rewards_clearer_field_alignment_in_fa`
 - `test_score_event_penalizes_near_tie_field_alignment_in_fa`
 - `test_score_event_keeps_clear_field_alignment_semantics_stable`

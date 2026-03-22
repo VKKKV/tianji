@@ -748,6 +748,9 @@ Current status after the first Candidate B slice:
   windows are now parser-rejected across the read-only operator surface
 - additive `Im` terms and direct text-signal bonus surfaces now have explicit
   isolation coverage in `tests/test_pipeline.py`
+- the current `Fa` ambiguity rules now also have threshold-boundary regression
+  coverage for the `< 1.0` near-tie gate and the `> 2.5` diffuse-third-field
+  gate
 - the next likely useful work is now either a further narrow `Fa` refinement only
   if a new concrete mixed-field case still escapes the current ambiguity rules,
   or a return to pure scoring-model depth inside `Im`
