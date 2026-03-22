@@ -477,6 +477,72 @@ class PipelineTests(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload, [])
 
+    def test_cli_history_rejects_inverted_top_impact_score_range(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--min-top-impact-score",
+                        "5",
+                        "--max-top-impact-score",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-top-impact-score cannot be greater than --max-top-impact-score.",
+            stderr.getvalue(),
+        )
+
+    def test_cli_history_rejects_inverted_top_field_attraction_range(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--min-top-field-attraction",
+                        "5",
+                        "--max-top-field-attraction",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-top-field-attraction cannot be greater than --max-top-field-attraction.",
+            stderr.getvalue(),
+        )
+
+    def test_cli_history_rejects_inverted_top_divergence_score_range(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as error:
+                main(
+                    [
+                        "history",
+                        "--sqlite-path",
+                        "runs/tianji.sqlite3",
+                        "--min-top-divergence-score",
+                        "5",
+                        "--max-top-divergence-score",
+                        "4",
+                    ]
+                )
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "--min-top-divergence-score cannot be greater than --max-top-divergence-score.",
+            stderr.getvalue(),
+        )
+
     def test_cli_history_filters_runs_by_mode_and_dominant_field(self) -> None:
         with TemporaryDirectory() as tmpdir:
             sqlite_path = Path(tmpdir) / "tianji.sqlite3"

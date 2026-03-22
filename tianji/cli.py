@@ -469,6 +469,27 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--min-event-group-count must be zero or greater.")
         if args.max_event_group_count is not None and args.max_event_group_count < 0:
             parser.error("--max-event-group-count must be zero or greater.")
+        validate_score_range(
+            parser,
+            min_value=args.min_top_impact_score,
+            max_value=args.max_top_impact_score,
+            min_flag="--min-top-impact-score",
+            max_flag="--max-top-impact-score",
+        )
+        validate_score_range(
+            parser,
+            min_value=args.min_top_field_attraction,
+            max_value=args.max_top_field_attraction,
+            min_flag="--min-top-field-attraction",
+            max_flag="--max-top-field-attraction",
+        )
+        validate_score_range(
+            parser,
+            min_value=args.min_top_divergence_score,
+            max_value=args.max_top_divergence_score,
+            min_flag="--min-top-divergence-score",
+            max_flag="--max-top-divergence-score",
+        )
         if (
             args.min_event_group_count is not None
             and args.max_event_group_count is not None
