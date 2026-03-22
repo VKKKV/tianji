@@ -4,6 +4,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+RUN_ARTIFACT_SCHEMA_VERSION = "tianji.run-artifact.v1"
+
+
 @dataclass(slots=True)
 class RawItem:
     source: str
@@ -65,6 +68,7 @@ class RunArtifact:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": RUN_ARTIFACT_SCHEMA_VERSION,
             "mode": self.mode,
             "generated_at": self.generated_at,
             "input_summary": self.input_summary,

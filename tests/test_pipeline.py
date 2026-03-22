@@ -27,12 +27,16 @@ class PipelineTests(unittest.TestCase):
 
             self.assertTrue(output_path.exists())
             payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema_version"], "tianji.run-artifact.v1")
             self.assertEqual(payload["mode"], "fixture")
             self.assertEqual(payload["input_summary"]["raw_item_count"], 3)
             self.assertGreater(len(payload["scored_events"]), 0)
             self.assertGreater(len(payload["intervention_candidates"]), 0)
             self.assertIn("headline", payload["scenario_summary"])
             self.assertEqual(len(artifact.scored_events), 3)
+            self.assertEqual(
+                artifact.to_dict()["schema_version"], "tianji.run-artifact.v1"
+            )
 
     def test_fetch_pipeline_can_read_from_local_http_server(self) -> None:
         fixture_bytes = FIXTURE_PATH.read_bytes()
