@@ -693,7 +693,7 @@ def format_status_footer(state: HistoryListState, width: int) -> str:
     right_parts = []
     if compare_state:
         right_parts.append(compare_state)
-    if lens_state != "lenses:all":
+    if lens_state != "lens:all-runs":
         right_parts.append(f"VIEW {lens_state.upper()}")
     if zoom:
         right_parts.append(zoom)

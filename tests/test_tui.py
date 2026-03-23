@@ -556,6 +556,7 @@ class TuiTests(unittest.TestCase):
         self.assertIn("id:10", footer)
         self.assertIn("[first]", footer)
         self.assertIn("LIST", footer)
+        self.assertNotIn("VIEW LENS", footer)
         self.assertNotIn("ZOOM", footer)
         self.assertNotIn("COMPARE", footer)
 
