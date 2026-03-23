@@ -1,0 +1,45 @@
+LSP diagnostics
+- tianji/tui.py: No diagnostics found
+- tests/test_tui.py: No diagnostics found
+
+Test command
+- python -m unittest discover -s tests -p "test_tui.py" -v
+
+Result
+test_build_compare_panel_title_shows_pairing (test_tui.TuiTests.test_build_compare_panel_title_shows_pairing) ... ok
+test_build_compare_panel_title_shows_scroll_indicator (test_tui.TuiTests.test_build_compare_panel_title_shows_scroll_indicator) ... ok
+test_build_detail_panel_passes_active_lens_kwargs (test_tui.TuiTests.test_build_detail_panel_passes_active_lens_kwargs) ... ok
+test_build_detail_panel_treats_filtered_empty_projection_as_valid_detail (test_tui.TuiTests.test_build_detail_panel_treats_filtered_empty_projection_as_valid_detail) ... ok
+test_cli_tui_dispatches_to_history_browser (test_tui.TuiTests.test_cli_tui_dispatches_to_history_browser) ... ok
+test_cli_tui_rejects_negative_limit (test_tui.TuiTests.test_cli_tui_rejects_negative_limit) ... ok
+test_format_compare_detail_includes_core_fields (test_tui.TuiTests.test_format_compare_detail_includes_core_fields) ... ok
+test_format_delta_handles_none (test_tui.TuiTests.test_format_delta_handles_none) ... ok
+test_format_history_row_includes_core_fields_and_truncates_headline (test_tui.TuiTests.test_format_history_row_includes_core_fields_and_truncates_headline) ... ok
+test_format_run_detail_includes_core_fields (test_tui.TuiTests.test_format_run_detail_includes_core_fields) ... ok
+test_format_run_detail_limits_event_group_preview_and_truncates_summaries (test_tui.TuiTests.test_format_run_detail_limits_event_group_preview_and_truncates_summaries) ... ok
+test_format_run_detail_limits_intervention_preview_and_truncates_effects (test_tui.TuiTests.test_format_run_detail_limits_intervention_preview_and_truncates_effects) ... ok
+test_format_run_detail_limits_scored_event_preview_and_truncates_titles (test_tui.TuiTests.test_format_run_detail_limits_scored_event_preview_and_truncates_titles) ... ok
+test_format_status_footer_shows_bounds_and_state (test_tui.TuiTests.test_format_status_footer_shows_bounds_and_state) ... ok
+test_format_top_group_evidence_diff_lines_comparable (test_tui.TuiTests.test_format_top_group_evidence_diff_lines_comparable) ... ok
+test_format_top_group_evidence_diff_lines_contrast (test_tui.TuiTests.test_format_top_group_evidence_diff_lines_contrast) ... ok
+test_get_compare_similarity_summary_high_similarity (test_tui.TuiTests.test_get_compare_similarity_summary_high_similarity) ... ok
+test_get_compare_similarity_summary_identical (test_tui.TuiTests.test_get_compare_similarity_summary_identical) ... ok
+test_get_compare_similarity_summary_major_changes (test_tui.TuiTests.test_get_compare_similarity_summary_major_changes) ... ok
+test_history_list_state_compare_transitions (test_tui.TuiTests.test_history_list_state_compare_transitions) ... ok
+test_history_list_state_compare_transitions_single_run (test_tui.TuiTests.test_history_list_state_compare_transitions_single_run) ... ok
+test_history_list_state_keeps_selection_visible_when_scrolling (test_tui.TuiTests.test_history_list_state_keeps_selection_visible_when_scrolling) ... ok
+test_history_list_state_scrolls_detail_pane (test_tui.TuiTests.test_history_list_state_scrolls_detail_pane) ... ok
+test_history_list_state_sets_transient_messages_on_bounds (test_tui.TuiTests.test_history_list_state_sets_transient_messages_on_bounds) ... ok
+test_history_list_state_step_compare_target_skips_left_run (test_tui.TuiTests.test_history_list_state_step_compare_target_skips_left_run) ... ok
+test_history_list_state_step_compare_target_stays_in_bounds (test_tui.TuiTests.test_history_list_state_step_compare_target_stays_in_bounds) ... ok
+test_history_list_state_step_run_stays_in_bounds (test_tui.TuiTests.test_history_list_state_step_run_stays_in_bounds) ... ok
+test_history_list_state_steps_runs_and_resets_detail_scroll (test_tui.TuiTests.test_history_list_state_steps_runs_and_resets_detail_scroll) ... ok
+test_history_list_state_toggles_focus_and_zoom (test_tui.TuiTests.test_history_list_state_toggles_focus_and_zoom) ... ok
+test_launch_history_tui_prints_empty_state_without_browser (test_tui.TuiTests.test_launch_history_tui_prints_empty_state_without_browser) ... ok
+test_launch_history_tui_uses_browser_for_available_runs (test_tui.TuiTests.test_launch_history_tui_uses_browser_for_available_runs) ... ok
+test_wrap_text_splits_long_lines (test_tui.TuiTests.test_wrap_text_splits_long_lines) ... ok
+
+----------------------------------------------------------------------
+Ran 32 tests in 0.004s
+
+OK

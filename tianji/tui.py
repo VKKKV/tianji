@@ -14,6 +14,22 @@ from rich.text import Text
 from .storage import list_runs, get_run_summary, compare_runs
 
 
+LENS_DOMINANT_FIELD_VALUES = (
+    "conflict",
+    "diplomacy",
+    "economy",
+    "technology",
+)
+LENS_LIMIT_VALUES = (1, 3, 5)
+LENS_KEY_BINDINGS = {
+    "a": "dominant_field",
+    "s": "limit_scored_events",
+    "d": "group_dominant_field",
+    "f": "limit_event_groups",
+    "v": "only_matching_interventions",
+}
+
+
 @dataclass(slots=True)
 class HistoryListState:
     rows: list[dict[str, object]]
@@ -21,6 +37,7 @@ class HistoryListState:
     selected_index: int = 0
     scroll_offset: int = 0
     cached_detail_run_id: int | None = None
+    cached_detail_lens_key: tuple[object, ...] | None = None
     cached_detail_lines: list[str] | None = None
     show_help: bool = False
     focused_pane: str = "list"
@@ -30,7 +47,83 @@ class HistoryListState:
     staged_compare_left_run_id: int | None = None
     active_view: str = "detail"
     cached_compare_right_run_id: int | None = None
+    cached_compare_lens_key: tuple[object, ...] | None = None
     cached_compare_lines: list[str] | None = None
+    dominant_field: str | None = None
+    limit_scored_events: int | None = None
+    group_dominant_field: str | None = None
+    limit_event_groups: int | None = None
+    only_matching_interventions: bool = False
+
+    def invalidate_projected_panes(self) -> None:
+        self.cached_detail_run_id = None
+        self.cached_detail_lines = None
+        self.cached_compare_right_run_id = None
+        self.cached_compare_lens_key = None
+        self.cached_compare_lines = None
+        self.detail_scroll_offset = 0
+
+    def active_lens_key(self) -> tuple[object, ...]:
+        return (
+            self.dominant_field,
+            self.limit_scored_events,
+            self.group_dominant_field,
+            self.limit_event_groups,
+            self.only_matching_interventions,
+        )
+
+    def _cycle_nullable_str(
+        self, current: str | None, values: tuple[str, ...]
+    ) -> str | None:
+        sequence: tuple[str | None, ...] = (None, *values)
+        try:
+            index = sequence.index(current)
+        except ValueError:
+            index = 0
+        return sequence[(index + 1) % len(sequence)]
+
+    def _cycle_nullable_int(
+        self, current: int | None, values: tuple[int, ...]
+    ) -> int | None:
+        sequence: tuple[int | None, ...] = (None, *values)
+        try:
+            index = sequence.index(current)
+        except ValueError:
+            index = 0
+        return sequence[(index + 1) % len(sequence)]
+
+    def cycle_dominant_field_lens(self) -> str | None:
+        self.dominant_field = self._cycle_nullable_str(
+            self.dominant_field, LENS_DOMINANT_FIELD_VALUES
+        )
+        self.invalidate_projected_panes()
+        return self.dominant_field
+
+    def cycle_group_dominant_field_lens(self) -> str | None:
+        self.group_dominant_field = self._cycle_nullable_str(
+            self.group_dominant_field, LENS_DOMINANT_FIELD_VALUES
+        )
+        self.invalidate_projected_panes()
+        return self.group_dominant_field
+
+    def cycle_limit_scored_events_lens(self) -> int | None:
+        self.limit_scored_events = self._cycle_nullable_int(
+            self.limit_scored_events, LENS_LIMIT_VALUES
+        )
+        self.invalidate_projected_panes()
+        return self.limit_scored_events
+
+    def cycle_limit_event_groups_lens(self) -> int | None:
+        self.limit_event_groups = self._cycle_nullable_int(
+            self.limit_event_groups, LENS_LIMIT_VALUES
+        )
+        self.invalidate_projected_panes()
+        return self.limit_event_groups
+
+    def toggle_only_matching_interventions(self) -> bool:
+        self.only_matching_interventions = not self.only_matching_interventions
+        self.invalidate_projected_panes()
+        return self.only_matching_interventions
 
     def _find_nearest_valid_compare_target_index(self) -> int | None:
         if not self.rows or len(self.rows) < 2:
@@ -132,22 +225,14 @@ class HistoryListState:
         if not self.rows:
             self.selected_index = 0
             self.scroll_offset = 0
-            self.detail_scroll_offset = 0
-            self.cached_detail_run_id = None
-            self.cached_detail_lines = None
-            self.cached_compare_right_run_id = None
-            self.cached_compare_lines = None
+            self.invalidate_projected_panes()
             return
         next_index = min(max(self.selected_index + delta, 0), len(self.rows) - 1)
         if next_index == self.selected_index and delta != 0:
             self.message = "first run" if delta < 0 else "last run"
         elif next_index != self.selected_index:
             self.selected_index = next_index
-            self.detail_scroll_offset = 0
-            self.cached_detail_run_id = None
-            self.cached_detail_lines = None
-            self.cached_compare_right_run_id = None
-            self.cached_compare_lines = None
+            self.invalidate_projected_panes()
         self.ensure_selection_visible(page_size=page_size)
 
     def step_compare_target(self, delta: int, *, page_size: int) -> None:
@@ -165,9 +250,7 @@ class HistoryListState:
             if run_id == self.staged_compare_left_run_id:
                 continue
             self.selected_index = next_index
-            self.detail_scroll_offset = 0
-            self.cached_compare_right_run_id = None
-            self.cached_compare_lines = None
+            self.invalidate_projected_panes()
             self.ensure_selection_visible(page_size=page_size)
             break
 
@@ -256,6 +339,36 @@ def run_history_list_browser(state: HistoryListState) -> None:
             if key == "C":
                 state.clear_compare()
                 continue
+            if key == "a":
+                dominant_field = state.cycle_dominant_field_lens()
+                state.message = format_lens_change_message(
+                    "event field lens", dominant_field or "all"
+                )
+                continue
+            if key == "s":
+                limit_scored_events = state.cycle_limit_scored_events_lens()
+                state.message = format_lens_change_message(
+                    "scored-event limit", str(limit_scored_events or "all")
+                )
+                continue
+            if key == "d":
+                group_dominant_field = state.cycle_group_dominant_field_lens()
+                state.message = format_lens_change_message(
+                    "group field lens", group_dominant_field or "all"
+                )
+                continue
+            if key == "f":
+                limit_event_groups = state.cycle_limit_event_groups_lens()
+                state.message = format_lens_change_message(
+                    "group limit", str(limit_event_groups or "all")
+                )
+                continue
+            if key == "v":
+                only_matching = state.toggle_only_matching_interventions()
+                state.message = format_lens_change_message(
+                    "matching interventions", "on" if only_matching else "off"
+                )
+                continue
             if key in ("z", "\r", "\n"):
                 state.zoomed = not state.zoomed
                 state.message = "zoom on" if state.zoomed else "zoom off"
@@ -329,19 +442,31 @@ def build_compare_panel(state: HistoryListState, width: int, page_size: int) -> 
         if right_run_id == state.staged_compare_left_run_id:
             content = Text("Cannot compare a run with itself.\nSelect a different run.")
         else:
-            if state.cached_compare_right_run_id != right_run_id:
+            compare_lens_key = state.active_lens_key()
+            if (
+                state.cached_compare_right_run_id != right_run_id
+                or state.cached_compare_lens_key != compare_lens_key
+            ):
                 compare_result = compare_runs(
                     sqlite_path=state.sqlite_path,
                     left_run_id=state.staged_compare_left_run_id,
                     right_run_id=right_run_id,
+                    dominant_field=state.dominant_field,
+                    limit_scored_events=state.limit_scored_events,
+                    group_dominant_field=state.group_dominant_field,
+                    limit_event_groups=state.limit_event_groups,
+                    only_matching_interventions=state.only_matching_interventions,
                 )
                 if compare_result:
                     state.cached_compare_lines = format_compare_detail(
                         compare_result, width=inner_width
                     )
                 else:
-                    state.cached_compare_lines = ["Compare details not found."]
+                    state.cached_compare_lines = [
+                        format_projected_empty_message(state, subject="compare")
+                    ]
                 state.cached_compare_right_run_id = right_run_id
+                state.cached_compare_lens_key = compare_lens_key
                 state.detail_scroll_offset = 0
 
             if state.cached_compare_lines:
@@ -380,7 +505,8 @@ def build_layout(
     )
 
     status_line = (
-        " TianJi | j/k move | h/l focus | [/] step | Tab/Enter zoom | ? help | q quit "
+        " TianJi | j/k move | h/l focus | [/] step | a/s/d/f/v lens view"
+        f" | {format_active_lens_summary(state)} | Tab/Enter zoom | ? help | q quit "
     )
     layout["header"].update(Text(status_line.ljust(width), style="reverse"))
 
@@ -449,15 +575,30 @@ def build_detail_panel(state: HistoryListState, width: int, page_size: int) -> P
     else:
         selected_row = state.rows[state.selected_index]
         run_id = coerce_int(selected_row.get("run_id"))
-        if state.cached_detail_run_id != run_id:
-            summary = get_run_summary(sqlite_path=state.sqlite_path, run_id=run_id)
+        detail_lens_key = state.active_lens_key()
+        if (
+            state.cached_detail_run_id != run_id
+            or state.cached_detail_lens_key != detail_lens_key
+        ):
+            summary = get_run_summary(
+                sqlite_path=state.sqlite_path,
+                run_id=run_id,
+                dominant_field=state.dominant_field,
+                limit_scored_events=state.limit_scored_events,
+                group_dominant_field=state.group_dominant_field,
+                limit_event_groups=state.limit_event_groups,
+                only_matching_interventions=state.only_matching_interventions,
+            )
             if summary:
                 state.cached_detail_lines = format_run_detail(
                     summary, width=inner_width
                 )
             else:
-                state.cached_detail_lines = ["Run details not found."]
+                state.cached_detail_lines = [
+                    format_projected_empty_message(state, subject="detail")
+                ]
             state.cached_detail_run_id = run_id
+            state.cached_detail_lens_key = detail_lens_key
             state.detail_scroll_offset = 0
 
         if state.cached_detail_lines:
@@ -495,6 +636,14 @@ def build_help_text() -> Text:
         "   c           : Stage/activate compare",
         "   C           : Clear compare",
         "",
+        " Lenses:",
+        "   a           : Cycle scored-event field lens",
+        "   s           : Cycle scored-event limit lens",
+        "   d           : Cycle event-group field lens",
+        "   f           : Cycle event-group limit lens",
+        "   v           : Toggle intervention-match lens",
+        "   Active lens  : Projects detail/compare, list stays persisted",
+        "",
         " General:",
         "   ?           : Toggle this help",
         "   q           : Quit / Close help / Unzoom",
@@ -529,11 +678,15 @@ def format_status_footer(state: HistoryListState, width: int) -> str:
         else:
             compare_state = f"COMPARE L:{state.staged_compare_left_run_id}"
 
+    lens_state = format_active_lens_summary(state)
+
     left = f" run {current}/{total} | id:{run_id} | {bounds} "
 
     right_parts = []
     if compare_state:
         right_parts.append(compare_state)
+    if lens_state != "lenses:all":
+        right_parts.append(f"VIEW {lens_state.upper()}")
     if zoom:
         right_parts.append(zoom)
     right_parts.append(focus)
@@ -544,7 +697,11 @@ def format_status_footer(state: HistoryListState, width: int) -> str:
     if len(left) + len(right) <= width:
         return left + " " * (width - len(left) - len(right)) + right
 
-    compact = f" {current}/{total} id:{run_id} {bounds} {compare_state} {zoom} {focus} "
+    compact_lens = "" if lens_state == "lens:all-runs" else lens_state
+    compact = (
+        f" run {current}/{total} id:{run_id} {bounds}"
+        f" {compare_state} {compact_lens} {zoom} {focus} "
+    )
     compact = " ".join(compact.split())
     return shorten_text(compact.strip(), width).ljust(width)
 
@@ -570,6 +727,34 @@ def format_history_row(
     available_headline_width = max(width - len(prefix), 0)
     text = prefix + shorten_text(headline, available_headline_width)
     return text.ljust(width)
+
+
+def format_lens_change_message(label: str, value: str) -> str:
+    return f"lens {label}: {value}"
+
+
+def format_active_lens_summary(state: HistoryListState) -> str:
+    parts = []
+    if state.dominant_field is not None:
+        parts.append(f"ev={state.dominant_field}")
+    if state.limit_scored_events is not None:
+        parts.append(f"top={state.limit_scored_events}")
+    if state.group_dominant_field is not None:
+        parts.append(f"grp={state.group_dominant_field}")
+    if state.limit_event_groups is not None:
+        parts.append(f"groups={state.limit_event_groups}")
+    if state.only_matching_interventions:
+        parts.append("match-int")
+    if not parts:
+        return "lens:all-runs"
+    return "lens:" + ",".join(parts)
+
+
+def format_projected_empty_message(state: HistoryListState, *, subject: str) -> str:
+    lens_summary = format_active_lens_summary(state)
+    if lens_summary == "lens:all-runs":
+        return f"No persisted {subject} view is available."
+    return f"No {subject} rows match the active lens. Persisted run data is unchanged."
 
 
 def format_event_group_preview_lines(

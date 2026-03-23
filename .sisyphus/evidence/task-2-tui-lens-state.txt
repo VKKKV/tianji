@@ -1,0 +1,9 @@
+task=2
+dominant_field_sequence=['conflict', 'diplomacy', 'economy', 'technology', None]
+limit_scored_events_sequence=[1, 3, 5, None]
+group_dominant_field_sequence=['conflict', 'diplomacy', 'economy', 'technology', None]
+limit_event_groups_sequence=[1, 3, 5, None]
+only_matching_interventions_toggles=[True, False]
+cache_state_after_toggle_one=(None, None, None, None, 0, 1, 'compare', 'compare')
+forbidden_fields=[]
+required_fields_present=True

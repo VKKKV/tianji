@@ -1,13 +1,112 @@
 from support import *
 from rich.text import Text
 from tianji.tui import (
+    LENS_DOMINANT_FIELD_VALUES,
+    LENS_LIMIT_VALUES,
+    LENS_KEY_BINDINGS,
+    build_detail_panel,
     build_compare_panel,
+    build_layout,
+    build_help_text,
+    format_active_lens_summary,
+    format_lens_change_message,
     format_top_group_evidence_diff_lines,
     get_compare_similarity_summary,
+    run_history_list_browser,
 )
 
 
 class TuiTests(unittest.TestCase):
+    def test_history_list_state_lens_defaults_share_all_lenses_key(self) -> None:
+        state = HistoryListState(rows=[{"run_id": 10}], sqlite_path="dummy.sqlite3")
+
+        self.assertIsNone(state.dominant_field)
+        self.assertIsNone(state.limit_scored_events)
+        self.assertIsNone(state.group_dominant_field)
+        self.assertIsNone(state.limit_event_groups)
+        self.assertFalse(state.only_matching_interventions)
+        self.assertEqual(
+            state.active_lens_key(),
+            (None, None, None, None, False),
+        )
+        self.assertEqual(format_active_lens_summary(state), "lens:all-runs")
+        self.assertEqual(
+            LENS_KEY_BINDINGS,
+            {
+                "a": "dominant_field",
+                "s": "limit_scored_events",
+                "d": "group_dominant_field",
+                "f": "limit_event_groups",
+                "v": "only_matching_interventions",
+            },
+        )
+
+    def test_history_list_state_cycles_and_toggles_all_lens_helpers(self) -> None:
+        state = HistoryListState(rows=[{"run_id": 10}], sqlite_path="dummy.sqlite3")
+
+        dominant_field_values = [state.dominant_field]
+        for _ in LENS_DOMINANT_FIELD_VALUES:
+            dominant_field_values.append(state.cycle_dominant_field_lens())
+        self.assertEqual(dominant_field_values, [None, *LENS_DOMINANT_FIELD_VALUES])
+
+        scored_limit_values = [state.limit_scored_events]
+        for _ in LENS_LIMIT_VALUES:
+            scored_limit_values.append(state.cycle_limit_scored_events_lens())
+        self.assertEqual(scored_limit_values, [None, *LENS_LIMIT_VALUES])
+
+        group_field_values = [state.group_dominant_field]
+        for _ in LENS_DOMINANT_FIELD_VALUES:
+            group_field_values.append(state.cycle_group_dominant_field_lens())
+        self.assertEqual(group_field_values, [None, *LENS_DOMINANT_FIELD_VALUES])
+
+        group_limit_values = [state.limit_event_groups]
+        for _ in LENS_LIMIT_VALUES:
+            group_limit_values.append(state.cycle_limit_event_groups_lens())
+        self.assertEqual(group_limit_values, [None, *LENS_LIMIT_VALUES])
+
+        self.assertTrue(state.toggle_only_matching_interventions())
+        self.assertFalse(state.toggle_only_matching_interventions())
+
+    def test_history_list_state_lens_helpers_invalidate_projected_panes_only(
+        self,
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            scroll_offset=1,
+            focused_pane="compare",
+            zoomed=True,
+            show_help=True,
+            message="persist",
+            staged_compare_left_run_id=10,
+            active_view="compare",
+            cached_detail_run_id=20,
+            cached_detail_lens_key=("technology", 1, "diplomacy", 3, True),
+            cached_detail_lines=["detail"],
+            cached_compare_right_run_id=20,
+            cached_compare_lens_key=("technology", 1, "diplomacy", 3, True),
+            cached_compare_lines=["compare"],
+            detail_scroll_offset=4,
+        )
+
+        state.cycle_dominant_field_lens()
+
+        self.assertIsNone(state.cached_detail_run_id)
+        self.assertIsNone(state.cached_detail_lines)
+        self.assertIsNone(state.cached_compare_right_run_id)
+        self.assertIsNone(state.cached_compare_lens_key)
+        self.assertIsNone(state.cached_compare_lines)
+        self.assertEqual(state.detail_scroll_offset, 0)
+        self.assertEqual(state.selected_index, 1)
+        self.assertEqual(state.scroll_offset, 1)
+        self.assertEqual(state.focused_pane, "compare")
+        self.assertEqual(state.active_view, "compare")
+        self.assertEqual(state.staged_compare_left_run_id, 10)
+        self.assertTrue(state.zoomed)
+        self.assertTrue(state.show_help)
+        self.assertEqual(state.message, "persist")
+
     def test_cli_tui_dispatches_to_history_browser(self) -> None:
         with mock.patch("tianji.cli.launch_history_tui", return_value=0) as launch_mock:
             exit_code = main(
@@ -500,6 +599,82 @@ class TuiTests(unittest.TestCase):
         footer = format_status_footer(state, width=50)
         self.assertIn("0/0", footer)
 
+    @mock.patch("tianji.tui.compare_runs", return_value=None)
+    def test_status_footer_and_header_expose_active_lens_state(
+        self, mock_compare_runs
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            focused_pane="compare",
+            active_view="compare",
+            staged_compare_left_run_id=10,
+            dominant_field="technology",
+            limit_scored_events=1,
+            group_dominant_field="diplomacy",
+            limit_event_groups=3,
+            only_matching_interventions=True,
+        )
+
+        footer = format_status_footer(state, width=120)
+        self.assertIn("COMPARE L:10 R:20", footer)
+        self.assertIn(
+            "VIEW LENS:EV=TECHNOLOGY,TOP=1,GRP=DIPLOMACY,GROUPS=3,MATCH-INT", footer
+        )
+
+        layout = build_layout(state, height=20, width=120, page_size=10)
+        header_text = cast(Text, layout["header"].renderable).plain
+        self.assertIn("a/s/d/f/v lens view", header_text)
+        self.assertIn(
+            "lens:ev=technology,top=1,grp=diplomacy,groups=3,match-int",
+            header_text,
+        )
+        mock_compare_runs.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            left_run_id=10,
+            right_run_id=20,
+            dominant_field="technology",
+            limit_scored_events=1,
+            group_dominant_field="diplomacy",
+            limit_event_groups=3,
+            only_matching_interventions=True,
+        )
+
+    def test_help_text_lists_all_five_lens_controls(self) -> None:
+        help_text = build_help_text().plain
+
+        self.assertIn("a           : Cycle scored-event field lens", help_text)
+        self.assertIn("s           : Cycle scored-event limit lens", help_text)
+        self.assertIn("d           : Cycle event-group field lens", help_text)
+        self.assertIn("f           : Cycle event-group limit lens", help_text)
+        self.assertIn("v           : Toggle intervention-match lens", help_text)
+        self.assertIn(
+            "Active lens  : Projects detail/compare, list stays persisted",
+            help_text,
+        )
+
+    def test_format_lens_summary_and_change_message_use_projection_vocabulary(
+        self,
+    ) -> None:
+        state = HistoryListState(rows=[{"run_id": 10}], sqlite_path="dummy.sqlite3")
+
+        self.assertEqual(format_active_lens_summary(state), "lens:all-runs")
+        self.assertEqual(
+            format_lens_change_message("event field lens", "technology"),
+            "lens event field lens: technology",
+        )
+
+        state.dominant_field = "technology"
+        state.limit_scored_events = 1
+        state.group_dominant_field = "diplomacy"
+        state.limit_event_groups = 3
+        state.only_matching_interventions = True
+        self.assertEqual(
+            format_active_lens_summary(state),
+            "lens:ev=technology,top=1,grp=diplomacy,groups=3,match-int",
+        )
+
     def test_format_compare_detail_includes_core_fields(self) -> None:
         compare_result: dict[str, object] = {
             "left": {
@@ -756,6 +931,7 @@ class TuiTests(unittest.TestCase):
             staged_compare_left_run_id=10,
         )
         state.cached_compare_right_run_id = 20
+        state.cached_compare_lens_key = (None, None, None, None, False)
         state.cached_compare_lines = ["line 1", "line 2", "line 3", "line 4", "line 5"]
         state.detail_scroll_offset = 1
 
@@ -767,6 +943,668 @@ class TuiTests(unittest.TestCase):
         self.assertEqual(
             panel.title, Text(" [Compare L:10 R:20 2-3/5] ", style="reverse bold")
         )
+
+    @mock.patch("tianji.tui.get_run_summary")
+    def test_build_detail_panel_passes_active_lens_kwargs(
+        self, mock_get_run_summary
+    ) -> None:
+        mock_get_run_summary.return_value = {
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Projected detail.",
+                "event_groups": [{"dominant_field": "diplomacy", "member_count": 2}],
+            },
+            "scored_events": [
+                {
+                    "title": "Projected event",
+                    "dominant_field": "technology",
+                    "impact_score": 14.03,
+                    "field_attraction": 7.75,
+                    "divergence_score": 19.58,
+                }
+            ],
+            "intervention_candidates": [
+                {
+                    "target": "Projected target",
+                    "intervention_type": "monitor",
+                    "expected_effect": "Projected effect.",
+                }
+            ],
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            dominant_field="technology",
+            limit_scored_events=1,
+            group_dominant_field="diplomacy",
+            limit_event_groups=3,
+            only_matching_interventions=True,
+        )
+
+        panel = build_detail_panel(state, width=60, page_size=20)
+
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            run_id=10,
+            dominant_field="technology",
+            limit_scored_events=1,
+            group_dominant_field="diplomacy",
+            limit_event_groups=3,
+            only_matching_interventions=True,
+        )
+        self.assertEqual(state.cached_detail_run_id, 10)
+        self.assertEqual(
+            state.cached_detail_lens_key,
+            ("technology", 1, "diplomacy", 3, True),
+        )
+        detail_text = cast(Text, panel.renderable).plain
+        self.assertIn("Projected detail.", detail_text)
+
+    @mock.patch("tianji.tui.get_run_summary")
+    def test_build_detail_panel_reuses_cached_projection_until_lens_changes(
+        self, mock_get_run_summary
+    ) -> None:
+        mock_get_run_summary.return_value = {
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Cached detail.",
+                "event_groups": [],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        }
+        state = HistoryListState(rows=[{"run_id": 10}], sqlite_path="dummy.sqlite3")
+
+        first_panel = build_detail_panel(state, width=60, page_size=20)
+        second_panel = build_detail_panel(state, width=60, page_size=20)
+
+        self.assertEqual(mock_get_run_summary.call_count, 1)
+        self.assertIn("Cached detail.", cast(Text, first_panel.renderable).plain)
+        self.assertIn("Cached detail.", cast(Text, second_panel.renderable).plain)
+
+        state.cycle_limit_scored_events_lens()
+        build_detail_panel(state, width=60, page_size=20)
+
+        self.assertEqual(mock_get_run_summary.call_count, 2)
+        self.assertEqual(
+            mock_get_run_summary.call_args_list[1].kwargs,
+            {
+                "sqlite_path": "dummy.sqlite3",
+                "run_id": 10,
+                "dominant_field": None,
+                "limit_scored_events": 1,
+                "group_dominant_field": None,
+                "limit_event_groups": None,
+                "only_matching_interventions": False,
+            },
+        )
+        self.assertEqual(state.cached_detail_lens_key, (None, 1, None, None, False))
+
+    @mock.patch("tianji.tui.compare_runs")
+    def test_build_compare_panel_passes_active_lens_kwargs(
+        self, mock_compare_runs
+    ) -> None:
+        mock_compare_runs.return_value = {
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left headline",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+            },
+            "right": {
+                "run_id": 20,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Right headline",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+            },
+            "diff": {
+                "dominant_field_changed": False,
+                "risk_level_changed": False,
+                "raw_item_count_delta": 0,
+                "normalized_event_count_delta": 0,
+                "event_group_count_delta": 0,
+                "top_event_group_changed": False,
+                "top_scored_event_changed": False,
+                "top_intervention_changed": False,
+            },
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            staged_compare_left_run_id=10,
+            dominant_field="technology",
+            limit_scored_events=1,
+            group_dominant_field="diplomacy",
+            limit_event_groups=3,
+            only_matching_interventions=True,
+        )
+
+        panel = build_compare_panel(state, width=60, page_size=20)
+
+        mock_compare_runs.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            left_run_id=10,
+            right_run_id=20,
+            dominant_field="technology",
+            limit_scored_events=1,
+            group_dominant_field="diplomacy",
+            limit_event_groups=3,
+            only_matching_interventions=True,
+        )
+        self.assertEqual(state.cached_compare_right_run_id, 20)
+        self.assertEqual(
+            state.cached_compare_lens_key,
+            ("technology", 1, "diplomacy", 3, True),
+        )
+        compare_text = cast(Text, panel.renderable).plain
+        self.assertIn("Compare: Run #10 (Left) vs Run #20 (Right)", compare_text)
+
+    @mock.patch("tianji.tui.compare_runs")
+    def test_build_compare_panel_reuses_cached_projection_until_lens_changes(
+        self, mock_compare_runs
+    ) -> None:
+        mock_compare_runs.return_value = {
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left headline",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+            },
+            "right": {
+                "run_id": 20,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Right headline",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+            },
+            "diff": {
+                "dominant_field_changed": False,
+                "risk_level_changed": False,
+                "raw_item_count_delta": 0,
+                "normalized_event_count_delta": 0,
+                "event_group_count_delta": 0,
+                "top_event_group_changed": False,
+                "top_scored_event_changed": False,
+                "top_intervention_changed": False,
+            },
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            staged_compare_left_run_id=10,
+        )
+
+        first_panel = build_compare_panel(state, width=60, page_size=20)
+        second_panel = build_compare_panel(state, width=60, page_size=20)
+
+        self.assertEqual(mock_compare_runs.call_count, 1)
+        self.assertIn(
+            "Compare: Run #10 (Left) vs Run #20 (Right)",
+            cast(Text, first_panel.renderable).plain,
+        )
+        self.assertIn(
+            "Compare: Run #10 (Left) vs Run #20 (Right)",
+            cast(Text, second_panel.renderable).plain,
+        )
+
+        state.toggle_only_matching_interventions()
+        build_compare_panel(state, width=60, page_size=20)
+
+        self.assertEqual(mock_compare_runs.call_count, 2)
+        self.assertEqual(
+            mock_compare_runs.call_args_list[1].kwargs,
+            {
+                "sqlite_path": "dummy.sqlite3",
+                "left_run_id": 10,
+                "right_run_id": 20,
+                "dominant_field": None,
+                "limit_scored_events": None,
+                "group_dominant_field": None,
+                "limit_event_groups": None,
+                "only_matching_interventions": True,
+            },
+        )
+        self.assertEqual(state.cached_compare_lens_key, (None, None, None, None, True))
+
+    @mock.patch("tianji.tui.compare_runs")
+    def test_compare_panel_lens_changes_invalidate_cache_without_breaking_compare_flow(
+        self, mock_compare_runs
+    ) -> None:
+        mock_compare_runs.return_value = {
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left headline",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+            },
+            "right": {
+                "run_id": 30,
+                "mode": "fixture",
+                "dominant_field": "diplomacy",
+                "risk_level": "medium",
+                "headline": "Right headline",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+            },
+            "diff": {
+                "dominant_field_changed": True,
+                "risk_level_changed": True,
+                "raw_item_count_delta": 1,
+                "normalized_event_count_delta": 1,
+                "event_group_count_delta": 0,
+                "top_event_group_changed": False,
+                "top_scored_event_changed": False,
+                "top_intervention_changed": False,
+            },
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}, {"run_id": 30}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+            focused_pane="compare",
+        )
+
+        state.stage_compare(10, page_size=2)
+        self.assertEqual(state.staged_compare_left_run_id, 10)
+        self.assertEqual(state.active_view, "detail")
+
+        state.stage_compare(10, page_size=2)
+        self.assertEqual(state.active_view, "compare")
+        self.assertEqual(state.focused_pane, "compare")
+        self.assertEqual(state.selected_index, 1)
+
+        build_compare_panel(state, width=60, page_size=20)
+        first_call = mock_compare_runs.call_args_list[0]
+        self.assertEqual(
+            first_call.kwargs,
+            {
+                "sqlite_path": "dummy.sqlite3",
+                "left_run_id": 10,
+                "right_run_id": 20,
+                "dominant_field": None,
+                "limit_scored_events": None,
+                "group_dominant_field": None,
+                "limit_event_groups": None,
+                "only_matching_interventions": False,
+            },
+        )
+
+        state.step_compare_target(1, page_size=2)
+        self.assertEqual(state.selected_index, 2)
+        self.assertEqual(state.staged_compare_left_run_id, 10)
+        self.assertIsNone(state.cached_compare_right_run_id)
+        self.assertIsNone(state.cached_compare_lens_key)
+
+        state.cycle_dominant_field_lens()
+        self.assertEqual(state.active_view, "compare")
+        self.assertEqual(state.focused_pane, "compare")
+        self.assertEqual(state.staged_compare_left_run_id, 10)
+        self.assertEqual(state.selected_index, 2)
+        self.assertIsNone(state.cached_compare_right_run_id)
+        self.assertIsNone(state.cached_compare_lens_key)
+
+        build_compare_panel(state, width=60, page_size=20)
+        second_call = mock_compare_runs.call_args_list[1]
+        self.assertEqual(
+            second_call.kwargs,
+            {
+                "sqlite_path": "dummy.sqlite3",
+                "left_run_id": 10,
+                "right_run_id": 30,
+                "dominant_field": "conflict",
+                "limit_scored_events": None,
+                "group_dominant_field": None,
+                "limit_event_groups": None,
+                "only_matching_interventions": False,
+            },
+        )
+        self.assertEqual(state.cached_compare_right_run_id, 30)
+        self.assertEqual(
+            state.cached_compare_lens_key,
+            ("conflict", None, None, None, False),
+        )
+        self.assertEqual(mock_compare_runs.call_count, 2)
+
+    @mock.patch("tianji.tui.get_run_summary")
+    def test_build_detail_panel_treats_filtered_empty_projection_as_valid_detail(
+        self, mock_get_run_summary
+    ) -> None:
+        mock_get_run_summary.return_value = {
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Persisted truth remains visible.",
+                "event_groups": [],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            dominant_field="uncategorized",
+            limit_scored_events=1,
+            group_dominant_field="diplomacy",
+            limit_event_groups=1,
+            only_matching_interventions=True,
+        )
+
+        panel = build_detail_panel(state, width=60, page_size=20)
+
+        detail_text = cast(Text, panel.renderable).plain
+        self.assertIn("Run #10", detail_text)
+        self.assertIn("Items: 3 raw -> 3 normalized", detail_text)
+        self.assertIn("Scenario: technology • Risk: high", detail_text)
+        self.assertIn("Persisted truth remains visible.", detail_text)
+        self.assertIn("Event Groups: 0", detail_text)
+        self.assertIn("Scored Events: 0", detail_text)
+        self.assertIn("Interventions: 0", detail_text)
+        self.assertNotIn("Run details not found.", detail_text)
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            run_id=10,
+            dominant_field="uncategorized",
+            limit_scored_events=1,
+            group_dominant_field="diplomacy",
+            limit_event_groups=1,
+            only_matching_interventions=True,
+        )
+
+    @mock.patch("tianji.tui.get_run_summary", return_value=None)
+    def test_build_detail_panel_uses_lens_empty_copy_without_missing_data_wording(
+        self, mock_get_run_summary
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            dominant_field="technology",
+        )
+
+        panel = build_detail_panel(state, width=70, page_size=20)
+
+        detail_text = cast(Text, panel.renderable).plain
+        self.assertIn("No detail rows match the active lens.", detail_text)
+        self.assertIn("Persisted run data is unchanged.", detail_text)
+        self.assertNotIn("Run details not found.", detail_text)
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            run_id=10,
+            dominant_field="technology",
+            limit_scored_events=None,
+            group_dominant_field=None,
+            limit_event_groups=None,
+            only_matching_interventions=False,
+        )
+
+    @mock.patch("tianji.tui.compare_runs")
+    def test_build_compare_panel_treats_filtered_empty_projection_as_valid_compare(
+        self, mock_compare_runs
+    ) -> None:
+        mock_compare_runs.return_value = {
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left persisted truth.",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+                "event_group_count": 0,
+                "intervention_event_ids": [],
+            },
+            "right": {
+                "run_id": 20,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Right persisted truth.",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+                "event_group_count": 0,
+                "intervention_event_ids": [],
+            },
+            "diff": {
+                "dominant_field_changed": False,
+                "risk_level_changed": False,
+                "raw_item_count_delta": 0,
+                "normalized_event_count_delta": 0,
+                "event_group_count_delta": 0,
+                "top_event_group_changed": False,
+                "top_event_group_evidence_diff": {
+                    "comparable": False,
+                    "member_count_delta": 0,
+                    "evidence_chain_link_count_delta": 0,
+                    "right_only_member_event_ids": [],
+                    "left_only_member_event_ids": [],
+                    "shared_keywords_added": [],
+                    "shared_keywords_removed": [],
+                    "chain_summary_changed": False,
+                },
+                "top_scored_event_changed": False,
+                "top_scored_event_comparable": False,
+                "top_impact_score_delta": None,
+                "top_field_attraction_delta": None,
+                "top_divergence_score_delta": None,
+                "top_intervention_changed": False,
+                "left_top_scored_event_id": None,
+                "right_top_scored_event_id": None,
+            },
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            staged_compare_left_run_id=10,
+            dominant_field="uncategorized",
+            group_dominant_field="uncategorized",
+            only_matching_interventions=True,
+        )
+
+        panel = build_compare_panel(state, width=70, page_size=20)
+
+        compare_text = cast(Text, panel.renderable).plain
+        self.assertIn("Compare: Run #10 (Left) vs Run #20 (Right)", compare_text)
+        self.assertIn(
+            "Summary: Effectively identical: no meaningful differences found.",
+            compare_text,
+        )
+        self.assertIn("[Left] fixture • technology • Risk: high", compare_text)
+        self.assertIn("Left persisted truth.", compare_text)
+        self.assertIn("[Right] fixture • technology • Risk: high", compare_text)
+        self.assertIn("Right persisted truth.", compare_text)
+        self.assertIn("Diff Highlights:", compare_text)
+        self.assertNotIn("Compare details not found.", compare_text)
+        mock_compare_runs.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            left_run_id=10,
+            right_run_id=20,
+            dominant_field="uncategorized",
+            limit_scored_events=None,
+            group_dominant_field="uncategorized",
+            limit_event_groups=None,
+            only_matching_interventions=True,
+        )
+
+    @mock.patch("tianji.tui.compare_runs", return_value=None)
+    def test_build_compare_panel_uses_lens_empty_copy_without_missing_data_wording(
+        self, mock_compare_runs
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            staged_compare_left_run_id=10,
+            dominant_field="technology",
+        )
+
+        panel = build_compare_panel(state, width=70, page_size=20)
+
+        compare_text = cast(Text, panel.renderable).plain
+        self.assertIn("No compare rows match the active lens.", compare_text)
+        self.assertIn("Persisted run data is unchanged.", compare_text)
+        self.assertNotIn("Compare details not found.", compare_text)
+        mock_compare_runs.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            left_run_id=10,
+            right_run_id=20,
+            dominant_field="technology",
+            limit_scored_events=None,
+            group_dominant_field=None,
+            limit_event_groups=None,
+            only_matching_interventions=False,
+        )
+
+    @mock.patch(
+        "tianji.tui.get_run_summary",
+        return_value={
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 1, "normalized_event_count": 1},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Detail headline.",
+                "event_groups": [],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        },
+    )
+    @mock.patch(
+        "tianji.tui.compare_runs",
+        return_value={
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left headline",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+            },
+            "right": {
+                "run_id": 20,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Right headline",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+            },
+            "diff": {
+                "dominant_field_changed": False,
+                "risk_level_changed": False,
+                "raw_item_count_delta": 0,
+                "normalized_event_count_delta": 0,
+                "event_group_count_delta": 0,
+                "top_event_group_changed": False,
+                "top_scored_event_changed": False,
+                "top_intervention_changed": False,
+            },
+        },
+    )
+    def test_run_history_list_browser_preserves_non_lens_navigation_behavior(
+        self, mock_compare_runs, mock_get_run_summary
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}, {"run_id": 30}],
+            sqlite_path="dummy.sqlite3",
+        )
+        key_sequence = iter(
+            [
+                "?",
+                "?",
+                "l",
+                "z",
+                "z",
+                "c",
+                "c",
+                "l",
+                "]",
+                "[",
+                "h",
+                "j",
+                "g",
+                "G",
+                "q",
+            ]
+        )
+
+        class FakeLive:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                self.updates: list[object] = []
+
+            def __enter__(self) -> "FakeLive":
+                return self
+
+            def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+                return False
+
+            def update(self, layout: object, refresh: bool = False) -> None:
+                self.updates.append((layout, refresh))
+
+        fake_console = mock.Mock()
+        fake_console.size.height = 12
+        fake_console.size.width = 100
+
+        with mock.patch("tianji.tui.Console", return_value=fake_console):
+            with mock.patch("tianji.tui.Live", FakeLive):
+                with mock.patch(
+                    "tianji.tui.getch", side_effect=lambda: next(key_sequence)
+                ):
+                    run_history_list_browser(state)
+
+        self.assertEqual(state.selected_index, 2)
+        self.assertEqual(state.scroll_offset, 0)
+        self.assertEqual(state.focused_pane, "list")
+        self.assertEqual(state.active_view, "compare")
+        self.assertFalse(state.show_help)
+        self.assertFalse(state.zoomed)
+        self.assertEqual(state.staged_compare_left_run_id, 10)
+        self.assertIsNone(state.message)
+        self.assertGreaterEqual(mock_get_run_summary.call_count, 1)
+        self.assertGreaterEqual(mock_compare_runs.call_count, 1)
 
     def test_launch_history_tui_prints_empty_state_without_browser(self) -> None:
         stdout = io.StringIO()

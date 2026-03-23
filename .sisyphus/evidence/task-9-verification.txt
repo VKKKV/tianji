@@ -1,18 +1,63 @@
-Task 9 verification evidence
-Observed docs-only scope decision: stage documentation, .sisyphus evidence, and task notepad files only; exclude unrelated scoring-code edits in tianji/scoring.py and tests/test_scoring.py.
-## full unittest suite
-Command: .venv/bin/python -m unittest discover -s tests -v
-Exit code: 0
-STDOUT:
-{
+test_build_compare_panel_passes_active_lens_kwargs (test_tui.TuiTests.test_build_compare_panel_passes_active_lens_kwargs) ... ok
+test_build_compare_panel_reuses_cached_projection_until_lens_changes (test_tui.TuiTests.test_build_compare_panel_reuses_cached_projection_until_lens_changes) ... ok
+test_build_compare_panel_title_shows_pairing (test_tui.TuiTests.test_build_compare_panel_title_shows_pairing) ... ok
+test_build_compare_panel_title_shows_scroll_indicator (test_tui.TuiTests.test_build_compare_panel_title_shows_scroll_indicator) ... ok
+test_build_compare_panel_treats_filtered_empty_projection_as_valid_compare (test_tui.TuiTests.test_build_compare_panel_treats_filtered_empty_projection_as_valid_compare) ... ok
+test_build_compare_panel_uses_lens_empty_copy_without_missing_data_wording (test_tui.TuiTests.test_build_compare_panel_uses_lens_empty_copy_without_missing_data_wording) ... ok
+test_build_detail_panel_passes_active_lens_kwargs (test_tui.TuiTests.test_build_detail_panel_passes_active_lens_kwargs) ... ok
+test_build_detail_panel_reuses_cached_projection_until_lens_changes (test_tui.TuiTests.test_build_detail_panel_reuses_cached_projection_until_lens_changes) ... ok
+test_build_detail_panel_treats_filtered_empty_projection_as_valid_detail (test_tui.TuiTests.test_build_detail_panel_treats_filtered_empty_projection_as_valid_detail) ... ok
+test_build_detail_panel_uses_lens_empty_copy_without_missing_data_wording (test_tui.TuiTests.test_build_detail_panel_uses_lens_empty_copy_without_missing_data_wording) ... ok
+test_cli_tui_dispatches_to_history_browser (test_tui.TuiTests.test_cli_tui_dispatches_to_history_browser) ... ok
+test_cli_tui_rejects_negative_limit (test_tui.TuiTests.test_cli_tui_rejects_negative_limit) ... ok
+test_compare_panel_lens_changes_invalidate_cache_without_breaking_compare_flow (test_tui.TuiTests.test_compare_panel_lens_changes_invalidate_cache_without_breaking_compare_flow) ... ok
+test_format_compare_detail_includes_core_fields (test_tui.TuiTests.test_format_compare_detail_includes_core_fields) ... ok
+test_format_delta_handles_none (test_tui.TuiTests.test_format_delta_handles_none) ... ok
+test_format_history_row_includes_core_fields_and_truncates_headline (test_tui.TuiTests.test_format_history_row_includes_core_fields_and_truncates_headline) ... ok
+test_format_lens_summary_and_change_message_use_projection_vocabulary (test_tui.TuiTests.test_format_lens_summary_and_change_message_use_projection_vocabulary) ... ok
+test_format_run_detail_includes_core_fields (test_tui.TuiTests.test_format_run_detail_includes_core_fields) ... ok
+test_format_run_detail_limits_event_group_preview_and_truncates_summaries (test_tui.TuiTests.test_format_run_detail_limits_event_group_preview_and_truncates_summaries) ... ok
+test_format_run_detail_limits_intervention_preview_and_truncates_effects (test_tui.TuiTests.test_format_run_detail_limits_intervention_preview_and_truncates_effects) ... ok
+test_format_run_detail_limits_scored_event_preview_and_truncates_titles (test_tui.TuiTests.test_format_run_detail_limits_scored_event_preview_and_truncates_titles) ... ok
+test_format_status_footer_shows_bounds_and_state (test_tui.TuiTests.test_format_status_footer_shows_bounds_and_state) ... ok
+test_format_top_group_evidence_diff_lines_comparable (test_tui.TuiTests.test_format_top_group_evidence_diff_lines_comparable) ... ok
+test_format_top_group_evidence_diff_lines_contrast (test_tui.TuiTests.test_format_top_group_evidence_diff_lines_contrast) ... ok
+test_get_compare_similarity_summary_high_similarity (test_tui.TuiTests.test_get_compare_similarity_summary_high_similarity) ... ok
+test_get_compare_similarity_summary_identical (test_tui.TuiTests.test_get_compare_similarity_summary_identical) ... ok
+test_get_compare_similarity_summary_major_changes (test_tui.TuiTests.test_get_compare_similarity_summary_major_changes) ... ok
+test_help_text_lists_all_five_lens_controls (test_tui.TuiTests.test_help_text_lists_all_five_lens_controls) ... ok
+test_history_list_state_compare_transitions (test_tui.TuiTests.test_history_list_state_compare_transitions) ... ok
+test_history_list_state_compare_transitions_single_run (test_tui.TuiTests.test_history_list_state_compare_transitions_single_run) ... ok
+test_history_list_state_cycles_and_toggles_all_lens_helpers (test_tui.TuiTests.test_history_list_state_cycles_and_toggles_all_lens_helpers) ... ok
+test_history_list_state_keeps_selection_visible_when_scrolling (test_tui.TuiTests.test_history_list_state_keeps_selection_visible_when_scrolling) ... ok
+test_history_list_state_lens_defaults_share_all_lenses_key (test_tui.TuiTests.test_history_list_state_lens_defaults_share_all_lenses_key) ... ok
+test_history_list_state_lens_helpers_invalidate_projected_panes_only (test_tui.TuiTests.test_history_list_state_lens_helpers_invalidate_projected_panes_only) ... ok
+test_history_list_state_scrolls_detail_pane (test_tui.TuiTests.test_history_list_state_scrolls_detail_pane) ... ok
+test_history_list_state_sets_transient_messages_on_bounds (test_tui.TuiTests.test_history_list_state_sets_transient_messages_on_bounds) ... ok
+test_history_list_state_step_compare_target_skips_left_run (test_tui.TuiTests.test_history_list_state_step_compare_target_skips_left_run) ... ok
+test_history_list_state_step_compare_target_stays_in_bounds (test_tui.TuiTests.test_history_list_state_step_compare_target_stays_in_bounds) ... ok
+test_history_list_state_step_run_stays_in_bounds (test_tui.TuiTests.test_history_list_state_step_run_stays_in_bounds) ... ok
+test_history_list_state_steps_runs_and_resets_detail_scroll (test_tui.TuiTests.test_history_list_state_steps_runs_and_resets_detail_scroll) ... ok
+test_history_list_state_toggles_focus_and_zoom (test_tui.TuiTests.test_history_list_state_toggles_focus_and_zoom) ... ok
+test_launch_history_tui_prints_empty_state_without_browser (test_tui.TuiTests.test_launch_history_tui_prints_empty_state_without_browser) ... ok
+test_launch_history_tui_uses_browser_for_available_runs (test_tui.TuiTests.test_launch_history_tui_uses_browser_for_available_runs) ... ok
+test_run_history_list_browser_preserves_non_lens_navigation_behavior (test_tui.TuiTests.test_run_history_list_browser_preserves_non_lens_navigation_behavior) ... ok
+test_status_footer_and_header_expose_active_lens_state (test_tui.TuiTests.test_status_footer_and_header_expose_active_lens_state) ... ok
+test_wrap_text_splits_long_lines (test_tui.TuiTests.test_wrap_text_splits_long_lines) ... ok
+
+----------------------------------------------------------------------
+Ran 46 tests in 0.007s
+
+OK
+test_cli_can_fetch_using_source_config (test_cli_inputs.CliInputTests.test_cli_can_fetch_using_source_config) ... {
   "schema_version": "tianji.run-artifact.v1",
   "mode": "fetch",
-  "generated_at": "2026-03-23T13:37:58.060919+00:00",
+  "generated_at": "2026-03-23T15:40:49.059244+00:00",
   "input_summary": {
     "raw_item_count": 3,
     "normalized_event_count": 3,
     "sources": [
-      "127.0.0.1:40979"
+      "127.0.0.1:36603"
     ]
   },
   "scenario_summary": {
@@ -33,9 +78,9 @@ STDOUT:
   },
   "scored_events": [
     {
-      "event_id": "58d0024d14004954",
+      "event_id": "6110d187b1dc0c4d",
       "title": "China expands chip controls after new AI export dispute with the United States",
-      "source": "127.0.0.1:40979",
+      "source": "127.0.0.1:36603",
       "link": "https://example.com/china-chip-controls",
       "published_at": "Sun, 22 Mar 2026 08:00:00 GMT",
       "actors": [
@@ -67,29 +112,18 @@ STDOUT:
       "rationale": [
         "Im=15.79",
         "Fa=7.75",
-        "im_base=3.0",
-        "im_actor_weight=3.0",
-        "im_region_weight=3.0",
-        "im_keyword_density=3.0",
-        "im_dominant_field_bonus=1.62",
-        "im_nonzero_field_bonus=0.4",
         "im_title_salience=0.8",
         "im_field_impact_scaling=0.24",
         "im_text_signal_intensity=0.72",
-        "fa_dominant_field_strength=6.5",
-        "fa_dominance_margin_bonus=0.67",
-        "fa_coherence_bonus=0.57",
-        "fa_near_tie_penalty=0.0",
-        "fa_diffuse_third_field_penalty=0.0",
         "actors=usa, china",
         "regions=east-asia, united-states",
         "dominant_field=technology:7.75"
       ]
     },
     {
-      "event_id": "86cecd2e746e2eb6",
+      "event_id": "aaa051ec85a8ac43",
       "title": "Iran and Israel exchange missile warnings as diplomats push for talks",
-      "source": "127.0.0.1:40979",
+      "source": "127.0.0.1:36603",
       "link": "https://example.com/iran-israel-warnings",
       "published_at": "Sun, 22 Mar 2026 07:00:00 GMT",
       "actors": [
@@ -119,29 +153,18 @@ STDOUT:
       "rationale": [
         "Im=13.04",
         "Fa=6.17",
-        "im_base=3.0",
-        "im_actor_weight=1.2",
-        "im_region_weight=2.5",
-        "im_keyword_density=3.0",
-        "im_dominant_field_bonus=1.38",
-        "im_nonzero_field_bonus=0.6",
         "im_title_salience=0.64",
         "im_field_impact_scaling=0.3",
         "im_text_signal_intensity=0.42",
-        "fa_dominant_field_strength=5.5",
-        "fa_dominance_margin_bonus=0.3",
-        "fa_coherence_bonus=0.38",
-        "fa_near_tie_penalty=0.0",
-        "fa_diffuse_third_field_penalty=0.0",
         "actors=iran",
         "regions=middle-east",
         "dominant_field=diplomacy:6.17"
       ]
     },
     {
-      "event_id": "5572e236816e6535",
+      "event_id": "545f855b4f611867",
       "title": "NATO reviews troop readiness after Russia strike near Ukraine logistics corridor",
-      "source": "127.0.0.1:40979",
+      "source": "127.0.0.1:36603",
       "link": "https://example.com/nato-ukraine-readiness",
       "published_at": "Sun, 22 Mar 2026 09:00:00 GMT",
       "actors": [
@@ -174,20 +197,9 @@ STDOUT:
       "rationale": [
         "Im=17.1",
         "Fa=3.6",
-        "im_base=3.0",
-        "im_actor_weight=3.0",
-        "im_region_weight=5.5",
-        "im_keyword_density=3.0",
-        "im_dominant_field_bonus=0.75",
-        "im_nonzero_field_bonus=0.4",
         "im_title_salience=0.8",
         "im_field_impact_scaling=0.23",
         "im_text_signal_intensity=0.42",
-        "fa_dominant_field_strength=3.0",
-        "fa_dominance_margin_bonus=0.15",
-        "fa_coherence_bonus=0.45",
-        "fa_near_tie_penalty=0.0",
-        "fa_diffuse_third_field_penalty=0.0",
         "actors=nato, russia",
         "regions=ukraine, russia, europe",
         "dominant_field=conflict:3.6"
@@ -197,7 +209,7 @@ STDOUT:
   "intervention_candidates": [
     {
       "priority": 1,
-      "event_id": "58d0024d14004954",
+      "event_id": "6110d187b1dc0c4d",
       "target": "usa",
       "intervention_type": "capability-control",
       "reason": "Backtracked from event 'China expands chip controls after new AI export dispute with the United States' because its divergence score is 20.73 with field=technology, actors=usa, china, regions=east-asia, united-states.",
@@ -205,7 +217,7 @@ STDOUT:
     },
     {
       "priority": 2,
-      "event_id": "86cecd2e746e2eb6",
+      "event_id": "aaa051ec85a8ac43",
       "target": "iran",
       "intervention_type": "negotiation",
       "reason": "Backtracked from event 'Iran and Israel exchange missile warnings as diplomats push for talks' because its divergence score is 16.81 with field=diplomacy, actors=iran, regions=middle-east.",
@@ -213,7 +225,7 @@ STDOUT:
     },
     {
       "priority": 3,
-      "event_id": "5572e236816e6535",
+      "event_id": "545f855b4f611867",
       "target": "nato",
       "intervention_type": "de-escalation",
       "reason": "Backtracked from event 'NATO reviews troop readiness after Russia strike near Ukraine logistics corridor' because its divergence score is 15.98 with field=conflict, actors=nato, russia, regions=ukraine, russia, europe.",
@@ -222,16 +234,17 @@ STDOUT:
   ]
 }
 
-Artifact written to: /tmp/tmpxkrpserc/config-report.json
-{
+Artifact written to: /tmp/tmpo8sqg4ts/config-report.json
+ok
+test_cli_dedupes_config_and_explicit_source_urls (test_cli_inputs.CliInputTests.test_cli_dedupes_config_and_explicit_source_urls) ... {
   "schema_version": "tianji.run-artifact.v1",
   "mode": "fetch",
-  "generated_at": "2026-03-23T13:37:58.561988+00:00",
+  "generated_at": "2026-03-23T15:40:49.559837+00:00",
   "input_summary": {
     "raw_item_count": 3,
     "normalized_event_count": 3,
     "sources": [
-      "127.0.0.1:40717"
+      "127.0.0.1:46573"
     ]
   },
   "scenario_summary": {
@@ -252,9 +265,9 @@ Artifact written to: /tmp/tmpxkrpserc/config-report.json
   },
   "scored_events": [
     {
-      "event_id": "8b055bbeba8d3434",
+      "event_id": "92a31b67e9eaee36",
       "title": "China expands chip controls after new AI export dispute with the United States",
-      "source": "127.0.0.1:40717",
+      "source": "127.0.0.1:46573",
       "link": "https://example.com/china-chip-controls",
       "published_at": "Sun, 22 Mar 2026 08:00:00 GMT",
       "actors": [
@@ -286,29 +299,18 @@ Artifact written to: /tmp/tmpxkrpserc/config-report.json
       "rationale": [
         "Im=15.79",
         "Fa=7.75",
-        "im_base=3.0",
-        "im_actor_weight=3.0",
-        "im_region_weight=3.0",
-        "im_keyword_density=3.0",
-        "im_dominant_field_bonus=1.62",
-        "im_nonzero_field_bonus=0.4",
         "im_title_salience=0.8",
         "im_field_impact_scaling=0.24",
         "im_text_signal_intensity=0.72",
-        "fa_dominant_field_strength=6.5",
-        "fa_dominance_margin_bonus=0.67",
-        "fa_coherence_bonus=0.57",
-        "fa_near_tie_penalty=0.0",
-        "fa_diffuse_third_field_penalty=0.0",
         "actors=usa, china",
         "regions=east-asia, united-states",
         "dominant_field=technology:7.75"
       ]
     },
     {
-      "event_id": "dae2d1575d7e0a47",
+      "event_id": "c95dad79e505bdd3",
       "title": "Iran and Israel exchange missile warnings as diplomats push for talks",
-      "source": "127.0.0.1:40717",
+      "source": "127.0.0.1:46573",
       "link": "https://example.com/iran-israel-warnings",
       "published_at": "Sun, 22 Mar 2026 07:00:00 GMT",
       "actors": [
@@ -338,29 +340,18 @@ Artifact written to: /tmp/tmpxkrpserc/config-report.json
       "rationale": [
         "Im=13.04",
         "Fa=6.17",
-        "im_base=3.0",
-        "im_actor_weight=1.2",
-        "im_region_weight=2.5",
-        "im_keyword_density=3.0",
-        "im_dominant_field_bonus=1.38",
-        "im_nonzero_field_bonus=0.6",
         "im_title_salience=0.64",
         "im_field_impact_scaling=0.3",
         "im_text_signal_intensity=0.42",
-        "fa_dominant_field_strength=5.5",
-        "fa_dominance_margin_bonus=0.3",
-        "fa_coherence_bonus=0.38",
-        "fa_near_tie_penalty=0.0",
-        "fa_diffuse_third_field_penalty=0.0",
         "actors=iran",
         "regions=middle-east",
         "dominant_field=diplomacy:6.17"
       ]
     },
     {
-      "event_id": "882e4ae7e40e4623",
+      "event_id": "949a5711aecbbc39",
       "title": "NATO reviews troop readiness after Russia strike near Ukraine logistics corridor",
-      "source": "127.0.0.1:40717",
+      "source": "127.0.0.1:46573",
       "link": "https://example.com/nato-ukraine-readiness",
       "published_at": "Sun, 22 Mar 2026 09:00:00 GMT",
       "actors": [
@@ -393,20 +384,9 @@ Artifact written to: /tmp/tmpxkrpserc/config-report.json
       "rationale": [
         "Im=17.1",
         "Fa=3.6",
-        "im_base=3.0",
-        "im_actor_weight=3.0",
-        "im_region_weight=5.5",
-        "im_keyword_density=3.0",
-        "im_dominant_field_bonus=0.75",
-        "im_nonzero_field_bonus=0.4",
         "im_title_salience=0.8",
         "im_field_impact_scaling=0.23",
         "im_text_signal_intensity=0.42",
-        "fa_dominant_field_strength=3.0",
-        "fa_dominance_margin_bonus=0.15",
-        "fa_coherence_bonus=0.45",
-        "fa_near_tie_penalty=0.0",
-        "fa_diffuse_third_field_penalty=0.0",
         "actors=nato, russia",
         "regions=ukraine, russia, europe",
         "dominant_field=conflict:3.6"
@@ -416,7 +396,7 @@ Artifact written to: /tmp/tmpxkrpserc/config-report.json
   "intervention_candidates": [
     {
       "priority": 1,
-      "event_id": "8b055bbeba8d3434",
+      "event_id": "92a31b67e9eaee36",
       "target": "usa",
       "intervention_type": "capability-control",
       "reason": "Backtracked from event 'China expands chip controls after new AI export dispute with the United States' because its divergence score is 20.73 with field=technology, actors=usa, china, regions=east-asia, united-states.",
@@ -424,7 +404,7 @@ Artifact written to: /tmp/tmpxkrpserc/config-report.json
     },
     {
       "priority": 2,
-      "event_id": "dae2d1575d7e0a47",
+      "event_id": "c95dad79e505bdd3",
       "target": "iran",
       "intervention_type": "negotiation",
       "reason": "Backtracked from event 'Iran and Israel exchange missile warnings as diplomats push for talks' because its divergence score is 16.81 with field=diplomacy, actors=iran, regions=middle-east.",
@@ -432,7 +412,7 @@ Artifact written to: /tmp/tmpxkrpserc/config-report.json
     },
     {
       "priority": 3,
-      "event_id": "882e4ae7e40e4623",
+      "event_id": "949a5711aecbbc39",
       "target": "nato",
       "intervention_type": "de-escalation",
       "reason": "Backtracked from event 'NATO reviews troop readiness after Russia strike near Ukraine logistics corridor' because its divergence score is 15.98 with field=conflict, actors=nato, russia, regions=ukraine, russia, europe.",
@@ -441,15 +421,13 @@ Artifact written to: /tmp/tmpxkrpserc/config-report.json
   ]
 }
 
-Artifact written to: /tmp/tmprq_6rp97/dedupe-report.json
-STDERR:
-test_cli_can_fetch_using_source_config (test_cli_inputs.CliInputTests.test_cli_can_fetch_using_source_config) ... ok
-test_cli_dedupes_config_and_explicit_source_urls (test_cli_inputs.CliInputTests.test_cli_dedupes_config_and_explicit_source_urls) ... ok
+Artifact written to: /tmp/tmpioswm0gx/dedupe-report.json
+ok
 test_cli_reports_duplicate_source_names_cleanly (test_cli_inputs.CliInputTests.test_cli_reports_duplicate_source_names_cleanly) ... ok
 test_cli_reports_fetch_failure_cleanly (test_cli_inputs.CliInputTests.test_cli_reports_fetch_failure_cleanly) ... ok
 test_cli_reports_unknown_source_name_cleanly (test_cli_inputs.CliInputTests.test_cli_reports_unknown_source_name_cleanly) ... ok
-test_cli_requires_input_source (test_cli_inputs.CliInputTests.test_cli_requires_input_source) ... Usage: python -m unittest run [OPTIONS]
-Try 'python -m unittest run -h' for help.
+test_cli_requires_input_source (test_cli_inputs.CliInputTests.test_cli_requires_input_source) ... Usage: python -m tianji run [OPTIONS]
+Try 'python -m tianji run -h' for help.
 
 Error: Provide at least one --fixture or enable --fetch with --source-url and/or --source-config.
 ok
@@ -578,13 +556,23 @@ test_score_event_text_signal_intensity_respects_cap (test_scoring.ScoringTests.t
 test_score_event_treats_zero_field_mass_as_uncategorized (test_scoring.ScoringTests.test_score_event_treats_zero_field_mass_as_uncategorized) ... ok
 test_score_event_zero_field_mass_does_not_produce_negative_fa (test_scoring.ScoringTests.test_score_event_zero_field_mass_does_not_produce_negative_fa) ... ok
 test_summarize_scenario_resolves_dominant_field_ties_independently_of_event_order (test_scoring.ScoringTests.test_summarize_scenario_resolves_dominant_field_ties_independently_of_event_order) ... ok
+test_build_compare_panel_passes_active_lens_kwargs (test_tui.TuiTests.test_build_compare_panel_passes_active_lens_kwargs) ... ok
+test_build_compare_panel_reuses_cached_projection_until_lens_changes (test_tui.TuiTests.test_build_compare_panel_reuses_cached_projection_until_lens_changes) ... ok
 test_build_compare_panel_title_shows_pairing (test_tui.TuiTests.test_build_compare_panel_title_shows_pairing) ... ok
 test_build_compare_panel_title_shows_scroll_indicator (test_tui.TuiTests.test_build_compare_panel_title_shows_scroll_indicator) ... ok
+test_build_compare_panel_treats_filtered_empty_projection_as_valid_compare (test_tui.TuiTests.test_build_compare_panel_treats_filtered_empty_projection_as_valid_compare) ... ok
+test_build_compare_panel_uses_lens_empty_copy_without_missing_data_wording (test_tui.TuiTests.test_build_compare_panel_uses_lens_empty_copy_without_missing_data_wording) ... ok
+test_build_detail_panel_passes_active_lens_kwargs (test_tui.TuiTests.test_build_detail_panel_passes_active_lens_kwargs) ... ok
+test_build_detail_panel_reuses_cached_projection_until_lens_changes (test_tui.TuiTests.test_build_detail_panel_reuses_cached_projection_until_lens_changes) ... ok
+test_build_detail_panel_treats_filtered_empty_projection_as_valid_detail (test_tui.TuiTests.test_build_detail_panel_treats_filtered_empty_projection_as_valid_detail) ... ok
+test_build_detail_panel_uses_lens_empty_copy_without_missing_data_wording (test_tui.TuiTests.test_build_detail_panel_uses_lens_empty_copy_without_missing_data_wording) ... ok
 test_cli_tui_dispatches_to_history_browser (test_tui.TuiTests.test_cli_tui_dispatches_to_history_browser) ... ok
 test_cli_tui_rejects_negative_limit (test_tui.TuiTests.test_cli_tui_rejects_negative_limit) ... ok
+test_compare_panel_lens_changes_invalidate_cache_without_breaking_compare_flow (test_tui.TuiTests.test_compare_panel_lens_changes_invalidate_cache_without_breaking_compare_flow) ... ok
 test_format_compare_detail_includes_core_fields (test_tui.TuiTests.test_format_compare_detail_includes_core_fields) ... ok
 test_format_delta_handles_none (test_tui.TuiTests.test_format_delta_handles_none) ... ok
 test_format_history_row_includes_core_fields_and_truncates_headline (test_tui.TuiTests.test_format_history_row_includes_core_fields_and_truncates_headline) ... ok
+test_format_lens_summary_and_change_message_use_projection_vocabulary (test_tui.TuiTests.test_format_lens_summary_and_change_message_use_projection_vocabulary) ... ok
 test_format_run_detail_includes_core_fields (test_tui.TuiTests.test_format_run_detail_includes_core_fields) ... ok
 test_format_run_detail_limits_event_group_preview_and_truncates_summaries (test_tui.TuiTests.test_format_run_detail_limits_event_group_preview_and_truncates_summaries) ... ok
 test_format_run_detail_limits_intervention_preview_and_truncates_effects (test_tui.TuiTests.test_format_run_detail_limits_intervention_preview_and_truncates_effects) ... ok
@@ -595,9 +583,13 @@ test_format_top_group_evidence_diff_lines_contrast (test_tui.TuiTests.test_forma
 test_get_compare_similarity_summary_high_similarity (test_tui.TuiTests.test_get_compare_similarity_summary_high_similarity) ... ok
 test_get_compare_similarity_summary_identical (test_tui.TuiTests.test_get_compare_similarity_summary_identical) ... ok
 test_get_compare_similarity_summary_major_changes (test_tui.TuiTests.test_get_compare_similarity_summary_major_changes) ... ok
+test_help_text_lists_all_five_lens_controls (test_tui.TuiTests.test_help_text_lists_all_five_lens_controls) ... ok
 test_history_list_state_compare_transitions (test_tui.TuiTests.test_history_list_state_compare_transitions) ... ok
 test_history_list_state_compare_transitions_single_run (test_tui.TuiTests.test_history_list_state_compare_transitions_single_run) ... ok
+test_history_list_state_cycles_and_toggles_all_lens_helpers (test_tui.TuiTests.test_history_list_state_cycles_and_toggles_all_lens_helpers) ... ok
 test_history_list_state_keeps_selection_visible_when_scrolling (test_tui.TuiTests.test_history_list_state_keeps_selection_visible_when_scrolling) ... ok
+test_history_list_state_lens_defaults_share_all_lenses_key (test_tui.TuiTests.test_history_list_state_lens_defaults_share_all_lenses_key) ... ok
+test_history_list_state_lens_helpers_invalidate_projected_panes_only (test_tui.TuiTests.test_history_list_state_lens_helpers_invalidate_projected_panes_only) ... ok
 test_history_list_state_scrolls_detail_pane (test_tui.TuiTests.test_history_list_state_scrolls_detail_pane) ... ok
 test_history_list_state_sets_transient_messages_on_bounds (test_tui.TuiTests.test_history_list_state_sets_transient_messages_on_bounds) ... ok
 test_history_list_state_step_compare_target_skips_left_run (test_tui.TuiTests.test_history_list_state_step_compare_target_skips_left_run) ... ok
@@ -606,241 +598,15 @@ test_history_list_state_step_run_stays_in_bounds (test_tui.TuiTests.test_history
 test_history_list_state_steps_runs_and_resets_detail_scroll (test_tui.TuiTests.test_history_list_state_steps_runs_and_resets_detail_scroll) ... ok
 test_history_list_state_toggles_focus_and_zoom (test_tui.TuiTests.test_history_list_state_toggles_focus_and_zoom) ... ok
 test_launch_history_tui_prints_empty_state_without_browser (test_tui.TuiTests.test_launch_history_tui_prints_empty_state_without_browser) ... ok
-test_launch_history_tui_uses_browser_for_available_runs (test_tui.TuiTests.test_launch_history_tui_uses_browser_for_available_runs) ... /home/kita/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ffb6f6c4040>
+test_launch_history_tui_uses_browser_for_available_runs (test_tui.TuiTests.test_launch_history_tui_uses_browser_for_available_runs) ... ok
+test_run_history_list_browser_preserves_non_lens_navigation_behavior (test_tui.TuiTests.test_run_history_list_browser_preserves_non_lens_navigation_behavior) ... /home/kita/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f069be13f10>
   def __init__(self, name, parent):
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
+test_status_footer_and_header_expose_active_lens_state (test_tui.TuiTests.test_status_footer_and_header_expose_active_lens_state) ... ok
 test_wrap_text_splits_long_lines (test_tui.TuiTests.test_wrap_text_splits_long_lines) ... ok
 
 ----------------------------------------------------------------------
-Ran 161 tests in 2.112s
+Ran 177 tests in 2.117s
 
 OK
-
-## cli help: top-level
-Command: .venv/bin/python -m tianji --help
-Exit code: 0
-STDOUT:
-Usage: python -m unittest [OPTIONS] COMMAND [ARGS]...
-
-  TianJi one-shot MVP.
-
-Options:
-  -h, --help  Show this message and exit.
-
-Commands:
-  history
-  history-compare
-  history-show
-  run
-  tui
-
-## cli help: run
-Command: .venv/bin/python -m tianji run --help
-Exit code: 0
-STDOUT:
-Usage: python -m unittest run [OPTIONS]
-
-Options:
-  --fixture TEXT        Path to a local RSS/Atom fixture file
-  --fetch               Fetch one or more live feeds once
-  --source-url TEXT     Feed URL used with --fetch
-  --source-config TEXT  Optional JSON file containing named source URLs
-  --source-name TEXT    Optional source name from --source-config; repeat to
-                        select multiple
-  --output TEXT         Path for the generated JSON artifact  [default:
-                        runs/latest-run.json]
-  --sqlite-path TEXT    Optional SQLite database path for persisting run data
-  -h, --help            Show this message and exit.
-
-## cli help: history
-Command: .venv/bin/python -m tianji history --help
-Exit code: 0
-STDOUT:
-Usage: python -m unittest history [OPTIONS]
-
-Options:
-  --sqlite-path TEXT              SQLite database path containing persisted
-                                  TianJi runs  [required]
-  --limit INTEGER                 Maximum number of runs to list  [default:
-                                  20]
-  --mode TEXT                     Optional run mode filter (for example:
-                                  fixture, fetch, fetch+fixture)
-  --dominant-field TEXT           Optional dominant field filter for persisted
-                                  runs
-  --risk-level TEXT               Optional risk level filter for persisted
-                                  runs
-  --since TEXT                    Optional inclusive lower bound for
-                                  generated_at (ISO timestamp)
-  --until TEXT                    Optional inclusive upper bound for
-                                  generated_at (ISO timestamp)
-  --min-top-impact-score FLOAT    Optional minimum impact_score for the
-                                  persisted run's top scored event
-  --max-top-impact-score FLOAT    Optional maximum impact_score for the
-                                  persisted run's top scored event
-  --min-top-field-attraction FLOAT
-                                  Optional minimum field_attraction for the
-                                  persisted run's top scored event
-  --max-top-field-attraction FLOAT
-                                  Optional maximum field_attraction for the
-                                  persisted run's top scored event
-  --min-top-divergence-score FLOAT
-                                  Optional minimum divergence_score for the
-                                  persisted run's top scored event
-  --max-top-divergence-score FLOAT
-                                  Optional maximum divergence_score for the
-                                  persisted run's top scored event
-  --top-group-dominant-field TEXT
-                                  Optional dominant field filter for the
-                                  persisted run's top event group
-  --min-event-group-count INTEGER
-                                  Optional minimum persisted event-group count
-                                  for the run
-  --max-event-group-count INTEGER
-                                  Optional maximum persisted event-group count
-                                  for the run
-  -h, --help                      Show this message and exit.
-
-## cli help: history-show
-Command: .venv/bin/python -m tianji history-show --help
-Exit code: 0
-STDOUT:
-Usage: python -m unittest history-show [OPTIONS]
-
-Options:
-  --sqlite-path TEXT             SQLite database path containing persisted
-                                 TianJi runs  [required]
-  --run-id INTEGER               Run identifier to inspect
-  --latest                       Show the latest persisted run instead of
-                                 specifying --run-id
-  --previous                     Show the persisted run immediately before
-                                 --run-id
-  --next                         Show the persisted run immediately after
-                                 --run-id
-  --dominant-field TEXT          Optional dominant field filter for scored
-                                 events inside the selected run
-  --min-impact-score FLOAT       Optional minimum impact_score for scored
-                                 events inside the selected run
-  --max-impact-score FLOAT       Optional maximum impact_score for scored
-                                 events inside the selected run
-  --min-field-attraction FLOAT   Optional minimum field_attraction for scored
-                                 events inside the selected run
-  --max-field-attraction FLOAT   Optional maximum field_attraction for scored
-                                 events inside the selected run
-  --min-divergence-score FLOAT   Optional minimum divergence_score for scored
-                                 events inside the selected run
-  --max-divergence-score FLOAT   Optional maximum divergence_score for scored
-                                 events inside the selected run
-  --limit-scored-events INTEGER  Optional maximum number of scored events to
-                                 return for the selected run
-  --only-matching-interventions  Keep only intervention candidates whose
-                                 event_id remains in the final visible scored-
-                                 event set after filters and limits
-  --group-dominant-field TEXT    Optional dominant field filter for persisted
-                                 event groups inside the selected run
-  --limit-event-groups INTEGER   Optional maximum number of persisted event
-                                 groups to return for the selected run
-  -h, --help                     Show this message and exit.
-
-## cli help: history-compare
-Command: .venv/bin/python -m tianji history-compare --help
-Exit code: 0
-STDOUT:
-Usage: python -m unittest history-compare [OPTIONS]
-
-Options:
-  --sqlite-path TEXT             SQLite database path containing persisted
-                                 TianJi runs  [required]
-  --left-run-id INTEGER          Left-side run identifier for comparison
-  --right-run-id INTEGER         Right-side run identifier for comparison
-  --latest-pair                  Compare the two latest persisted runs instead
-                                 of specifying run ids
-  --run-id INTEGER               Compare one explicit run against the latest
-                                 persisted run
-  --against-latest               Use the latest persisted run as the right-
-                                 hand side for comparison
-  --against-previous             Use the immediately previous persisted run as
-                                 the left-hand side for comparison
-  --dominant-field TEXT          Optional dominant field filter for scored
-                                 events inside both compared runs
-  --min-impact-score FLOAT       Optional minimum impact_score for scored
-                                 events inside both compared runs
-  --max-impact-score FLOAT       Optional maximum impact_score for scored
-                                 events inside both compared runs
-  --min-field-attraction FLOAT   Optional minimum field_attraction for scored
-                                 events inside both compared runs
-  --max-field-attraction FLOAT   Optional maximum field_attraction for scored
-                                 events inside both compared runs
-  --min-divergence-score FLOAT   Optional minimum divergence_score for scored
-                                 events inside both compared runs
-  --max-divergence-score FLOAT   Optional maximum divergence_score for scored
-                                 events inside both compared runs
-  --limit-scored-events INTEGER  Optional maximum number of scored events to
-                                 return for each compared run
-  --only-matching-interventions  Keep only intervention candidates whose
-                                 event_id remains in the final visible scored-
-                                 event set for each compared run
-  --group-dominant-field TEXT    Optional dominant field filter for persisted
-                                 event groups inside both compared runs
-  --limit-event-groups INTEGER   Optional maximum number of persisted event
-                                 groups to return for each compared run
-  -h, --help                     Show this message and exit.
-
-## cli help: tui
-Command: .venv/bin/python -m tianji tui --help
-Exit code: 0
-STDOUT:
-Usage: python -m unittest tui [OPTIONS]
-
-Options:
-  --sqlite-path TEXT  SQLite database path containing persisted TianJi runs
-                      [required]
-  --limit INTEGER     Maximum number of runs to load into the history browser
-                      [default: 20]
-  -h, --help          Show this message and exit.
-
-## git diff --stat
-Command: git diff --stat
-Exit code: 0
-STDOUT:
- DEV_PLAN.md           | 131 +++++++++++++++++++++++++++++---------------------
- LOCAL_API_CONTRACT.md |  11 +++--
- README.md             | 107 ++++++++++++++++++-----------------------
- SCORING_SPEC.md       | 106 ++++++++++++++++++++++------------------
- SESSION_HANDOFF.md    |  51 +++++++++-----------
- TUI_CONTRACT.md       |  57 ++++++++++++++--------
- tests/test_scoring.py |  28 +++++++++++
- tianji/scoring.py     | 106 ++++++++++++++++++++++++++++++++++++++++
- 8 files changed, 383 insertions(+), 214 deletions(-)
-
-## git status --short
-Command: git status --short
-Exit code: 0
-STDOUT:
- M DEV_PLAN.md
- M LOCAL_API_CONTRACT.md
- M README.md
- M SCORING_SPEC.md
- M SESSION_HANDOFF.md
- M TUI_CONTRACT.md
- M tests/test_scoring.py
- M tianji/scoring.py
-?? .sisyphus/boulder.json
-?? .sisyphus/evidence/
-?? .sisyphus/notepads/
-?? .sisyphus/plans/tianji-docs-and-fa-ambiguity-refinement.md
-?? .sisyphus/plans/tianji-rationale-transparency.md
-
-## git diff --name-only
-Command: git diff --name-only
-Exit code: 0
-STDOUT:
-DEV_PLAN.md
-LOCAL_API_CONTRACT.md
-README.md
-SCORING_SPEC.md
-SESSION_HANDOFF.md
-TUI_CONTRACT.md
-tests/test_scoring.py
-tianji/scoring.py
-

@@ -259,7 +259,8 @@ Future contract drafts live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`. Th
 - keep scoring docs aligned with the shipped additive `Im` / `Fa` contract; no new `Fa` rule landed on this branch because the mixed-field no-gap review did not prove a meaningful uncovered weakness
 - richer backtracking and causal grouping
 - finish the Click-based CLI-first operator workflow for persisted analysis
-- expand the Rich-based Vim-motion TUI from list/detail browsing toward fuller persisted operator workflows
+- expand the Rich-based Vim-motion TUI by adding the next planned read-only Phase 5 slice, shared detail/compare lens controls for `dominant_field`, `limit_scored_events`, `group_dominant_field`, `limit_event_groups`, and `only_matching_interventions`, while keeping the list pane on persisted truth
+- keep numeric threshold entry and list-pane filtering out of that next TUI slice for now
 - future local API implementation only when a real local service boundary is chosen
 
 ### Later

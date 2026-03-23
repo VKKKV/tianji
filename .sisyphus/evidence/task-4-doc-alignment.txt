@@ -1,0 +1,44 @@
+Task 4 doc alignment evidence
+Date: 2026-03-23
+
+TUI_CONTRACT.md
+- The shipped TUI still exposes the persisted list, detail, and compare browser without full in-TUI projection controls.
+- The next explicit Phase 5 slice should reuse current CLI and storage projection rules for read-only detail and compare panes only.
+- Next planned shared lens controls:
+  - `dominant_field`
+  - `limit_scored_events`
+  - `group_dominant_field`
+  - `limit_event_groups`
+- Next planned shared lens control:
+  - `only_matching_interventions=false`
+  - `only_matching_interventions=true`
+- Explicitly deferred from this slice:
+  - numeric threshold entry for `min_impact_score` / `max_impact_score`
+  - numeric threshold entry for `min_field_attraction` / `max_field_attraction`
+  - numeric threshold entry for `min_divergence_score` / `max_divergence_score`
+- This Phase 5 slice should keep those controls shared across detail and compare panes. It should not add list-pane filtering, text entry, or any new storage semantics.
+- For the next planned TUI slice, those projected lenses should stay confined to detail and compare rendering. The persisted history list should continue to show storage-backed truth rather than a separately filtered list pane.
+- The shipped TUI does not require a local API, and later TUI work should not require one either.
+
+DEV_PLAN.md
+- Next explicit slice for this phase:
+- add shared read-only detail/compare lens controls that mirror the existing CLI and `storage.py` projection vocabulary for:
+  - `dominant_field`
+  - `limit_scored_events`
+  - `group_dominant_field`
+  - `limit_event_groups`
+  - `only_matching_interventions`
+- keep the history list pane on persisted truth rather than introducing in-TUI list filtering
+- defer numeric threshold entry for score windows to a later branch
+- keep CLI and storage semantics as the source of truth instead of inventing a TUI-only projection model
+- do not treat list-pane filtering or numeric threshold entry as part of this next slice
+
+README.md
+- expand the Rich-based Vim-motion TUI by adding the next planned read-only Phase 5 slice, shared detail/compare lens controls for `dominant_field`, `limit_scored_events`, `group_dominant_field`, `limit_event_groups`, and `only_matching_interventions`, while keeping the list pane on persisted truth
+- keep numeric threshold entry and list-pane filtering out of that next TUI slice for now
+- future local API implementation only when a real service boundary is chosen
+
+Result
+- Docs frame the lens-controls work as planned, not shipped.
+- Docs defer numeric threshold entry and list-pane filtering.
+- Docs keep CLI and storage semantics as the source of truth and avoid broadening into daemon, API, or web behavior for this branch.
