@@ -20,6 +20,16 @@ STRONG_GROUP_INTERVENTION_TYPES = {
     "technology": "capability-freeze",
 }
 
+WEAK_GROUP_INTERVENTION_TYPES = {
+    "conflict": "escalation-containment",
+    "diplomacy": "channel-stabilization",
+    "economy": "market-stabilization",
+    "technology": "capability-containment",
+}
+
+MIN_STRONG_GROUP_SHARED_SIGNAL_COUNT = 5
+FAST_GROUP_CAUSAL_SPAN_HOURS = 2.0
+
 
 class EventChainLink(TypedDict):
     from_event_id: str
@@ -153,12 +163,27 @@ def infer_intervention_type(
 def infer_group_intervention_type(
     event_group: EventGroupSummary,
 ) -> str | None:
-    if event_group["member_count"] < 3 or len(event_group["evidence_chain"]) < 2:
-        return None
-    return STRONG_GROUP_INTERVENTION_TYPES.get(
-        event_group["dominant_field"],
-        "pattern-disruption",
-    )
+    member_count = event_group["member_count"]
+    evidence_chain = event_group["evidence_chain"]
+    link_count = len(evidence_chain)
+    if (
+        member_count >= 3
+        and link_count >= 2
+        and all(
+            link["shared_signal_count"] >= MIN_STRONG_GROUP_SHARED_SIGNAL_COUNT
+            for link in evidence_chain
+        )
+    ):
+        return STRONG_GROUP_INTERVENTION_TYPES.get(
+            event_group["dominant_field"],
+            "pattern-disruption",
+        )
+    if member_count >= 2 and link_count >= 1:
+        return WEAK_GROUP_INTERVENTION_TYPES.get(
+            event_group["dominant_field"],
+            "pattern-monitoring",
+        )
+    return None
 
 
 def infer_field_intervention_type(dominant_field: str) -> str:
@@ -190,15 +215,79 @@ def infer_group_expected_effect(
     member_count = event_group["member_count"]
     link_count = len(event_group["evidence_chain"])
     chain_type = "reinforcing chain" if link_count >= 2 else "linked cluster"
+    urgency_prefix = infer_group_effect_urgency_prefix(event_group, link_count)
+    conflict_action = "disrupt" if urgency_prefix else "Disrupt"
+    diplomacy_action = "stabilize" if urgency_prefix else "Stabilize"
+    economy_action = "interrupt" if urgency_prefix else "Interrupt"
+    generic_action = "break" if urgency_prefix else "Break"
     if event.dominant_field == "conflict":
-        return f"Disrupt the {chain_type} before escalation compounds across {member_count} related events."
+        return f"{urgency_prefix}{conflict_action} the {chain_type} before escalation compounds across {member_count} related events."
     if event.dominant_field == "diplomacy":
-        return f"Stabilize the {chain_type} so {member_count} related diplomatic moves do not harden into a wider standoff."
+        return f"{urgency_prefix}{diplomacy_action} the {chain_type} so {member_count} related diplomatic moves do not harden into a wider standoff."
     if event.dominant_field == "economy":
-        return f"Interrupt the {chain_type} before {member_count} linked economic signals compound into a broader shock."
+        return f"{urgency_prefix}{economy_action} the {chain_type} before {member_count} linked economic signals compound into a broader shock."
     if event.dominant_field == "technology":
-        return f"Disrupt the {chain_type} before {member_count} related capability moves harden into a broader race."
-    return f"Break the {chain_type} and collect better evidence before {member_count} related events reinforce the branch further."
+        return f"{urgency_prefix}{conflict_action} the {chain_type} before {member_count} related capability moves harden into a broader race."
+    return f"{urgency_prefix}{generic_action} the {chain_type} and collect better evidence before {member_count} related events reinforce the branch further."
+
+
+def infer_group_effect_urgency_prefix(
+    event_group: EventGroupSummary,
+    link_count: int,
+) -> str:
+    causal_span_hours = event_group["causal_span_hours"]
+    if causal_span_hours is None:
+        return ""
+    if causal_span_hours <= FAST_GROUP_CAUSAL_SPAN_HOURS:
+        return "Urgently " if link_count >= 2 else "Quickly "
+    return ""
+
+
+def infer_group_corroboration_text(event_group: EventGroupSummary) -> str:
+    if all(
+        link["shared_signal_count"] >= MIN_STRONG_GROUP_SHARED_SIGNAL_COUNT
+        for link in event_group["evidence_chain"]
+    ):
+        return " high corroboration across causal links;"
+    return " moderate corroboration across causal links;"
+
+
+def infer_group_relationship_text(event_group: EventGroupSummary) -> str:
+    relationship_counts: dict[str, int] = {}
+    for link in event_group["evidence_chain"]:
+        relationship = link["relationship"]
+        relationship_counts[relationship] = relationship_counts.get(relationship, 0) + 1
+    dominant_relationship = min(
+        relationship_counts.items(),
+        key=lambda item: (-item[1], item[0]),
+    )[0]
+    return f" dominant relationship={dominant_relationship};"
+
+
+def infer_group_signal_support_text(event_group: EventGroupSummary) -> str:
+    signal_counts = [
+        link["shared_signal_count"] for link in event_group["evidence_chain"]
+    ]
+    min_signal_count = min(signal_counts)
+    max_signal_count = max(signal_counts)
+    if min_signal_count == max_signal_count:
+        return f" signal support={min_signal_count};"
+    return f" signal support range={min_signal_count}-{max_signal_count};"
+
+
+def infer_group_link_tempo_text(event_group: EventGroupSummary) -> str:
+    link_deltas = [
+        link["time_delta_hours"]
+        for link in event_group["evidence_chain"]
+        if link["time_delta_hours"] is not None
+    ]
+    if not link_deltas:
+        return ""
+    min_link_delta = min(link_deltas)
+    max_link_delta = max(link_deltas)
+    if min_link_delta == max_link_delta:
+        return f" link tempo={min_link_delta}h;"
+    return f" link tempo range={min_link_delta}-{max_link_delta}h;"
 
 
 def build_reason(
@@ -228,9 +317,17 @@ def build_reason(
         if event_group["causal_span_hours"] is not None
         else ""
     )
+    corroboration_text = infer_group_corroboration_text(event_group)
+    relationship_text = infer_group_relationship_text(event_group)
+    signal_support_text = infer_group_signal_support_text(event_group)
+    link_tempo_text = infer_group_link_tempo_text(event_group)
     return (
         f"{base_reason} Grouped context: {event_group['member_count']}-event {event_group['dominant_field']} cluster"
         f" with {len(event_group['evidence_chain'])} causal link(s){span_text};"
+        f"{corroboration_text}"
+        f"{relationship_text}"
+        f"{signal_support_text}"
+        f"{link_tempo_text}"
         f"{shared_actor_text}{shared_region_text}"
         f" Evidence chain: {event_group['chain_summary']} "
         f"Causal cluster: {event_group['causal_summary']}"
