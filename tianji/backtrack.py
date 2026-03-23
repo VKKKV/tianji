@@ -137,6 +137,15 @@ def select_intervention_target(
     event_group: EventGroupSummary | None = None,
 ) -> str:
     if event_group is not None:
+        headline_role_text = infer_group_headline_role_text(event_group)
+        if headline_role_text in {
+            " headline role=chain endpoint;",
+            " headline role=chain pivot;",
+        }:
+            if event.actors:
+                return event.actors[0]
+            if event.regions:
+                return event.regions[0]
         if event_group["shared_actors"]:
             return event_group["shared_actors"][0]
         if event_group["shared_regions"]:
