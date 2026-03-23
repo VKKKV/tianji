@@ -47,6 +47,22 @@ class HistoryListState:
         elif self.selected_index >= self.scroll_offset + normalized_page_size:
             self.scroll_offset = self.selected_index - normalized_page_size + 1
 
+    def step_run(self, delta: int, *, page_size: int) -> None:
+        if not self.rows:
+            self.selected_index = 0
+            self.scroll_offset = 0
+            self.detail_scroll_offset = 0
+            self.cached_detail_run_id = None
+            self.cached_detail_lines = None
+            return
+        next_index = min(max(self.selected_index + delta, 0), len(self.rows) - 1)
+        if next_index != self.selected_index:
+            self.selected_index = next_index
+            self.detail_scroll_offset = 0
+            self.cached_detail_run_id = None
+            self.cached_detail_lines = None
+        self.ensure_selection_visible(page_size=page_size)
+
 
 def launch_history_tui(*, sqlite_path: str, limit: int) -> int:
     rows = list_runs(sqlite_path=sqlite_path, limit=limit)
@@ -67,7 +83,7 @@ def run_history_list_browser(
     while True:
         draw_history_list(stdscr, state)
         key = stdscr.getch()
-        page_size = max(stdscr.getmaxyx()[0] - 2, 1)
+        page_size = max(stdscr.getmaxyx()[0] - 3, 1)
         if key in (ord("q"), ord("Q")):
             if state.show_help:
                 state.show_help = False
@@ -93,6 +109,12 @@ def run_history_list_browser(
             continue
         if key in (ord("z"), ord("\n"), curses.KEY_ENTER, 10, 13):
             state.zoomed = not state.zoomed
+            continue
+        if key == ord("["):
+            state.step_run(-1, page_size=page_size)
+            continue
+        if key == ord("]"):
+            state.step_run(1, page_size=page_size)
             continue
         if key in (ord("j"), curses.KEY_DOWN):
             state.move_selection(1, page_size=page_size)
@@ -125,13 +147,45 @@ def run_history_list_browser(
             continue
 
 
+def format_status_footer(state: HistoryListState, width: int) -> str:
+    total = len(state.rows)
+    if total == 0:
+        return " 0/0 ".ljust(width)
+
+    current = state.selected_index + 1
+    run_id = state.rows[state.selected_index].get("run_id", "?")
+
+    if total == 1:
+        bounds = "[only]"
+    elif current == 1:
+        bounds = "[first]"
+    elif current == total:
+        bounds = "[last]"
+    else:
+        bounds = "[-]"
+
+    focus = state.focused_pane.upper()
+    zoom = "ZOOM" if state.zoomed else ""
+
+    left = f" run {current}/{total} | id:{run_id} | {bounds} "
+    right = f" {zoom} | {focus} " if zoom else f" {focus} "
+
+    if len(left) + len(right) <= width:
+        return left + " " * (width - len(left) - len(right)) + right
+
+    compact = f" {current}/{total} id:{run_id} {bounds} {zoom} {focus} "
+    return shorten_text(compact.strip(), width).ljust(width)
+
+
 def draw_history_list(stdscr: curses.window, state: HistoryListState) -> None:
     height, width = stdscr.getmaxyx()
-    page_size = max(height - 2, 1)
+    page_size = max(height - 3, 1)
     state.ensure_selection_visible(page_size=page_size)
     stdscr.erase()
 
-    status_line = " TianJi | j/k move | h/l focus | Tab/Enter zoom | ? help | q quit "
+    status_line = (
+        " TianJi | j/k move | h/l focus | [/] step | Tab/Enter zoom | ? help | q quit "
+    )
     stdscr.addnstr(0, 0, status_line.ljust(width), width, curses.A_REVERSE)
 
     if state.show_help:
@@ -171,7 +225,7 @@ def draw_history_list(stdscr: curses.window, state: HistoryListState) -> None:
             stdscr.addnstr(index + 2, 0, row_text, left_width, attributes)
 
     if left_width > 0 and right_width > 0:
-        for i in range(1, height):
+        for i in range(1, height - 1):
             try:
                 stdscr.addch(i, left_width, curses.ACS_VLINE)
             except curses.error:
@@ -207,9 +261,12 @@ def draw_history_list(stdscr: curses.window, state: HistoryListState) -> None:
                 state.detail_scroll_offset : state.detail_scroll_offset + page_size
             ]
             for i, line in enumerate(visible_lines):
-                if i + 2 >= height:
+                if i + 2 >= height - 1:
                     break
                 stdscr.addnstr(i + 2, start_x, line, right_width)
+
+    footer_text = format_status_footer(state, width)
+    stdscr.addnstr(height - 1, 0, footer_text, width, curses.A_REVERSE)
 
     stdscr.refresh()
 
@@ -227,6 +284,7 @@ def draw_help_overlay(stdscr: curses.window, height: int, width: int) -> None:
         " Panes & Zoom:",
         "   h / l       : Focus List / Detail pane",
         "   Tab         : Toggle pane focus",
+        "   [ / ]       : Previous / Next run",
         "   Enter / z   : Toggle zoom on focused pane",
         "",
         " General:",

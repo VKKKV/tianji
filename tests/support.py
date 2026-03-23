@@ -24,6 +24,7 @@ from tianji.tui import (
     launch_history_tui,
     format_run_detail,
     wrap_text,
+    format_status_footer,
 )
 from tianji.pipeline import run_pipeline
 from tianji.scoring import score_event, summarize_scenario
