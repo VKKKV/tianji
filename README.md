@@ -132,7 +132,7 @@ The current MVP flow is:
    Convert raw feed items into normalized events with extracted keywords, actors, regions, and field scores.
 
 3. **Infer / Score**  
-   Apply deterministic scoring rules to estimate event impact and field attraction, then rank the most important events.
+   Apply deterministic scoring rules to estimate event impact and field attraction, using weighted actors/regions, bounded title salience, bounded dominant-field impact scaling, field-alignment structure, and dominant-field text-signal intensity before ranking the most important events.
 
 4. **Backtrack**  
    Generate likely intervention targets and intervention types from the highest-ranked events.
@@ -157,9 +157,11 @@ The artifact includes:
 
 - `schema_version`: stable top-level artifact contract version
 - `input_summary`: item counts and source list
-- `scenario_summary`: dominant field, top actors, top regions, risk level, and a short headline; when dominant-field counts tie across scored events, the stored summary resolves the winner deterministically by field-name order
+- `scenario_summary`: dominant field, top actors, top regions, risk level, and a short headline; when dominant-field counts tie across scored events, the stored summary resolves the winner deterministically by strongest tied `divergence_score`, using field-name order only as the final fallback
 - `scored_events`: normalized events with impact score, field attraction, divergence score, and rationale
 - `intervention_candidates`: ranked backtracked actions derived from the top events
+
+Current scored-event rationale remains additive and inspectable. It always exposes top-level `Im` / `Fa` values, and now also surfaces the bounded `Im` subterms for dominant-field impact scaling and title salience when those bonuses actually contribute to the event.
 
 Persisted run history now exposes both compact run summaries and per-run drill-down over stored scored events and intervention candidates.
 
@@ -185,7 +187,7 @@ Grouped event summaries now also carry lightweight evidence-chain metadata so in
 
 Grouped event summaries now also carry additive causal-cluster metadata such as `causal_ordered_event_ids`, `causal_span_hours`, and `causal_summary`, so operators can distinguish simple shared-signal overlap from a linked reinforcing chain. That causal order reflects the group admission path, not necessarily strict timestamp order. `causal_span_hours` is computed from the earliest and latest known timestamps inside the group when at least two timestamps are available; otherwise it stays `null`, and the summary text falls back to non-span wording.
 
-Scoring-contract coverage now also includes isolated `Im` checks for actor weighting, region weighting, raw keyword-density cap behavior, dominant-field-strength bonus behavior, nonzero-field-count bonus behavior, direct keyword/title/summary text-signal surface contributions, and isolated `Fa` checks for dominance-margin and coherence behavior, so future scoring changes can be caught at the additive-term level instead of only through full aggregate snapshots.
+Scoring-contract coverage now also includes isolated `Im` checks for actor weighting, region weighting, actor/region title-salience behavior, raw keyword-density cap behavior, dominant-field-strength bonus behavior, dominant-field-specific impact scaling, nonzero-field-count bonus behavior, direct keyword/title/summary text-signal surface contributions, and isolated `Fa` checks for dominance-margin and coherence behavior, so future scoring changes can be caught at the additive-term level instead of only through full aggregate snapshots.
 
 ## Repository Layout
 
@@ -269,7 +271,7 @@ The operator CLI implementation now uses Click while preserving the existing `ru
 
 ### Next
 
-- more formalized `Im` / `Fa`-style scoring model
+- further deterministic `Im` / `Fa` refinement beyond the current title-salience and field-impact-scaling slice
 - richer backtracking and causal grouping
 - finish the Click-based CLI-first operator workflow for persisted analysis
 - expand the Rich-based Vim-motion TUI from list/detail browsing toward fuller persisted operator workflows

@@ -13,8 +13,10 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
   - In the current slice, it is a bounded additive score built from:
      - actor weight
      - region weight
+     - a bounded actor/region title-salience bonus for headline mentions
      - keyword density
      - a small dominant-field evidence bonus
+     - a bounded dominant-field-specific impact-scaling bonus
      - a small thresholded field-diversity bonus for fields with meaningful scored support
      - a bounded text-signal-intensity bonus for dominant-field cue concentration across normalized text surfaces
 
@@ -43,6 +45,116 @@ This first scoring-focused Phase 2 change does **not**:
 - add model-driven or cloud-based scoring
 
 It only makes the existing deterministic scoring language explicit and testable in first-party TianJi terms.
+
+## Current Actor / Region Title-Salience Expansion
+
+The current Phase 2 scoring slice now also includes:
+
+- **a bounded title-salience bonus inside `Im` for actor and region mentions already present in the normalized event**
+
+Intent:
+
+- reward events whose already-extracted actors or regions are important enough to
+  appear directly in the headline rather than only in the body text
+- deepen `Im` without changing the meaning of `Fa`
+- preserve the current split where `Im` represents branch-moving force and `Fa`
+  represents dominant-field alignment
+
+Allowed inputs for this slice:
+
+- normalized `title`
+- normalized `actors`
+- normalized `regions`
+- existing actor and region pattern vocabulary already used during normalization
+
+Disallowed inputs for this slice:
+
+- any new stored title-only actor or region fields in the artifact or SQLite
+- cross-event corroboration
+- prior runs or baseline history
+
+Constraints implemented in this slice:
+
+- the bonus is additive inside `Im`
+- the bonus only rewards actors and regions already matched by TianJi's existing
+  normalization vocabulary; it does not introduce a second entity extractor
+- title salience remains smaller than the base actor/region contribution so the
+  headline can sharpen an existing signal without overpowering the event's
+  broader normalized evidence
+- `Fa` and the top-level artifact shape remain unchanged
+
+Current implementation shape:
+
+- TianJi re-checks the normalized `title` against the existing actor and region
+  pattern maps from normalization
+- actor title-salience adds a small bounded bonus per actor whose canonical label
+  is both present in `event.actors` and matched in the title
+- region title-salience adds a small bounded bonus per region whose canonical
+  label is both present in `event.regions` and matched in the title
+- the combined title-salience bonus is capped so headline mentions sharpen `Im`
+  but do not outweigh the full actor + region base contribution
+
+Recommended verification for this slice:
+
+- paired synthetic-event tests where `field_scores`, keywords, body text, and
+  extracted actor/region sets stay fixed
+- moving a matched actor or region mention into the title should raise
+  `impact_score`
+- the same paired tests should leave `field_attraction` unchanged
+
+## Current Dominant-Field Impact-Scaling Expansion
+
+The current Phase 2 scoring slice now also includes:
+
+- **a bounded dominant-field-specific impact-scaling bonus inside `Im`**
+
+Intent:
+
+- let TianJi distinguish equally structured events whose branch-moving force
+  should differ slightly by dominant field even before any historical baseline
+  exists
+- keep the scoring model local and inspectable by deriving the adjustment from
+  the same first-party field vocabulary TianJi already uses for normalization
+- preserve the current split where `Im` remains branch-moving force and `Fa`
+  remains field-alignment strength
+
+Allowed inputs for this slice:
+
+- the selected `dominant_field`
+- the dominant field's current strength from `field_scores`
+- first-party field keyword weights already defined in `tianji/normalize.py`
+
+Disallowed inputs for this slice:
+
+- any external taxonomy or reference-repo runtime logic
+- persistence history, novelty, or spike detection
+- changes to the `divergence_score` blend itself
+
+Constraints implemented in this slice:
+
+- the adjustment stays additive inside `Im`
+- the adjustment is field-specific but derived from first-party TianJi field
+  vocabulary rather than hidden manual overrides at runtime
+- the bonus remains smaller than the dominant-field base contribution so it
+  refines impact rather than rewriting the ranking model
+- `Fa` stays field-alignment-only for this slice
+
+Current implementation shape:
+
+- TianJi computes a small field-impact factor from the dominant field's keyword
+  vocabulary profile in `tianji/normalize.py`
+- stronger dominant-field vocabularies contribute a modestly larger bounded bonus
+  when the event's dominant-field strength is otherwise the same
+- uncategorized events do not receive this bonus
+
+Recommended verification for this slice:
+
+- paired synthetic-event tests where actor, region, keyword-density, and
+  dominant-field strength stay fixed while the dominant field changes
+- a stronger-impact dominant field should score a modestly higher `impact_score`
+  than a weaker-impact field with the same structural inputs
+- `field_attraction` should continue to reflect only field-score shape, not this
+  `Im`-side refinement
 
 Later Phase 2 grouping work now adds lightweight evidence-chain metadata inside
 `scenario_summary.event_groups` so grouped backtracking can cite corroborating

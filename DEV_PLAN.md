@@ -301,12 +301,16 @@ Draft contract notes now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; 
 
 ### Milestone: Deterministic scoring-model expansion
 
+This milestone is now partially shipped as a concrete Phase 2.3 slice rather than
+an abstract next step.
+
 Why this is next:
 
 - grouped analysis and persisted operator workflows are no longer the weakest
   part of the owned product surface
-- the current scoring slice works, but it is still thin relative to the richer
-  grouping and comparison machinery now built around it
+- the current scoring slice is stronger than the earlier Phase 2 baseline, but it
+  is still thinner than the richer grouping and comparison machinery now built
+  around it
 - improving the first-party scoring model sharpens both single-run output and
   persisted run comparison without changing the overall product shape
 
@@ -316,7 +320,7 @@ Primary files:
 - `tianji/normalize.py`
 - `tianji/models.py`
 - `SCORING_SPEC.md`
-- `tests/test_pipeline.py`
+- `tests/test_scoring.py`
 
 Suggested scope for the next scoring branch:
 
@@ -334,11 +338,17 @@ Current code-grounded factor inventory:
 - **Current `Im` inputs in `tianji/scoring.py`**
   - weighted actor presence from normalized `actors`
   - weighted region presence from normalized `regions`
+  - bounded actor/region title salience when already-matched entities appear in
+    the normalized `title`
   - bounded keyword density from normalized `keywords`
   - a dominant-field-strength evidence bonus from `field_scores`
+  - a bounded dominant-field-specific impact-scaling bonus derived from the
+    selected field's first-party keyword vocabulary profile
   - a thresholded field-diversity bonus from `field_scores`, where only fields
     with meaningful support (`field_score >= 1.0`) count toward extra diversity
     credit beyond the dominant positive-field baseline
+  - bounded dominant-field text-signal intensity across normalized keywords,
+    title, and summary
 - **Current `Fa` inputs in `tianji/scoring.py`**
   - dominant field strength from `field_scores`
   - dominance margin over the second-best field
@@ -397,7 +407,7 @@ Expected outcome:
 
 #### Step 4 — score-specific verification
 
-- add focused tests in `tests/test_pipeline.py`
+- add focused tests in `tests/test_scoring.py`
 - assert component-level scoring behavior where possible, not only ranked order
 - verify the full suite still passes after scoring changes
 
@@ -411,9 +421,11 @@ Recommended verification additions:
 - these `Im` factor-isolation tests are now shipped:
   - actor-weight changes inside `Im`
   - region-weight changes inside `Im`
+  - actor/region title-salience changes inside `Im`
   - keyword-density cap behavior
   - thresholded field-diversity behavior inside `Im`
   - dominant-field-strength effects inside `Im`
+  - dominant-field-specific impact scaling inside `Im`
   - direct keyword/title/summary text-signal surface contributions
 - add factor-isolation tests for dominance-margin and coherence effects inside
   `Fa`
@@ -421,6 +433,15 @@ Recommended verification additions:
   documented formula remains pinned
 - keep persisted CLI score-filter tests focused on read behavior, not on formula
   internals
+
+Phase 2.3 scoring slice now shipped:
+
+- `SCORING_SPEC.md` now defines bounded actor/region title salience and bounded
+  dominant-field impact scaling inside `Im`
+- `tianji/scoring.py` now implements those additive `Im` factors without changing
+  artifact or SQLite schema shape
+- `tests/test_scoring.py` now pins both factor-isolation behaviors plus updated
+  exact-value rationale output
 
 #### Step 5 — doc and operator pass
 
@@ -673,7 +694,7 @@ Use this as the concrete execution order when the next session starts coding.
 - keep deferred items listed explicitly so novelty, contradiction, and baseline
   work do not leak into the branch
 
-#### `tests/test_pipeline.py`
+#### `tests/test_scoring.py`
 
 - add one paired-event test where only textual field-evidence intensity changes
 - keep actor, region, and dominant-field structure fixed in that paired test
@@ -777,7 +798,7 @@ Current status after the first Candidate B slice:
 - compare preset misuse, negative compare limits, and inverted persisted score
   windows are now parser-rejected across the read-only operator surface
 - additive `Im` terms and direct text-signal bonus surfaces now have explicit
-  isolation coverage in `tests/test_pipeline.py`
+  isolation coverage in `tests/test_scoring.py`
 - the current `Fa` ambiguity rules now also have threshold-boundary regression
   coverage for the `< 1.0` near-tie gate and the `> 2.5` diffuse-third-field
   gate
