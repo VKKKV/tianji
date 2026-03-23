@@ -1,0 +1,846 @@
+Task 9 verification evidence
+Observed docs-only scope decision: stage documentation, .sisyphus evidence, and task notepad files only; exclude unrelated scoring-code edits in tianji/scoring.py and tests/test_scoring.py.
+## full unittest suite
+Command: .venv/bin/python -m unittest discover -s tests -v
+Exit code: 0
+STDOUT:
+{
+  "schema_version": "tianji.run-artifact.v1",
+  "mode": "fetch",
+  "generated_at": "2026-03-23T13:37:58.060919+00:00",
+  "input_summary": {
+    "raw_item_count": 3,
+    "normalized_event_count": 3,
+    "sources": [
+      "127.0.0.1:40979"
+    ]
+  },
+  "scenario_summary": {
+    "headline": "The strongest current branch is technology, driven by china expands chip controls after new ai export dispute with the united states and 2 additional high-signal events.",
+    "dominant_field": "technology",
+    "risk_level": "high",
+    "top_regions": [
+      "east-asia",
+      "united-states",
+      "middle-east"
+    ],
+    "top_actors": [
+      "usa",
+      "china",
+      "iran"
+    ],
+    "event_groups": []
+  },
+  "scored_events": [
+    {
+      "event_id": "58d0024d14004954",
+      "title": "China expands chip controls after new AI export dispute with the United States",
+      "source": "127.0.0.1:40979",
+      "link": "https://example.com/china-chip-controls",
+      "published_at": "Sun, 22 Mar 2026 08:00:00 GMT",
+      "actors": [
+        "usa",
+        "china"
+      ],
+      "regions": [
+        "east-asia",
+        "united-states"
+      ],
+      "keywords": [
+        "china",
+        "expands",
+        "chip",
+        "controls",
+        "after",
+        "new",
+        "export",
+        "dispute",
+        "with",
+        "the",
+        "united",
+        "states"
+      ],
+      "dominant_field": "technology",
+      "impact_score": 15.79,
+      "field_attraction": 7.75,
+      "divergence_score": 20.73,
+      "rationale": [
+        "Im=15.79",
+        "Fa=7.75",
+        "im_base=3.0",
+        "im_actor_weight=3.0",
+        "im_region_weight=3.0",
+        "im_keyword_density=3.0",
+        "im_dominant_field_bonus=1.62",
+        "im_nonzero_field_bonus=0.4",
+        "im_title_salience=0.8",
+        "im_field_impact_scaling=0.24",
+        "im_text_signal_intensity=0.72",
+        "fa_dominant_field_strength=6.5",
+        "fa_dominance_margin_bonus=0.67",
+        "fa_coherence_bonus=0.57",
+        "fa_near_tie_penalty=0.0",
+        "fa_diffuse_third_field_penalty=0.0",
+        "actors=usa, china",
+        "regions=east-asia, united-states",
+        "dominant_field=technology:7.75"
+      ]
+    },
+    {
+      "event_id": "86cecd2e746e2eb6",
+      "title": "Iran and Israel exchange missile warnings as diplomats push for talks",
+      "source": "127.0.0.1:40979",
+      "link": "https://example.com/iran-israel-warnings",
+      "published_at": "Sun, 22 Mar 2026 07:00:00 GMT",
+      "actors": [
+        "iran"
+      ],
+      "regions": [
+        "middle-east"
+      ],
+      "keywords": [
+        "iran",
+        "and",
+        "israel",
+        "exchange",
+        "missile",
+        "warnings",
+        "diplomats",
+        "push",
+        "for",
+        "talks",
+        "officials",
+        "tehran"
+      ],
+      "dominant_field": "diplomacy",
+      "impact_score": 13.04,
+      "field_attraction": 6.17,
+      "divergence_score": 16.81,
+      "rationale": [
+        "Im=13.04",
+        "Fa=6.17",
+        "im_base=3.0",
+        "im_actor_weight=1.2",
+        "im_region_weight=2.5",
+        "im_keyword_density=3.0",
+        "im_dominant_field_bonus=1.38",
+        "im_nonzero_field_bonus=0.6",
+        "im_title_salience=0.64",
+        "im_field_impact_scaling=0.3",
+        "im_text_signal_intensity=0.42",
+        "fa_dominant_field_strength=5.5",
+        "fa_dominance_margin_bonus=0.3",
+        "fa_coherence_bonus=0.38",
+        "fa_near_tie_penalty=0.0",
+        "fa_diffuse_third_field_penalty=0.0",
+        "actors=iran",
+        "regions=middle-east",
+        "dominant_field=diplomacy:6.17"
+      ]
+    },
+    {
+      "event_id": "5572e236816e6535",
+      "title": "NATO reviews troop readiness after Russia strike near Ukraine logistics corridor",
+      "source": "127.0.0.1:40979",
+      "link": "https://example.com/nato-ukraine-readiness",
+      "published_at": "Sun, 22 Mar 2026 09:00:00 GMT",
+      "actors": [
+        "nato",
+        "russia"
+      ],
+      "regions": [
+        "ukraine",
+        "russia",
+        "europe"
+      ],
+      "keywords": [
+        "nato",
+        "reviews",
+        "troop",
+        "readiness",
+        "after",
+        "russia",
+        "strike",
+        "near",
+        "ukraine",
+        "logistics",
+        "corridor",
+        "officials"
+      ],
+      "dominant_field": "conflict",
+      "impact_score": 17.1,
+      "field_attraction": 3.6,
+      "divergence_score": 15.98,
+      "rationale": [
+        "Im=17.1",
+        "Fa=3.6",
+        "im_base=3.0",
+        "im_actor_weight=3.0",
+        "im_region_weight=5.5",
+        "im_keyword_density=3.0",
+        "im_dominant_field_bonus=0.75",
+        "im_nonzero_field_bonus=0.4",
+        "im_title_salience=0.8",
+        "im_field_impact_scaling=0.23",
+        "im_text_signal_intensity=0.42",
+        "fa_dominant_field_strength=3.0",
+        "fa_dominance_margin_bonus=0.15",
+        "fa_coherence_bonus=0.45",
+        "fa_near_tie_penalty=0.0",
+        "fa_diffuse_third_field_penalty=0.0",
+        "actors=nato, russia",
+        "regions=ukraine, russia, europe",
+        "dominant_field=conflict:3.6"
+      ]
+    }
+  ],
+  "intervention_candidates": [
+    {
+      "priority": 1,
+      "event_id": "58d0024d14004954",
+      "target": "usa",
+      "intervention_type": "capability-control",
+      "reason": "Backtracked from event 'China expands chip controls after new AI export dispute with the United States' because its divergence score is 20.73 with field=technology, actors=usa, china, regions=east-asia, united-states.",
+      "expected_effect": "Constrain a fast-moving capability race before spillover grows."
+    },
+    {
+      "priority": 2,
+      "event_id": "86cecd2e746e2eb6",
+      "target": "iran",
+      "intervention_type": "negotiation",
+      "reason": "Backtracked from event 'Iran and Israel exchange missile warnings as diplomats push for talks' because its divergence score is 16.81 with field=diplomacy, actors=iran, regions=middle-east.",
+      "expected_effect": "Shift the branch toward a negotiated or paused outcome."
+    },
+    {
+      "priority": 3,
+      "event_id": "5572e236816e6535",
+      "target": "nato",
+      "intervention_type": "de-escalation",
+      "reason": "Backtracked from event 'NATO reviews troop readiness after Russia strike near Ukraine logistics corridor' because its divergence score is 15.98 with field=conflict, actors=nato, russia, regions=ukraine, russia, europe.",
+      "expected_effect": "Reduce near-term escalation incentives around the triggering event."
+    }
+  ]
+}
+
+Artifact written to: /tmp/tmpxkrpserc/config-report.json
+{
+  "schema_version": "tianji.run-artifact.v1",
+  "mode": "fetch",
+  "generated_at": "2026-03-23T13:37:58.561988+00:00",
+  "input_summary": {
+    "raw_item_count": 3,
+    "normalized_event_count": 3,
+    "sources": [
+      "127.0.0.1:40717"
+    ]
+  },
+  "scenario_summary": {
+    "headline": "The strongest current branch is technology, driven by china expands chip controls after new ai export dispute with the united states and 2 additional high-signal events.",
+    "dominant_field": "technology",
+    "risk_level": "high",
+    "top_regions": [
+      "east-asia",
+      "united-states",
+      "middle-east"
+    ],
+    "top_actors": [
+      "usa",
+      "china",
+      "iran"
+    ],
+    "event_groups": []
+  },
+  "scored_events": [
+    {
+      "event_id": "8b055bbeba8d3434",
+      "title": "China expands chip controls after new AI export dispute with the United States",
+      "source": "127.0.0.1:40717",
+      "link": "https://example.com/china-chip-controls",
+      "published_at": "Sun, 22 Mar 2026 08:00:00 GMT",
+      "actors": [
+        "usa",
+        "china"
+      ],
+      "regions": [
+        "east-asia",
+        "united-states"
+      ],
+      "keywords": [
+        "china",
+        "expands",
+        "chip",
+        "controls",
+        "after",
+        "new",
+        "export",
+        "dispute",
+        "with",
+        "the",
+        "united",
+        "states"
+      ],
+      "dominant_field": "technology",
+      "impact_score": 15.79,
+      "field_attraction": 7.75,
+      "divergence_score": 20.73,
+      "rationale": [
+        "Im=15.79",
+        "Fa=7.75",
+        "im_base=3.0",
+        "im_actor_weight=3.0",
+        "im_region_weight=3.0",
+        "im_keyword_density=3.0",
+        "im_dominant_field_bonus=1.62",
+        "im_nonzero_field_bonus=0.4",
+        "im_title_salience=0.8",
+        "im_field_impact_scaling=0.24",
+        "im_text_signal_intensity=0.72",
+        "fa_dominant_field_strength=6.5",
+        "fa_dominance_margin_bonus=0.67",
+        "fa_coherence_bonus=0.57",
+        "fa_near_tie_penalty=0.0",
+        "fa_diffuse_third_field_penalty=0.0",
+        "actors=usa, china",
+        "regions=east-asia, united-states",
+        "dominant_field=technology:7.75"
+      ]
+    },
+    {
+      "event_id": "dae2d1575d7e0a47",
+      "title": "Iran and Israel exchange missile warnings as diplomats push for talks",
+      "source": "127.0.0.1:40717",
+      "link": "https://example.com/iran-israel-warnings",
+      "published_at": "Sun, 22 Mar 2026 07:00:00 GMT",
+      "actors": [
+        "iran"
+      ],
+      "regions": [
+        "middle-east"
+      ],
+      "keywords": [
+        "iran",
+        "and",
+        "israel",
+        "exchange",
+        "missile",
+        "warnings",
+        "diplomats",
+        "push",
+        "for",
+        "talks",
+        "officials",
+        "tehran"
+      ],
+      "dominant_field": "diplomacy",
+      "impact_score": 13.04,
+      "field_attraction": 6.17,
+      "divergence_score": 16.81,
+      "rationale": [
+        "Im=13.04",
+        "Fa=6.17",
+        "im_base=3.0",
+        "im_actor_weight=1.2",
+        "im_region_weight=2.5",
+        "im_keyword_density=3.0",
+        "im_dominant_field_bonus=1.38",
+        "im_nonzero_field_bonus=0.6",
+        "im_title_salience=0.64",
+        "im_field_impact_scaling=0.3",
+        "im_text_signal_intensity=0.42",
+        "fa_dominant_field_strength=5.5",
+        "fa_dominance_margin_bonus=0.3",
+        "fa_coherence_bonus=0.38",
+        "fa_near_tie_penalty=0.0",
+        "fa_diffuse_third_field_penalty=0.0",
+        "actors=iran",
+        "regions=middle-east",
+        "dominant_field=diplomacy:6.17"
+      ]
+    },
+    {
+      "event_id": "882e4ae7e40e4623",
+      "title": "NATO reviews troop readiness after Russia strike near Ukraine logistics corridor",
+      "source": "127.0.0.1:40717",
+      "link": "https://example.com/nato-ukraine-readiness",
+      "published_at": "Sun, 22 Mar 2026 09:00:00 GMT",
+      "actors": [
+        "nato",
+        "russia"
+      ],
+      "regions": [
+        "ukraine",
+        "russia",
+        "europe"
+      ],
+      "keywords": [
+        "nato",
+        "reviews",
+        "troop",
+        "readiness",
+        "after",
+        "russia",
+        "strike",
+        "near",
+        "ukraine",
+        "logistics",
+        "corridor",
+        "officials"
+      ],
+      "dominant_field": "conflict",
+      "impact_score": 17.1,
+      "field_attraction": 3.6,
+      "divergence_score": 15.98,
+      "rationale": [
+        "Im=17.1",
+        "Fa=3.6",
+        "im_base=3.0",
+        "im_actor_weight=3.0",
+        "im_region_weight=5.5",
+        "im_keyword_density=3.0",
+        "im_dominant_field_bonus=0.75",
+        "im_nonzero_field_bonus=0.4",
+        "im_title_salience=0.8",
+        "im_field_impact_scaling=0.23",
+        "im_text_signal_intensity=0.42",
+        "fa_dominant_field_strength=3.0",
+        "fa_dominance_margin_bonus=0.15",
+        "fa_coherence_bonus=0.45",
+        "fa_near_tie_penalty=0.0",
+        "fa_diffuse_third_field_penalty=0.0",
+        "actors=nato, russia",
+        "regions=ukraine, russia, europe",
+        "dominant_field=conflict:3.6"
+      ]
+    }
+  ],
+  "intervention_candidates": [
+    {
+      "priority": 1,
+      "event_id": "8b055bbeba8d3434",
+      "target": "usa",
+      "intervention_type": "capability-control",
+      "reason": "Backtracked from event 'China expands chip controls after new AI export dispute with the United States' because its divergence score is 20.73 with field=technology, actors=usa, china, regions=east-asia, united-states.",
+      "expected_effect": "Constrain a fast-moving capability race before spillover grows."
+    },
+    {
+      "priority": 2,
+      "event_id": "dae2d1575d7e0a47",
+      "target": "iran",
+      "intervention_type": "negotiation",
+      "reason": "Backtracked from event 'Iran and Israel exchange missile warnings as diplomats push for talks' because its divergence score is 16.81 with field=diplomacy, actors=iran, regions=middle-east.",
+      "expected_effect": "Shift the branch toward a negotiated or paused outcome."
+    },
+    {
+      "priority": 3,
+      "event_id": "882e4ae7e40e4623",
+      "target": "nato",
+      "intervention_type": "de-escalation",
+      "reason": "Backtracked from event 'NATO reviews troop readiness after Russia strike near Ukraine logistics corridor' because its divergence score is 15.98 with field=conflict, actors=nato, russia, regions=ukraine, russia, europe.",
+      "expected_effect": "Reduce near-term escalation incentives around the triggering event."
+    }
+  ]
+}
+
+Artifact written to: /tmp/tmprq_6rp97/dedupe-report.json
+STDERR:
+test_cli_can_fetch_using_source_config (test_cli_inputs.CliInputTests.test_cli_can_fetch_using_source_config) ... ok
+test_cli_dedupes_config_and_explicit_source_urls (test_cli_inputs.CliInputTests.test_cli_dedupes_config_and_explicit_source_urls) ... ok
+test_cli_reports_duplicate_source_names_cleanly (test_cli_inputs.CliInputTests.test_cli_reports_duplicate_source_names_cleanly) ... ok
+test_cli_reports_fetch_failure_cleanly (test_cli_inputs.CliInputTests.test_cli_reports_fetch_failure_cleanly) ... ok
+test_cli_reports_unknown_source_name_cleanly (test_cli_inputs.CliInputTests.test_cli_reports_unknown_source_name_cleanly) ... ok
+test_cli_requires_input_source (test_cli_inputs.CliInputTests.test_cli_requires_input_source) ... Usage: python -m unittest run [OPTIONS]
+Try 'python -m unittest run -h' for help.
+
+Error: Provide at least one --fixture or enable --fetch with --source-url and/or --source-config.
+ok
+test_run_pipeline_rejects_unsupported_feed_format_cleanly (test_cli_inputs.CliInputTests.test_run_pipeline_rejects_unsupported_feed_format_cleanly) ... ok
+test_run_pipeline_reports_malformed_fixture_cleanly (test_cli_inputs.CliInputTests.test_run_pipeline_reports_malformed_fixture_cleanly) ... ok
+test_backtrack_candidates_collapse_grouped_duplicate_events (test_grouping.GroupingTests.test_backtrack_candidates_collapse_grouped_duplicate_events) ... ok
+test_backtrack_candidates_fall_back_to_shared_actor_when_endpoint_lacks_local_target (test_grouping.GroupingTests.test_backtrack_candidates_fall_back_to_shared_actor_when_endpoint_lacks_local_target) ... ok
+test_backtrack_candidates_fall_back_to_shared_region_target_when_group_lacks_shared_actors (test_grouping.GroupingTests.test_backtrack_candidates_fall_back_to_shared_region_target_when_group_lacks_shared_actors) ... ok
+test_backtrack_candidates_keep_low_signal_three_event_group_on_weak_type (test_grouping.GroupingTests.test_backtrack_candidates_keep_low_signal_three_event_group_on_weak_type) ... ok
+test_backtrack_candidates_keep_missing_span_effect_wording_neutral (test_grouping.GroupingTests.test_backtrack_candidates_keep_missing_span_effect_wording_neutral) ... ok
+test_backtrack_candidates_prefer_headline_actor_for_chain_endpoint_target (test_grouping.GroupingTests.test_backtrack_candidates_prefer_headline_actor_for_chain_endpoint_target) ... ok
+test_backtrack_candidates_use_causal_chain_effect_for_larger_groups (test_grouping.GroupingTests.test_backtrack_candidates_use_causal_chain_effect_for_larger_groups) ... ok
+test_backtrack_candidates_use_strong_conflict_group_type (test_grouping.GroupingTests.test_backtrack_candidates_use_strong_conflict_group_type) ... ok
+test_backtrack_candidates_use_strong_diplomacy_group_type (test_grouping.GroupingTests.test_backtrack_candidates_use_strong_diplomacy_group_type) ... ok
+test_backtrack_candidates_use_strong_economy_group_type (test_grouping.GroupingTests.test_backtrack_candidates_use_strong_economy_group_type) ... ok
+test_backtrack_candidates_use_weak_conflict_group_type (test_grouping.GroupingTests.test_backtrack_candidates_use_weak_conflict_group_type) ... ok
+test_backtrack_candidates_use_weak_diplomacy_group_type (test_grouping.GroupingTests.test_backtrack_candidates_use_weak_diplomacy_group_type) ... ok
+test_backtrack_candidates_use_weak_economy_group_type (test_grouping.GroupingTests.test_backtrack_candidates_use_weak_economy_group_type) ... ok
+test_group_events_allow_missing_timestamp_fallback (test_grouping.GroupingTests.test_group_events_allow_missing_timestamp_fallback) ... ok
+test_group_events_clusters_obviously_related_events (test_grouping.GroupingTests.test_group_events_clusters_obviously_related_events) ... ok
+test_group_events_compute_causal_span_from_known_timestamps (test_grouping.GroupingTests.test_group_events_compute_causal_span_from_known_timestamps) ... ok
+test_group_events_do_not_cluster_distant_related_events (test_grouping.GroupingTests.test_group_events_do_not_cluster_distant_related_events) ... ok
+test_group_events_support_transitive_causal_clustering (test_grouping.GroupingTests.test_group_events_support_transitive_causal_clustering) ... ok
+test_pipeline_reduces_duplicate_interventions_for_grouped_events (test_grouping.GroupingTests.test_pipeline_reduces_duplicate_interventions_for_grouped_events) ... ok
+test_pipeline_surfaces_event_groups_in_scenario_summary (test_grouping.GroupingTests.test_pipeline_surfaces_event_groups_in_scenario_summary) ... ok
+test_build_compare_side_avoids_duplicate_flattened_top_group_fields (test_history_compare.HistoryCompareTests.test_build_compare_side_avoids_duplicate_flattened_top_group_fields) ... ok
+test_cli_history_compare_can_compare_run_against_latest (test_history_compare.HistoryCompareTests.test_cli_history_compare_can_compare_run_against_latest) ... ok
+test_cli_history_compare_can_compare_run_against_previous (test_history_compare.HistoryCompareTests.test_cli_history_compare_can_compare_run_against_previous) ... ok
+test_cli_history_compare_can_filter_projected_views (test_history_compare.HistoryCompareTests.test_cli_history_compare_can_filter_projected_views) ... ok
+test_cli_history_compare_can_return_empty_filtered_views (test_history_compare.HistoryCompareTests.test_cli_history_compare_can_return_empty_filtered_views) ... ok
+test_cli_history_compare_can_use_latest_pair (test_history_compare.HistoryCompareTests.test_cli_history_compare_can_use_latest_pair) ... ok
+test_cli_history_compare_reads_two_persisted_runs (test_history_compare.HistoryCompareTests.test_cli_history_compare_reads_two_persisted_runs) ... ok
+test_cli_history_compare_rejects_inverted_divergence_score_range (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_inverted_divergence_score_range) ... ok
+test_cli_history_compare_rejects_inverted_field_attraction_range (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_inverted_field_attraction_range) ... ok
+test_cli_history_compare_rejects_inverted_impact_score_range (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_inverted_impact_score_range) ... ok
+test_cli_history_compare_rejects_mixed_explicit_pair_and_against_latest (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_mixed_explicit_pair_and_against_latest) ... ok
+test_cli_history_compare_rejects_mixed_explicit_pair_and_against_previous (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_mixed_explicit_pair_and_against_previous) ... ok
+test_cli_history_compare_rejects_negative_event_group_limit (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_negative_event_group_limit) ... ok
+test_cli_history_compare_rejects_negative_scored_event_limit (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_negative_scored_event_limit) ... ok
+test_cli_history_compare_rejects_non_positive_explicit_pair_ids (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_non_positive_explicit_pair_ids) ... ok
+test_cli_history_compare_rejects_non_positive_run_id (test_history_compare.HistoryCompareTests.test_cli_history_compare_rejects_non_positive_run_id) ... ok
+test_cli_history_compare_surfaces_top_group_evidence_diff (test_history_compare.HistoryCompareTests.test_cli_history_compare_surfaces_top_group_evidence_diff) ... ok
+test_history_compare_keeps_top_score_deltas_for_different_top_events (test_history_compare.HistoryCompareTests.test_history_compare_keeps_top_score_deltas_for_different_top_events) ... ok
+test_history_compare_reports_group_diff_when_grouping_changes (test_history_compare.HistoryCompareTests.test_history_compare_reports_group_diff_when_grouping_changes) ... ok
+test_history_compare_reports_top_group_evidence_chain_deltas (test_history_compare.HistoryCompareTests.test_history_compare_reports_top_group_evidence_chain_deltas) ... ok
+test_history_compare_reports_top_score_deltas (test_history_compare.HistoryCompareTests.test_history_compare_reports_top_score_deltas) ... ok
+test_cli_history_applies_filters_before_limit (test_history_list.HistoryListTests.test_cli_history_applies_filters_before_limit) ... ok
+test_cli_history_filters_runs_by_max_event_group_count (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_max_event_group_count) ... ok
+test_cli_history_filters_runs_by_max_top_scores (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_max_top_scores) ... ok
+test_cli_history_filters_runs_by_min_top_divergence_score (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_min_top_divergence_score) ... ok
+test_cli_history_filters_runs_by_mode_and_dominant_field (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_mode_and_dominant_field) ... ok
+test_cli_history_filters_runs_by_risk_level (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_risk_level) ... ok
+test_cli_history_filters_runs_by_since_timestamp (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_since_timestamp) ... ok
+test_cli_history_filters_runs_by_top_group_field_and_group_count (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_top_group_field_and_group_count) ... ok
+test_cli_history_filters_runs_by_top_impact_and_field_attraction (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_top_impact_and_field_attraction) ... ok
+test_cli_history_filters_runs_by_until_timestamp (test_history_list.HistoryListTests.test_cli_history_filters_runs_by_until_timestamp) ... ok
+test_cli_history_lists_no_group_fields_for_runs_without_groups (test_history_list.HistoryListTests.test_cli_history_lists_no_group_fields_for_runs_without_groups) ... ok
+test_cli_history_lists_persisted_runs (test_history_list.HistoryListTests.test_cli_history_lists_persisted_runs) ... ok
+test_cli_history_rejects_invalid_event_group_count_ranges (test_history_list.HistoryListTests.test_cli_history_rejects_invalid_event_group_count_ranges) ... ok
+test_cli_history_rejects_inverted_top_divergence_score_range (test_history_list.HistoryListTests.test_cli_history_rejects_inverted_top_divergence_score_range) ... ok
+test_cli_history_rejects_inverted_top_field_attraction_range (test_history_list.HistoryListTests.test_cli_history_rejects_inverted_top_field_attraction_range) ... ok
+test_cli_history_rejects_inverted_top_impact_score_range (test_history_list.HistoryListTests.test_cli_history_rejects_inverted_top_impact_score_range) ... ok
+test_cli_history_rejects_negative_limit (test_history_list.HistoryListTests.test_cli_history_rejects_negative_limit) ... ok
+test_cli_history_score_filters_exclude_runs_without_scored_events (test_history_list.HistoryListTests.test_cli_history_score_filters_exclude_runs_without_scored_events) ... ok
+test_filter_run_list_items_applies_event_group_filters (test_history_list.HistoryListTests.test_filter_run_list_items_applies_event_group_filters) ... ok
+test_filter_run_list_items_applies_top_score_thresholds (test_history_list.HistoryListTests.test_filter_run_list_items_applies_top_score_thresholds) ... ok
+test_cli_history_show_aligns_interventions_after_limit (test_history_show.HistoryShowTests.test_cli_history_show_aligns_interventions_after_limit) ... ok
+test_cli_history_show_applies_filters_before_limit (test_history_show.HistoryShowTests.test_cli_history_show_applies_filters_before_limit) ... ok
+test_cli_history_show_can_filter_and_limit_event_groups (test_history_show.HistoryShowTests.test_cli_history_show_can_filter_and_limit_event_groups) ... ok
+test_cli_history_show_can_limit_interventions_to_visible_scored_events (test_history_show.HistoryShowTests.test_cli_history_show_can_limit_interventions_to_visible_scored_events) ... ok
+test_cli_history_show_can_read_latest_run (test_history_show.HistoryShowTests.test_cli_history_show_can_read_latest_run) ... ok
+test_cli_history_show_can_read_next_run (test_history_show.HistoryShowTests.test_cli_history_show_can_read_next_run) ... ok
+test_cli_history_show_can_read_previous_run (test_history_show.HistoryShowTests.test_cli_history_show_can_read_previous_run) ... ok
+test_cli_history_show_can_return_empty_matching_interventions (test_history_show.HistoryShowTests.test_cli_history_show_can_return_empty_matching_interventions) ... ok
+test_cli_history_show_can_return_empty_scored_event_selection (test_history_show.HistoryShowTests.test_cli_history_show_can_return_empty_scored_event_selection) ... ok
+test_cli_history_show_filters_scored_events_by_max_thresholds (test_history_show.HistoryShowTests.test_cli_history_show_filters_scored_events_by_max_thresholds) ... ok
+test_cli_history_show_filters_scored_events_by_scores_and_field (test_history_show.HistoryShowTests.test_cli_history_show_filters_scored_events_by_scores_and_field) ... ok
+test_cli_history_show_limits_scored_events (test_history_show.HistoryShowTests.test_cli_history_show_limits_scored_events) ... ok
+test_cli_history_show_preserves_group_evidence_chain_metadata (test_history_show.HistoryShowTests.test_cli_history_show_preserves_group_evidence_chain_metadata) ... ok
+test_cli_history_show_projects_scored_events_and_event_groups_independently (test_history_show.HistoryShowTests.test_cli_history_show_projects_scored_events_and_event_groups_independently) ... ok
+test_cli_history_show_reads_single_persisted_run (test_history_show.HistoryShowTests.test_cli_history_show_reads_single_persisted_run) ... ok
+test_cli_history_show_rejects_inverted_divergence_score_range (test_history_show.HistoryShowTests.test_cli_history_show_rejects_inverted_divergence_score_range) ... ok
+test_cli_history_show_rejects_inverted_field_attraction_range (test_history_show.HistoryShowTests.test_cli_history_show_rejects_inverted_field_attraction_range) ... ok
+test_cli_history_show_rejects_inverted_impact_score_range (test_history_show.HistoryShowTests.test_cli_history_show_rejects_inverted_impact_score_range) ... ok
+test_cli_history_show_rejects_negative_event_group_limit (test_history_show.HistoryShowTests.test_cli_history_show_rejects_negative_event_group_limit) ... ok
+test_cli_history_show_rejects_negative_scored_event_limit (test_history_show.HistoryShowTests.test_cli_history_show_rejects_negative_scored_event_limit) ... ok
+test_cli_history_show_rejects_non_positive_run_id (test_history_show.HistoryShowTests.test_cli_history_show_rejects_non_positive_run_id) ... ok
+test_filter_event_group_details_applies_field_filter_and_limit (test_history_show.HistoryShowTests.test_filter_event_group_details_applies_field_filter_and_limit) ... ok
+test_filter_intervention_candidate_details_can_align_with_visible_events (test_history_show.HistoryShowTests.test_filter_intervention_candidate_details_can_align_with_visible_events) ... ok
+test_filter_intervention_candidate_details_is_noop_without_alignment (test_history_show.HistoryShowTests.test_filter_intervention_candidate_details_is_noop_without_alignment) ... ok
+test_filter_scored_event_details_applies_thresholds_and_limit (test_history_show.HistoryShowTests.test_filter_scored_event_details_applies_thresholds_and_limit) ... ok
+test_fetch_pipeline_can_read_from_local_http_server (test_pipeline.PipelineIntegrationTests.test_fetch_pipeline_can_read_from_local_http_server) ... ok
+test_fixture_pipeline_can_persist_run_to_sqlite (test_pipeline.PipelineIntegrationTests.test_fixture_pipeline_can_persist_run_to_sqlite) ... ok
+test_fixture_pipeline_has_stable_scoring_and_backtrack_order (test_pipeline.PipelineIntegrationTests.test_fixture_pipeline_has_stable_scoring_and_backtrack_order) ... ok
+test_fixture_pipeline_writes_expected_artifact (test_pipeline.PipelineIntegrationTests.test_fixture_pipeline_writes_expected_artifact) ... ok
+test_pipeline_emits_empty_artifact_for_empty_atom_feed (test_pipeline.PipelineIntegrationTests.test_pipeline_emits_empty_artifact_for_empty_atom_feed) ... ok
+test_pipeline_emits_empty_artifact_for_empty_rss_feed (test_pipeline.PipelineIntegrationTests.test_pipeline_emits_empty_artifact_for_empty_rss_feed) ... ok
+test_pipeline_marks_mixed_fixture_and_fetch_mode (test_pipeline.PipelineIntegrationTests.test_pipeline_marks_mixed_fixture_and_fetch_mode) ... ok
+test_pipeline_parses_atom_feed_deterministically (test_pipeline.PipelineIntegrationTests.test_pipeline_parses_atom_feed_deterministically) ... ok
+test_score_event_applies_actor_weight_inside_im (test_scoring.ScoringTests.test_score_event_applies_actor_weight_inside_im) ... ok
+test_score_event_applies_coherence_inside_fa (test_scoring.ScoringTests.test_score_event_applies_coherence_inside_fa) ... ok
+test_score_event_applies_dominance_margin_inside_fa (test_scoring.ScoringTests.test_score_event_applies_dominance_margin_inside_fa) ... ok
+test_score_event_applies_dominant_field_strength_inside_im (test_scoring.ScoringTests.test_score_event_applies_dominant_field_strength_inside_im) ... ok
+test_score_event_applies_field_specific_impact_scaling (test_scoring.ScoringTests.test_score_event_applies_field_specific_impact_scaling) ... ok
+test_score_event_applies_region_weight_inside_im (test_scoring.ScoringTests.test_score_event_applies_region_weight_inside_im) ... ok
+test_score_event_applies_text_signal_surface_contributions_inside_im (test_scoring.ScoringTests.test_score_event_applies_text_signal_surface_contributions_inside_im) ... ok
+test_score_event_caps_raw_keyword_density_inside_im (test_scoring.ScoringTests.test_score_event_caps_raw_keyword_density_inside_im) ... ok
+test_score_event_combines_text_signal_surface_contributions_inside_im (test_scoring.ScoringTests.test_score_event_combines_text_signal_surface_contributions_inside_im) ... ok
+test_score_event_diffuse_third_field_penalty_starts_above_threshold (test_scoring.ScoringTests.test_score_event_diffuse_third_field_penalty_starts_above_threshold) ... ok
+test_score_event_exact_top_field_tie_is_order_independent (test_scoring.ScoringTests.test_score_event_exact_top_field_tie_is_order_independent) ... ok
+test_score_event_exposes_explicit_im_fa_semantics (test_scoring.ScoringTests.test_score_event_exposes_explicit_im_fa_semantics) ... ok
+test_score_event_ignores_subthreshold_field_noise_inside_im (test_scoring.ScoringTests.test_score_event_ignores_subthreshold_field_noise_inside_im) ... ok
+test_score_event_keeps_clear_field_alignment_semantics_stable (test_scoring.ScoringTests.test_score_event_keeps_clear_field_alignment_semantics_stable) ... ok
+test_score_event_near_tie_penalty_starts_below_margin_threshold (test_scoring.ScoringTests.test_score_event_near_tie_penalty_starts_below_margin_threshold) ... ok
+test_score_event_penalizes_diffuse_mixed_field_support_in_fa (test_scoring.ScoringTests.test_score_event_penalizes_diffuse_mixed_field_support_in_fa) ... ok
+test_score_event_penalizes_near_tie_field_alignment_in_fa (test_scoring.ScoringTests.test_score_event_penalizes_near_tie_field_alignment_in_fa) ... ok
+test_score_event_rewards_actor_and_region_title_salience (test_scoring.ScoringTests.test_score_event_rewards_actor_and_region_title_salience) ... ok
+test_score_event_rewards_clearer_field_alignment_in_fa (test_scoring.ScoringTests.test_score_event_rewards_clearer_field_alignment_in_fa) ... ok
+test_score_event_rewards_meaningful_field_diversity_inside_im (test_scoring.ScoringTests.test_score_event_rewards_meaningful_field_diversity_inside_im) ... ok
+test_score_event_rewards_stronger_text_signal_intensity_in_im (test_scoring.ScoringTests.test_score_event_rewards_stronger_text_signal_intensity_in_im) ... ok
+test_score_event_rewards_stronger_weighted_field_intensity_in_im (test_scoring.ScoringTests.test_score_event_rewards_stronger_weighted_field_intensity_in_im) ... ok
+test_score_event_text_signal_intensity_does_not_reward_generic_keyword_mass (test_scoring.ScoringTests.test_score_event_text_signal_intensity_does_not_reward_generic_keyword_mass) ... ok
+test_score_event_text_signal_intensity_ignores_incidental_substrings (test_scoring.ScoringTests.test_score_event_text_signal_intensity_ignores_incidental_substrings) ... ok
+test_score_event_text_signal_intensity_matches_punctuation_adjacent_cues (test_scoring.ScoringTests.test_score_event_text_signal_intensity_matches_punctuation_adjacent_cues) ... ok
+test_score_event_text_signal_intensity_respects_cap (test_scoring.ScoringTests.test_score_event_text_signal_intensity_respects_cap) ... ok
+test_score_event_treats_zero_field_mass_as_uncategorized (test_scoring.ScoringTests.test_score_event_treats_zero_field_mass_as_uncategorized) ... ok
+test_score_event_zero_field_mass_does_not_produce_negative_fa (test_scoring.ScoringTests.test_score_event_zero_field_mass_does_not_produce_negative_fa) ... ok
+test_summarize_scenario_resolves_dominant_field_ties_independently_of_event_order (test_scoring.ScoringTests.test_summarize_scenario_resolves_dominant_field_ties_independently_of_event_order) ... ok
+test_build_compare_panel_title_shows_pairing (test_tui.TuiTests.test_build_compare_panel_title_shows_pairing) ... ok
+test_build_compare_panel_title_shows_scroll_indicator (test_tui.TuiTests.test_build_compare_panel_title_shows_scroll_indicator) ... ok
+test_cli_tui_dispatches_to_history_browser (test_tui.TuiTests.test_cli_tui_dispatches_to_history_browser) ... ok
+test_cli_tui_rejects_negative_limit (test_tui.TuiTests.test_cli_tui_rejects_negative_limit) ... ok
+test_format_compare_detail_includes_core_fields (test_tui.TuiTests.test_format_compare_detail_includes_core_fields) ... ok
+test_format_delta_handles_none (test_tui.TuiTests.test_format_delta_handles_none) ... ok
+test_format_history_row_includes_core_fields_and_truncates_headline (test_tui.TuiTests.test_format_history_row_includes_core_fields_and_truncates_headline) ... ok
+test_format_run_detail_includes_core_fields (test_tui.TuiTests.test_format_run_detail_includes_core_fields) ... ok
+test_format_run_detail_limits_event_group_preview_and_truncates_summaries (test_tui.TuiTests.test_format_run_detail_limits_event_group_preview_and_truncates_summaries) ... ok
+test_format_run_detail_limits_intervention_preview_and_truncates_effects (test_tui.TuiTests.test_format_run_detail_limits_intervention_preview_and_truncates_effects) ... ok
+test_format_run_detail_limits_scored_event_preview_and_truncates_titles (test_tui.TuiTests.test_format_run_detail_limits_scored_event_preview_and_truncates_titles) ... ok
+test_format_status_footer_shows_bounds_and_state (test_tui.TuiTests.test_format_status_footer_shows_bounds_and_state) ... ok
+test_format_top_group_evidence_diff_lines_comparable (test_tui.TuiTests.test_format_top_group_evidence_diff_lines_comparable) ... ok
+test_format_top_group_evidence_diff_lines_contrast (test_tui.TuiTests.test_format_top_group_evidence_diff_lines_contrast) ... ok
+test_get_compare_similarity_summary_high_similarity (test_tui.TuiTests.test_get_compare_similarity_summary_high_similarity) ... ok
+test_get_compare_similarity_summary_identical (test_tui.TuiTests.test_get_compare_similarity_summary_identical) ... ok
+test_get_compare_similarity_summary_major_changes (test_tui.TuiTests.test_get_compare_similarity_summary_major_changes) ... ok
+test_history_list_state_compare_transitions (test_tui.TuiTests.test_history_list_state_compare_transitions) ... ok
+test_history_list_state_compare_transitions_single_run (test_tui.TuiTests.test_history_list_state_compare_transitions_single_run) ... ok
+test_history_list_state_keeps_selection_visible_when_scrolling (test_tui.TuiTests.test_history_list_state_keeps_selection_visible_when_scrolling) ... ok
+test_history_list_state_scrolls_detail_pane (test_tui.TuiTests.test_history_list_state_scrolls_detail_pane) ... ok
+test_history_list_state_sets_transient_messages_on_bounds (test_tui.TuiTests.test_history_list_state_sets_transient_messages_on_bounds) ... ok
+test_history_list_state_step_compare_target_skips_left_run (test_tui.TuiTests.test_history_list_state_step_compare_target_skips_left_run) ... ok
+test_history_list_state_step_compare_target_stays_in_bounds (test_tui.TuiTests.test_history_list_state_step_compare_target_stays_in_bounds) ... ok
+test_history_list_state_step_run_stays_in_bounds (test_tui.TuiTests.test_history_list_state_step_run_stays_in_bounds) ... ok
+test_history_list_state_steps_runs_and_resets_detail_scroll (test_tui.TuiTests.test_history_list_state_steps_runs_and_resets_detail_scroll) ... ok
+test_history_list_state_toggles_focus_and_zoom (test_tui.TuiTests.test_history_list_state_toggles_focus_and_zoom) ... ok
+test_launch_history_tui_prints_empty_state_without_browser (test_tui.TuiTests.test_launch_history_tui_prints_empty_state_without_browser) ... ok
+test_launch_history_tui_uses_browser_for_available_runs (test_tui.TuiTests.test_launch_history_tui_uses_browser_for_available_runs) ... /home/kita/.local/share/uv/python/cpython-3.13.12-linux-x86_64-gnu/lib/python3.13/unittest/mock.py:2247: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7ffb6f6c4040>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_wrap_text_splits_long_lines (test_tui.TuiTests.test_wrap_text_splits_long_lines) ... ok
+
+----------------------------------------------------------------------
+Ran 161 tests in 2.112s
+
+OK
+
+## cli help: top-level
+Command: .venv/bin/python -m tianji --help
+Exit code: 0
+STDOUT:
+Usage: python -m unittest [OPTIONS] COMMAND [ARGS]...
+
+  TianJi one-shot MVP.
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  history
+  history-compare
+  history-show
+  run
+  tui
+
+## cli help: run
+Command: .venv/bin/python -m tianji run --help
+Exit code: 0
+STDOUT:
+Usage: python -m unittest run [OPTIONS]
+
+Options:
+  --fixture TEXT        Path to a local RSS/Atom fixture file
+  --fetch               Fetch one or more live feeds once
+  --source-url TEXT     Feed URL used with --fetch
+  --source-config TEXT  Optional JSON file containing named source URLs
+  --source-name TEXT    Optional source name from --source-config; repeat to
+                        select multiple
+  --output TEXT         Path for the generated JSON artifact  [default:
+                        runs/latest-run.json]
+  --sqlite-path TEXT    Optional SQLite database path for persisting run data
+  -h, --help            Show this message and exit.
+
+## cli help: history
+Command: .venv/bin/python -m tianji history --help
+Exit code: 0
+STDOUT:
+Usage: python -m unittest history [OPTIONS]
+
+Options:
+  --sqlite-path TEXT              SQLite database path containing persisted
+                                  TianJi runs  [required]
+  --limit INTEGER                 Maximum number of runs to list  [default:
+                                  20]
+  --mode TEXT                     Optional run mode filter (for example:
+                                  fixture, fetch, fetch+fixture)
+  --dominant-field TEXT           Optional dominant field filter for persisted
+                                  runs
+  --risk-level TEXT               Optional risk level filter for persisted
+                                  runs
+  --since TEXT                    Optional inclusive lower bound for
+                                  generated_at (ISO timestamp)
+  --until TEXT                    Optional inclusive upper bound for
+                                  generated_at (ISO timestamp)
+  --min-top-impact-score FLOAT    Optional minimum impact_score for the
+                                  persisted run's top scored event
+  --max-top-impact-score FLOAT    Optional maximum impact_score for the
+                                  persisted run's top scored event
+  --min-top-field-attraction FLOAT
+                                  Optional minimum field_attraction for the
+                                  persisted run's top scored event
+  --max-top-field-attraction FLOAT
+                                  Optional maximum field_attraction for the
+                                  persisted run's top scored event
+  --min-top-divergence-score FLOAT
+                                  Optional minimum divergence_score for the
+                                  persisted run's top scored event
+  --max-top-divergence-score FLOAT
+                                  Optional maximum divergence_score for the
+                                  persisted run's top scored event
+  --top-group-dominant-field TEXT
+                                  Optional dominant field filter for the
+                                  persisted run's top event group
+  --min-event-group-count INTEGER
+                                  Optional minimum persisted event-group count
+                                  for the run
+  --max-event-group-count INTEGER
+                                  Optional maximum persisted event-group count
+                                  for the run
+  -h, --help                      Show this message and exit.
+
+## cli help: history-show
+Command: .venv/bin/python -m tianji history-show --help
+Exit code: 0
+STDOUT:
+Usage: python -m unittest history-show [OPTIONS]
+
+Options:
+  --sqlite-path TEXT             SQLite database path containing persisted
+                                 TianJi runs  [required]
+  --run-id INTEGER               Run identifier to inspect
+  --latest                       Show the latest persisted run instead of
+                                 specifying --run-id
+  --previous                     Show the persisted run immediately before
+                                 --run-id
+  --next                         Show the persisted run immediately after
+                                 --run-id
+  --dominant-field TEXT          Optional dominant field filter for scored
+                                 events inside the selected run
+  --min-impact-score FLOAT       Optional minimum impact_score for scored
+                                 events inside the selected run
+  --max-impact-score FLOAT       Optional maximum impact_score for scored
+                                 events inside the selected run
+  --min-field-attraction FLOAT   Optional minimum field_attraction for scored
+                                 events inside the selected run
+  --max-field-attraction FLOAT   Optional maximum field_attraction for scored
+                                 events inside the selected run
+  --min-divergence-score FLOAT   Optional minimum divergence_score for scored
+                                 events inside the selected run
+  --max-divergence-score FLOAT   Optional maximum divergence_score for scored
+                                 events inside the selected run
+  --limit-scored-events INTEGER  Optional maximum number of scored events to
+                                 return for the selected run
+  --only-matching-interventions  Keep only intervention candidates whose
+                                 event_id remains in the final visible scored-
+                                 event set after filters and limits
+  --group-dominant-field TEXT    Optional dominant field filter for persisted
+                                 event groups inside the selected run
+  --limit-event-groups INTEGER   Optional maximum number of persisted event
+                                 groups to return for the selected run
+  -h, --help                     Show this message and exit.
+
+## cli help: history-compare
+Command: .venv/bin/python -m tianji history-compare --help
+Exit code: 0
+STDOUT:
+Usage: python -m unittest history-compare [OPTIONS]
+
+Options:
+  --sqlite-path TEXT             SQLite database path containing persisted
+                                 TianJi runs  [required]
+  --left-run-id INTEGER          Left-side run identifier for comparison
+  --right-run-id INTEGER         Right-side run identifier for comparison
+  --latest-pair                  Compare the two latest persisted runs instead
+                                 of specifying run ids
+  --run-id INTEGER               Compare one explicit run against the latest
+                                 persisted run
+  --against-latest               Use the latest persisted run as the right-
+                                 hand side for comparison
+  --against-previous             Use the immediately previous persisted run as
+                                 the left-hand side for comparison
+  --dominant-field TEXT          Optional dominant field filter for scored
+                                 events inside both compared runs
+  --min-impact-score FLOAT       Optional minimum impact_score for scored
+                                 events inside both compared runs
+  --max-impact-score FLOAT       Optional maximum impact_score for scored
+                                 events inside both compared runs
+  --min-field-attraction FLOAT   Optional minimum field_attraction for scored
+                                 events inside both compared runs
+  --max-field-attraction FLOAT   Optional maximum field_attraction for scored
+                                 events inside both compared runs
+  --min-divergence-score FLOAT   Optional minimum divergence_score for scored
+                                 events inside both compared runs
+  --max-divergence-score FLOAT   Optional maximum divergence_score for scored
+                                 events inside both compared runs
+  --limit-scored-events INTEGER  Optional maximum number of scored events to
+                                 return for each compared run
+  --only-matching-interventions  Keep only intervention candidates whose
+                                 event_id remains in the final visible scored-
+                                 event set for each compared run
+  --group-dominant-field TEXT    Optional dominant field filter for persisted
+                                 event groups inside both compared runs
+  --limit-event-groups INTEGER   Optional maximum number of persisted event
+                                 groups to return for each compared run
+  -h, --help                     Show this message and exit.
+
+## cli help: tui
+Command: .venv/bin/python -m tianji tui --help
+Exit code: 0
+STDOUT:
+Usage: python -m unittest tui [OPTIONS]
+
+Options:
+  --sqlite-path TEXT  SQLite database path containing persisted TianJi runs
+                      [required]
+  --limit INTEGER     Maximum number of runs to load into the history browser
+                      [default: 20]
+  -h, --help          Show this message and exit.
+
+## git diff --stat
+Command: git diff --stat
+Exit code: 0
+STDOUT:
+ DEV_PLAN.md           | 131 +++++++++++++++++++++++++++++---------------------
+ LOCAL_API_CONTRACT.md |  11 +++--
+ README.md             | 107 ++++++++++++++++++-----------------------
+ SCORING_SPEC.md       | 106 ++++++++++++++++++++++------------------
+ SESSION_HANDOFF.md    |  51 +++++++++-----------
+ TUI_CONTRACT.md       |  57 ++++++++++++++--------
+ tests/test_scoring.py |  28 +++++++++++
+ tianji/scoring.py     | 106 ++++++++++++++++++++++++++++++++++++++++
+ 8 files changed, 383 insertions(+), 214 deletions(-)
+
+## git status --short
+Command: git status --short
+Exit code: 0
+STDOUT:
+ M DEV_PLAN.md
+ M LOCAL_API_CONTRACT.md
+ M README.md
+ M SCORING_SPEC.md
+ M SESSION_HANDOFF.md
+ M TUI_CONTRACT.md
+ M tests/test_scoring.py
+ M tianji/scoring.py
+?? .sisyphus/boulder.json
+?? .sisyphus/evidence/
+?? .sisyphus/notepads/
+?? .sisyphus/plans/tianji-docs-and-fa-ambiguity-refinement.md
+?? .sisyphus/plans/tianji-rationale-transparency.md
+
+## git diff --name-only
+Command: git diff --name-only
+Exit code: 0
+STDOUT:
+DEV_PLAN.md
+LOCAL_API_CONTRACT.md
+README.md
+SCORING_SPEC.md
+SESSION_HANDOFF.md
+TUI_CONTRACT.md
+tests/test_scoring.py
+tianji/scoring.py
+

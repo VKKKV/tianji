@@ -10,33 +10,21 @@ _Concept illustration for TianJi's long-term direction. The currently shipped pr
 
 ## Current Reality
 
-The implemented slice is a Python CLI pipeline under `tianji/`.
+The implemented slice is a local-first Python operator workflow under `tianji/`.
 
-It supports:
+What ships now:
 
-- loading one or more local RSS/Atom fixtures
-- optionally fetching one or more live feeds once
-- loading named fetch targets from a JSON source registry
-- normalizing events into a deterministic internal model
-- scoring events with rule-based divergence-style heuristics
-- producing ranked intervention candidates
-- writing a structured JSON artifact
-- optionally persisting runs to local SQLite
-- listing persisted runs and inspecting stored run details from SQLite
-- comparing two persisted runs from SQLite
-- filtering persisted runs by mode, dominant field, or risk level
-- filtering persisted runs by mode, dominant field, risk level, or generated time range
-- filtering persisted runs by top scored-event `impact_score`/`field_attraction`/`divergence_score` thresholds
-- filtering persisted runs by top event-group dominant field and event-group count
-- comparing grouped-analysis changes between persisted runs
-- grouping related events into lightweight evidence chains for operator review
-- grouping related events with transitive causal-cluster ordering inside persisted event groups
-- using grouped evidence chains inside intervention reasoning
-- surfacing grouped evidence/member/link deltas in persisted run comparison
-- surfacing top scored-event score deltas in persisted run comparison
-- surfacing clean CLI errors for malformed feeds and failed fetches
+- one-shot `run` execution from fixtures or one-time fetches
+- config-driven source selection from a JSON registry
+- deterministic normalization, scoring, grouping, and backtracking
+- schema-versioned JSON artifact output
+- optional SQLite persistence through `tianji/storage.py`
+- persisted run browsing with `history`, `history-show`, and `history-compare`
+- read-time scored-event and event-group lenses that shape the operator view without mutating stored runs
+- an early Rich-based `tui` command for read-only persisted list, detail, and compare browsing
+- operator-facing validation for malformed feeds, bad filter windows, invalid compare presets, and missing relative-history targets
 
-This keeps the first version testable, local, and reproducible.
+This keeps the shipped slice testable, local, and reproducible while leaving daemon, API, and web-runtime ideas clearly in the future bucket.
 
 ## Quick Start
 
@@ -132,7 +120,7 @@ The current MVP flow is:
    Convert raw feed items into normalized events with extracted keywords, actors, regions, and field scores.
 
 3. **Infer / Score**  
-   Apply deterministic scoring rules to estimate event impact and field attraction, using weighted actors/regions, bounded title salience, bounded dominant-field impact scaling, field-alignment structure, and dominant-field text-signal intensity before ranking the most important events.
+   Apply deterministic scoring rules to estimate event impact and field attraction, using weighted actors/regions, bounded title salience, bounded dominant-field impact scaling, field-alignment structure, and dominant-field text-signal intensity before ranking the most important events. The shipped rationale output is now richer and more inspectable, exposing additive `Im` and `Fa` terms directly so operators can see which bounded bonuses and penalties contributed without changing the current ranking formula.
 
 4. **Backtrack**  
    Generate likely intervention targets and intervention types from the highest-ranked events.
@@ -144,10 +132,10 @@ The current MVP flow is:
    Store run metadata plus raw, normalized, scored, and intervention rows in SQLite when `--sqlite-path` is provided.
 
 7. **Inspect Run History (Optional)**  
-   Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, generated-at range, or top scored-event `impact_score` / `field_attraction` / `divergence_score`, and inspect one stored run's summaries, scored events, event groups, and intervention candidates with `history-show`, `history-show --latest`, `history-show --previous`, or `history-show --next`. `history-show` can now also narrow the stored scored-event list by dominant field, score thresholds, and per-run result limits, optionally keep only intervention candidates that still match the visible scored-event set, and filter or limit persisted event groups inside the selected run.
+   Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, generated-at range, top scored-event `impact_score` / `field_attraction` / `divergence_score`, or grouped-analysis fields. Inspect one stored run with `history-show`, `history-show --latest`, `history-show --previous`, or `history-show --next`. `history-show` can also narrow visible scored events, event groups, and optionally aligned interventions, while stored run-summary fields remain the persisted truth.
 
 8. **Compare Persisted Runs (Optional)**  
-   Compare two stored runs with `history-compare`, compare the newest two stored runs with `history-compare --latest-pair`, compare one chosen run against the newest run with `history-compare --run-id N --against-latest`, or compare one chosen run against its immediate predecessor with `history-compare --run-id N --against-previous`. `history-compare` now also supports the same read-time scored-event and event-group projections as `history-show`, so comparisons can be scoped to one dominant field, score window, or group lens without changing the stored runs themselves.
+   Compare two stored runs with `history-compare`, compare the newest two stored runs with `history-compare --latest-pair`, compare one chosen run against the newest run with `history-compare --run-id N --against-latest`, or compare one chosen run against its immediate predecessor with `history-compare --run-id N --against-previous`. `history-compare` reuses the same read-time scored-event and event-group lenses as `history-show`, so compare-side projections can be focused without rewriting stored run data.
 
 ## Output Artifact
 
@@ -161,15 +149,15 @@ The artifact includes:
 - `scored_events`: normalized events with impact score, field attraction, divergence score, and rationale
 - `intervention_candidates`: ranked backtracked actions derived from the top events
 
-Current scored-event rationale remains additive and inspectable. It always exposes top-level `Im` / `Fa` values, and now also surfaces the bounded `Im` subterms for dominant-field impact scaling and title salience when those bonuses actually contribute to the event.
+Current scored-event rationale is shipped as an additive, explicit, and inspectable contract. It always exposes top-level `Im` / `Fa` values, keeps the current `divergence_score` blend unchanged, and now surfaces richer bounded rationale terms for the shipped `Im` and `Fa` components. That includes fixed additive `Im` terms such as actor weight, region weight, keyword density, dominant-field bonus, and nonzero-field bonus, conditional `Im` terms such as title salience and dominant-field impact scaling when they contribute, the shipped text-signal-intensity term for dominant-field cue concentration, and additive or subtractive `Fa` terms such as dominant-field strength, dominance-margin bonus, coherence bonus, near-tie penalty, and diffuse-third-field penalty.
 
-Persisted run history now exposes both compact run summaries and per-run drill-down over stored scored events and intervention candidates.
+Persisted run history now exposes both compact run summaries and per-run drill-down over stored scored events, grouped analysis, and intervention candidates.
 
 History list items now also expose the persisted run's top scored-event identity plus its `impact_score`, `field_attraction`, and `divergence_score`, so operators can query stored runs by the strongest scored branch signal without opening each run individually. These score filters operate on that single persisted top scored event for each run, and runs with no scored events expose `null` top metrics that do not satisfy numeric thresholds. Negative `--limit` values and inverted score windows such as `--min-top-impact-score` greater than `--max-top-impact-score` are rejected at parse time.
 
 History list items now also expose grouped-run triage fields such as `event_group_count`, `top_event_group_headline_event_id`, `top_event_group_dominant_field`, and `top_event_group_member_count`, so operators can query stored runs by whether grouped scenarios emerged at all and what kind of top group led the run. Runs with no event groups report `event_group_count=0` and `null` top-group fields.
 
-`history-show` now supports score-aware filtering and limiting over the selected run's persisted `scored_events`, using the same `impact_score` / `field_attraction` / `divergence_score` vocabulary as the stored scored-event details while leaving the run summary intact. By default the intervention list remains intact even if scored-event filters hide some events, but `--only-matching-interventions` can align intervention candidates to the final visible scored-event selection after both filters and limits. Inverted score windows and non-positive explicit `--run-id` values are rejected at parse time.
+`history-show` now supports score-aware filtering and limiting over the selected run's persisted `scored_events`, using the same `impact_score` / `field_attraction` / `divergence_score` vocabulary as the stored scored-event details while leaving the run summary intact. By default the intervention list remains intact even if scored-event filters hide some events, but `--only-matching-interventions` can align intervention candidates to the final visible scored-event selection after both filters and limits. In other words, stored run-summary fields remain persisted truth, while `scored_events`, grouped-analysis slices, and optionally aligned interventions can be projected into a narrower operator lens. Inverted score windows and non-positive explicit `--run-id` values are rejected at parse time.
 
 `history-show` now also supports group-aware drill-down over persisted `scenario_summary.event_groups` via `--group-dominant-field` and `--limit-event-groups`, so single-run grouped analysis can be narrowed without changing the stored scenario summary itself.
 
@@ -194,17 +182,30 @@ Scoring-contract coverage now also includes isolated `Im` checks for actor weigh
 ```text
 .
 ├── tianji/
+│   ├── __main__.py
 │   ├── cli.py
 │   ├── pipeline.py
 │   ├── fetch.py
 │   ├── normalize.py
 │   ├── scoring.py
 │   ├── backtrack.py
+│   ├── storage.py
+│   ├── tui.py
 │   └── models.py
 ├── tests/
 │   ├── fixtures/sample_feed.xml
-│   └── test_pipeline.py
+│   ├── test_pipeline.py
+│   ├── test_tui.py
+│   ├── test_history_list.py
+│   ├── test_history_show.py
+│   ├── test_history_compare.py
+│   ├── test_scoring.py
+│   ├── test_grouping.py
+│   ├── test_cli_inputs.py
+│   └── support.py
 ├── pyproject.toml
+├── LOCAL_API_CONTRACT.md
+├── TUI_CONTRACT.md
 └── README.md
 ```
 
@@ -212,7 +213,7 @@ Scoring-contract coverage now also includes isolated `Im` checks for actor weigh
 
 - **Language:** Python first, to keep the MVP small and fast to iterate
 - **Style:** stdlib-first, deterministic where possible
-- **Verification:** fixture-first tests plus fetch, Atom, mixed-input, config, and failure-path coverage
+- **Verification:** fixture-first tests plus history list/detail/compare, TUI, grouping, scoring, fetch, Atom, mixed-input, config, and failure-path coverage
 - **Current scope:** one-shot execution only; no daemon, scheduler, IPC bus, or web UI yet
 
 ## Long-Term Vision
@@ -241,37 +242,21 @@ These are reference inputs, not part of the initial TianJi repo history.
 
 ### Current
 
-- Click-based one-shot CLI
-- local fixture-first execution
-- optional one-time live fetch
+- Click-based CLI commands for `run`, `history`, `history-show`, `history-compare`, and `tui`
+- local fixture-first execution plus optional one-time live fetch
 - config-driven source registry
 - optional SQLite persistence
-- SQLite-backed run history inspection
-- filtered run-history queries by mode, dominant field, and risk level
-- filtered run-history queries by mode, dominant field, risk level, and time range
-- filtered run-history queries by top scored-event `impact_score`, `field_attraction`, and `divergence_score`
-- filtered run-history queries by top event-group dominant field and event-group count
-- score-aware `history-show` filtering and limiting for persisted scored events
-- optional `history-show` intervention alignment with the visible scored-event selection
-- group-aware `history-show` filtering and limiting for persisted event groups
-- richer `history-show` drill-down over stored scored events and interventions
-- persisted run comparison via `history-compare`
-- grouped-analysis diffs inside `history-compare`
-- lightweight evidence chains inside grouped event summaries and backtrack reasons
-- transitive causal-cluster ordering inside grouped event summaries
-- richer grouped evidence-chain deltas inside `history-compare`
-- top scored-event `impact_score` / `field_attraction` / `divergence_score` deltas inside `history-compare`
-- deterministic scoring and backtracking JSON report
-- schema-versioned artifacts
-- hardened input and fetch failure handling
-- Rich-based read-only TUI for persisted run list/detail browsing
+- persisted history list, single-run detail, and run-compare read surfaces
+- score-aware and group-aware read-time lenses over persisted runs
+- deterministic scoring, grouped analysis, and backtracking JSON artifacts
+- Rich-based read-only TUI for persisted list, detail, and compare browsing
+- schema-versioned artifacts and hardened operator-facing validation
 
-Future contract drafts now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; the local API remains planning-only, while the TUI now has an early Rich-based implementation that still follows the contract draft.
-The operator CLI implementation now uses Click while preserving the existing `run`, `history`, `history-show`, `history-compare`, and `tui` command semantics.
+Future contract drafts live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`. The local API is still planning-only. The TUI draft now documents a read-only slice that already ships.
 
 ### Next
 
-- further deterministic `Im` / `Fa` refinement beyond the current title-salience and field-impact-scaling slice
+- keep scoring docs aligned with the shipped additive `Im` / `Fa` contract; no new `Fa` rule landed on this branch because the mixed-field no-gap review did not prove a meaningful uncovered weakness
 - richer backtracking and causal grouping
 - finish the Click-based CLI-first operator workflow for persisted analysis
 - expand the Rich-based Vim-motion TUI from list/detail browsing toward fuller persisted operator workflows

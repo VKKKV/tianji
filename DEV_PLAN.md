@@ -24,8 +24,8 @@ TianJi should grow in this order:
 
 ## Roadmap Status Snapshot
 
-The current branch has materially advanced two roadmap areas beyond what the early
-plan assumed:
+The current branch has materially advanced three roadmap areas beyond what the
+early plan assumed:
 
 - **Phase 2 is partially shipped** through grouped event summaries, evidence-chain
   metadata, transitive causal clustering, admission-path causal ordering, and
@@ -33,11 +33,15 @@ plan assumed:
 - **Phase 4 is partially shipped** through SQLite-backed `history`,
   `history-show`, and `history-compare` workflows with score-aware and
   group-aware operator projections.
+- **Phase 5 has started shipping** through a first read-only Rich TUI slice that
+  already reuses persisted history and detail semantics from the CLI.
 
-This means the next development slice should stop treating grouped analysis and
-persisted operator ergonomics as the main frontier. The clearest next branch is
-to deepen the first-party deterministic scoring model while preserving the now
-stable CLI-first workflow.
+This means the next development slice should stop treating grouped analysis,
+persisted operator ergonomics, or the first TUI slice as hypothetical frontier
+work. The remaining choice is narrower: do small wording polish where Phase 4 is
+still rough, keep extending the shipped read-only TUI slice carefully, or open a
+new scoring branch only if a fresh concrete mixed-field weakness is actually
+proven beyond the already-shipped near-tie and diffuse-third-field coverage.
 
 ## Phase 1 — Harden the Owned Core
 
@@ -151,7 +155,8 @@ Still open before Phase 4 can be called complete:
 
 ## Phase 5 — Terminal UI (Rich-based Vim-Motion TUI)
 
-Goal: add a keyboard-first terminal interface after the CLI surface is complete.
+Goal: keep expanding a keyboard-first terminal interface on top of the now-shipped
+CLI and persisted-analysis surface.
 
 Principles:
 
@@ -163,25 +168,30 @@ Principles:
 - built on Rich (`Console`, `Live`, `Layout`) for robust terminal rendering
 - built on top of the Click-based CLI/storage semantics rather than a second command model
 
-Planned shape:
+Target shape:
 
 - browse run history
 - inspect one run and its scored events/interventions
 - compare runs
 - navigate with Vim-style motions and shortcuts
 
-Current planning status:
+Current status:
 
 - a first contract draft exists in `TUI_CONTRACT.md`
-- the first TUI slice is now shipping on the current branch as a read-only, persisted-analysis-first Rich interface:
+- the first TUI slice already ships on the current branch as a read-only,
+  persisted-analysis-first Rich interface:
   - history list
   - run detail
-  - run compare (planned)
+  - staged compare browsing backed by current compare semantics
 - current implemented detail surface already includes:
   - split-pane list/detail layout
   - Vim-style movement and focus switching
   - help overlay, footer, and transient minibuffer feedback
   - compact scored-event and intervention previews
+- current implemented compare surface already includes:
+  - compare staging from the history list
+  - a compare panel backed by persisted `history-compare` data
+  - compare-target stepping without adding a new daemon or API layer
 - the TUI intentionally reuses current `history`, `history-show`, and
   `history-compare` semantics instead of depending on a new daemon or local API
 
@@ -275,10 +285,10 @@ Retirement trigger:
 
 ## Immediate Backlog
 
-1. deepen the first-party deterministic scoring model in `tianji/scoring.py`
-2. define a clearer first-party TianJi `Im` / `Fa` spec in docs and tests
-3. add focused doc/handoff cleanup for shipped scoring determinism and compare-projection semantics when a short slice is needed
-4. define the Vim-motion TUI contract and navigation model only after scoring work lands
+1. keep first-party TianJi `Im` / `Fa` docs and tests aligned with the shipped additive rationale contract, then extend them only when later bounded scoring changes truly land
+2. add focused doc and handoff cleanup for shipped scoring determinism, compare-projection semantics, and the already-shipped first TUI slice when a short slice is needed
+3. continue the read-only Rich TUI carefully, staying on top of current history/detail/compare semantics rather than inventing a second command model
+4. open another scoring branch only if a newly proven mixed-field weakness escapes the current near-tie and diffuse-third-field `Fa` coverage
 5. keep the future local API contract as documentation until a real process boundary is chosen
 
 Recent progress on the now-mostly-shipped CLI workflow:
@@ -299,22 +309,28 @@ Draft contract notes now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; 
 
 ## Next Recommended Milestone
 
-### Milestone: Deterministic scoring-model expansion
+### Milestone: Hold the shipped scoring baseline unless a real gap is proven
 
-This milestone is now partially shipped as a concrete Phase 2.3 slice rather than
-an abstract next step.
+The Phase 2.3 scoring slice is already partially shipped. This branch stopped at
+docs alignment plus a no-gap proof rather than landing another `Fa` rule.
 
-Why this is next:
+Why further scoring work remains conditional rather than automatic:
 
 - grouped analysis and persisted operator workflows are no longer the weakest
   part of the owned product surface
 - the current scoring slice is stronger than the earlier Phase 2 baseline, but it
   is still thinner than the richer grouping and comparison machinery now built
   around it
-- improving the first-party scoring model sharpens both single-run output and
-  persisted run comparison without changing the overall product shape
+- the next scoring branch should start only if a fresh concrete weakness appears,
+  especially a mixed-field case that still escapes the shipped `Fa` ambiguity
+  rules after the current threshold-boundary coverage
+- Task 5's fixed-`Im` mixed-field review did not prove a meaningful uncovered
+  weakness beyond the shipped near-tie and diffuse-third-field rules, so no new
+  `Fa` formula change landed here
+- absent a later proof, doc polish and continued read-only TUI refinement are the
+  lower-risk near-term moves
 
-Primary files:
+Primary files for any future scoring proof branch:
 
 - `tianji/scoring.py`
 - `tianji/normalize.py`
@@ -322,7 +338,7 @@ Primary files:
 - `SCORING_SPEC.md`
 - `tests/test_scoring.py`
 
-Suggested scope for the next scoring branch:
+Suggested scope only if a future scoring branch is re-opened:
 
 1. inventory the current deterministic factors already available from normalized
    events
@@ -527,7 +543,7 @@ Success criteria:
 - score changes are observable in exact-value or factor-isolation tests
 - no schema, persistence, or CLI contract changes are required
 
-### Candidate B — refine `Fa` ambiguity handling
+### Candidate B — refine `Fa` ambiguity handling only if a new weakness is proven
 
 Shape:
 
@@ -551,26 +567,27 @@ Success criteria:
 
 - ambiguous mixed-field events lose rank relative to clearer same-domain events
 - the formula remains easy to explain in one short section of `SCORING_SPEC.md`
+- the motivating failure is new, concrete, and not already covered by the shipped
+  near-tie and diffuse-third-field rules
 
-### Candidate C — rationale transparency only
+### Candidate C — rationale transparency, now shipped
 
-Shape:
+Shipped shape:
 
-- keep the formulas mostly intact
+- keep the formulas intact
 - expand `rationale` so each score exposes more of its additive components
 
-Why it could be useful:
+What this shipped slice improved:
 
-- improves inspectability immediately
-- lowers future debugging and operator-explanation cost
+- improved inspectability immediately
+- lowered future debugging and operator-explanation cost
 
-Why it should not be first on its own:
+What it did not do:
 
-- Phase 2 currently needs better scoring semantics more than better formatting of
-  existing semantics
-- rationale-only work does not meaningfully deepen the model
+- it did not change `Im`, `Fa`, or `divergence_score` formulas
+- it did not meaningfully deepen the scoring model on its own
 
-Success criteria:
+Shipped success criteria:
 
 - score explanations become more legible without changing persisted contract shape
   in a breaking way
@@ -596,14 +613,16 @@ Use only if:
 
 Recommended choice:
 
-- start with **Candidate A** unless fresh code reading reveals an obviously more
-  urgent `Fa` ambiguity flaw
-- if the team wants the smallest possible slice, combine **Candidate A** with the
-  test additions from the verification plan and defer all other scoring changes
+- treat **Candidate A** as shipped, not as the default next branch
+- reopen scoring only when fresh code reading or a new failing example reveals an
+  obviously still-unhandled weakness
 
 Current status:
 
 - **Candidate A is now shipped** in first-party code, tests, and docs
+- **Candidate C is now also shipped** as rationale transparency, with explicit
+  additive `Im` / `Fa` rationale terms documented and tested without claiming a
+  broader scoring-formula revision
 - title/summary cue matching is now boundary-aware, so short cues like `ai` do
   not gain accidental credit inside unrelated larger words
 - text-signal cue matching now uses cached compiled regexes to avoid repeated
@@ -616,7 +635,8 @@ What this means for the next scoring branch:
 - do not reopen the original Candidate A design work unless a concrete bug shows
   the current boundary-aware cue model is still wrong
 - the next most likely worthwhile scoring branch is now **Candidate B** or
-  another similarly narrow deterministic refinement
+  another similarly narrow deterministic refinement, but only after a newly
+  demonstrated weakness justifies reopening scoring work
 
 ### Candidate A concrete proposal
 
@@ -771,8 +791,8 @@ Abort conditions for the branch:
 
 Recommended next branch after Candidate A hardening:
 
-- prefer a narrow **Candidate B** exploration over more Candidate A churn
-  unless a real text-boundary bug is observed
+- prefer a narrow **Candidate B** exploration over more Candidate A churn only if
+  a real mixed-field weakness is observed beyond the current shipped rules
 - if pursuing Candidate B, start with one mixed-field synthetic-event pair that
   exposes a concrete `Fa` ambiguity before changing formula constants
 - keep the same discipline used for Candidate A:
@@ -802,29 +822,30 @@ Current status after the first Candidate B slice:
 - the current `Fa` ambiguity rules now also have threshold-boundary regression
   coverage for the `< 1.0` near-tie gate and the `> 2.5` diffuse-third-field
   gate
-- the next likely useful work is now either a short doc/spec cleanup pass that
-  captures these shipped deterministic rules, a further narrow `Fa` refinement
-  only if a new concrete mixed-field case still escapes the current ambiguity
-  rules, or a return to pure scoring-model depth inside `Im` only if a new
-  concrete weakness appears
+- Task 5 then completed the intended decision gate: the fixed-`Im` mixed-field
+  review found no meaningful uncovered `Fa` weakness, so no additional `Fa` rule
+  landed and this branch stops at docs alignment plus the no-gap proof
+- the next likely useful work is now a short doc/spec cleanup pass or continued
+  read-only TUI refinement, with another scoring branch reserved for a later
+  concrete proof rather than assumed by default
 
 ## Phase Boundary Notes
 
 To keep future sessions from reopening already-mostly-solved branches, use these
 working boundaries:
 
-- **Phase 2 next work** = deepen first-party deterministic scoring semantics
-  inside the existing pipeline shape
-- **Phase 4 remaining work** = only small operator-wording polish unless a new
+- **Phase 2 next work** = keep the current shipped scoring baseline documented and
+  stable unless a fresh concrete weakness later proves the current rules are
+  still too thin inside the existing pipeline shape
+- **Phase 4 remaining work** = mostly small operator-wording polish unless a new
   persisted-analysis gap appears
-- **Phase 5 start condition** = scoring semantics and CLI operator workflows feel
-  stable enough that a TUI can reuse them without forcing contract churn
+- **Phase 5 current status** = a first read-only TUI slice already ships and
+  reuses current history/detail/compare semantics without forcing contract churn
 - **Local API work** stays contract-only until a real process boundary exists;
   `LOCAL_API_CONTRACT.md` is a planning input, not a near-term implementation
   trigger
-- **TUI planning work** can proceed at the contract level before implementation,
-  but should stay read-only and reuse the current storage/artifact vocabulary in
-  `TUI_CONTRACT.md`
+- **TUI next work** should keep refining that shipped read-only slice and reuse
+  the current storage/artifact vocabulary in `TUI_CONTRACT.md`
 
 ## Guardrails
 

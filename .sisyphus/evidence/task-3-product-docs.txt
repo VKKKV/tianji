@@ -1,0 +1,18 @@
+Task 3 product docs verification
+
+[PASS] README mentions tui command
+[PASS] README mentions history-compare command
+[PASS] README mentions storage.py in layout/current reality
+[PASS] README mentions representative tests
+[PASS] README separates persisted truth from read-time lenses
+[PASS] TUI contract has shipped-now section
+[PASS] TUI contract has planned-later section
+[PASS] TUI contract mentions read-only shipped slice
+[PASS] TUI contract cites storage.py
+[PASS] TUI contract cites test_tui.py
+[PASS] API contract mirrors history-compare surface
+[PASS] API contract still defers compare endpoints
+[PASS] API contract cites storage.py
+[PASS] Notepad learnings appended for task 3
+[PASS] Notepad issues appended for task 3
+[PASS] No unintended shipped daemon or web-runtime claims added

@@ -4,9 +4,9 @@
 
 This document defines the contract for TianJi's terminal UI.
 
-It is still a **contract draft** because the Phase 5 surface is incomplete, but
-TianJi now does ship an early Rich-based read-only implementation. The goal is
-to preserve alignment between:
+It is still a **contract draft** because the broader Phase 5 surface is incomplete.
+At the same time, TianJi already ships a first read-only Rich-based slice today.
+The goal here is to preserve alignment between:
 
 - the current CLI-first operator workflow
 - the current SQLite-backed persisted read surface
@@ -26,6 +26,28 @@ The TUI should browse:
 - one persisted run in detail
 - two persisted runs in comparison
 
+## Shipped Now vs Planned Later
+
+### Shipped now
+
+The current `tui` command already provides a read-only terminal browser over persisted SQLite-backed runs.
+
+Current shipped behavior, as implemented in `tianji/tui.py` and dispatched from `tianji/cli.py`:
+
+- launch from `python3 -m tianji tui --sqlite-path ...`
+- browse a persisted run list
+- open a persisted detail panel
+- stage a left run for comparison, then browse a compare panel against a selected right run
+- move through runs with keyboard-first navigation
+- keep compare staging visible in TUI state
+- treat storage-backed read payloads as the semantic source of truth
+
+Representative verification already exists in `tests/test_tui.py`.
+
+### Planned later
+
+This contract still reserves future room for a fuller Vim-style operator experience, but that later work should extend the shipped read-only browser instead of replacing it with a different domain model.
+
 ## Non-Goals
 
 This draft does **not** define:
@@ -39,10 +61,7 @@ This draft does **not** define:
 
 ## Implementation
 
-The current implementation path uses `rich` (`Console`, `Live`, `Layout`) plus a
-small stdlib raw-key loop for Vim-style navigation. This keeps the shipped Phase
-5 slice lightweight and local-first while preserving room to revise the
-framework choice later if the browser grows beyond Rich's comfortable scope.
+The shipped implementation uses `rich` (`Console`, `Live`, `Layout`) plus a small stdlib raw-key loop for keyboard-first navigation. This keeps the current slice lightweight and local-first while preserving room to revisit the framework choice later if the browser grows beyond Rich's comfortable scope.
 
 ## Design Principles
 
@@ -51,8 +70,9 @@ framework choice later if the browser grows beyond Rich's comfortable scope.
      backend contract.
 
 2. **Persisted truth stays distinct from projected lenses**
-   - Stored run-summary fields still describe the persisted run.
-   - Filters, limits, and compare projections only shape the operator view.
+    - Stored run-summary fields still describe the persisted run.
+    - Filters, limits, and compare projections only shape the operator view.
+    - This applies equally to the shipped CLI read surface and the shipped TUI read surface.
 
 3. **Read-only first**
    - The first TUI contract should browse persisted data only.
@@ -64,7 +84,7 @@ framework choice later if the browser grows beyond Rich's comfortable scope.
 
 ## Source-of-Truth Surfaces
 
-The future TUI should mirror these existing owned surfaces:
+The shipped and future TUI should mirror these existing owned surfaces:
 
 - the Click-based `python3 -m tianji ...` CLI remains the semantic source of truth for command behavior
 
@@ -83,6 +103,7 @@ The future TUI should mirror these existing owned surfaces:
 
 - `tianji/storage.py`
   - canonical read-model implementation for list/detail/compare payloads
+  - persisted truth lives here, while TUI panels render projected read lenses on top
 
 ## Core Entities and IDs
 
@@ -220,8 +241,7 @@ Shared lens controls:
 
 ## Navigation and State Model
 
-The first TUI contract only needs high-level navigation nouns, not final
-keybinding details.
+The first shipped slice already has concrete navigation behavior, but this contract only locks the high-level navigation nouns, not every final keybinding detail.
 
 Minimum state:
 
@@ -231,6 +251,8 @@ Minimum state:
 - active event-group lens
 - intervention alignment toggle
 - active panel/view (`list`, `detail`, `compare`)
+
+The current implementation already carries these ideas in state, including a visible staged left compare run before compare activation.
 
 Minimum Vim-style navigation intent:
 
@@ -266,22 +288,19 @@ Validation/error states to preserve:
 
 This document is intentionally separate from `LOCAL_API_CONTRACT.md`.
 
-- `TUI_CONTRACT.md` defines a future terminal read model over current in-process
-  storage/artifact semantics.
+- `TUI_CONTRACT.md` defines a shipped read-only terminal surface plus later terminal planning over current in-process storage/artifact semantics.
 - `LOCAL_API_CONTRACT.md` defines a future process boundary for an optional local
   service/API layer.
 
-The TUI should not require a local API to exist first.
+The shipped TUI does not require a local API, and later TUI work should not require one either.
 
 ## Recommended Later Implementation Order
 
-When TianJi is ready to actually implement a terminal UI, keep the first slice in
-this order:
+When TianJi extends the terminal UI further, keep the next slices in this order:
 
 1. history list view
 2. single-run detail view
 3. run compare view
 4. only then consider run-triggering or live-runtime concerns
 
-This keeps Phase 5 aligned with current product reality: local-first,
-deterministic, persisted-analysis-first, and read-only by default.
+This keeps Phase 5 aligned with current product reality: local-first, deterministic, persisted-analysis-first, and read-only by default.
