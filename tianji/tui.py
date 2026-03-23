@@ -1,9 +1,17 @@
 from __future__ import annotations
 
-import curses
+import sys
+import termios
+import tty
 from dataclasses import dataclass
 
-from .storage import list_runs, get_run_summary
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
+
+from .storage import list_runs, get_run_summary, compare_runs
 
 
 @dataclass(slots=True)
@@ -18,16 +26,87 @@ class HistoryListState:
     focused_pane: str = "list"
     zoomed: bool = False
     detail_scroll_offset: int = 0
+    message: str | None = None
+    staged_compare_left_run_id: int | None = None
+    active_view: str = "detail"
+    cached_compare_right_run_id: int | None = None
+    cached_compare_lines: list[str] | None = None
+
+    def _find_nearest_valid_compare_target_index(self) -> int | None:
+        if not self.rows or len(self.rows) < 2:
+            return None
+
+        for delta in (1, -1):
+            idx = self.selected_index + delta
+            if 0 <= idx < len(self.rows):
+                if (
+                    coerce_int(self.rows[idx].get("run_id"))
+                    != self.staged_compare_left_run_id
+                ):
+                    return idx
+
+        for i in range(self.selected_index + 1, len(self.rows)):
+            if (
+                coerce_int(self.rows[i].get("run_id"))
+                != self.staged_compare_left_run_id
+            ):
+                return i
+        for i in range(self.selected_index - 1, -1, -1):
+            if (
+                coerce_int(self.rows[i].get("run_id"))
+                != self.staged_compare_left_run_id
+            ):
+                return i
+
+        return None
+
+    def stage_compare(self, run_id: int, *, page_size: int = 1) -> None:
+        if self.staged_compare_left_run_id is None:
+            self.staged_compare_left_run_id = run_id
+            self.message = f"left run staged: {run_id}"
+        elif self.staged_compare_left_run_id == run_id:
+            target_index = self._find_nearest_valid_compare_target_index()
+            if target_index is not None:
+                self.selected_index = target_index
+                self.ensure_selection_visible(page_size=page_size)
+                self.active_view = "compare"
+                if self.focused_pane != "list":
+                    self.focused_pane = "compare"
+                self.message = "compare view active"
+            else:
+                self.message = "cannot compare a run with itself"
+        else:
+            self.active_view = "compare"
+            if self.focused_pane != "list":
+                self.focused_pane = "compare"
+            self.message = "compare view active"
+
+    def clear_compare(self) -> None:
+        self.staged_compare_left_run_id = None
+        self.active_view = "detail"
+        if self.focused_pane == "compare":
+            self.focused_pane = "detail"
+        self.message = "compare cleared"
 
     def move_selection(self, delta: int, *, page_size: int) -> None:
-        if self.focused_pane == "detail":
-            if not self.cached_detail_lines:
+        if self.focused_pane != "list":
+            lines = (
+                self.cached_detail_lines
+                if self.active_view == "detail"
+                else self.cached_compare_lines
+            )
+            if not lines:
                 self.detail_scroll_offset = 0
                 return
-            max_offset = max(0, len(self.cached_detail_lines) - page_size)
-            self.detail_scroll_offset = min(
-                max(self.detail_scroll_offset + delta, 0), max_offset
-            )
+            max_offset = max(0, len(lines) - page_size)
+            new_offset = min(max(self.detail_scroll_offset + delta, 0), max_offset)
+            if new_offset == self.detail_scroll_offset and delta != 0:
+                self.message = (
+                    f"top of {self.active_view}"
+                    if delta < 0
+                    else f"bottom of {self.active_view}"
+                )
+            self.detail_scroll_offset = new_offset
             return
 
         if not self.rows:
@@ -35,7 +114,9 @@ class HistoryListState:
             self.scroll_offset = 0
             return
         next_index = min(max(self.selected_index + delta, 0), len(self.rows) - 1)
-        if next_index != self.selected_index:
+        if next_index == self.selected_index and delta != 0:
+            self.message = "first run" if delta < 0 else "last run"
+        elif next_index != self.selected_index:
             self.selected_index = next_index
             self.detail_scroll_offset = 0
         self.ensure_selection_visible(page_size=page_size)
@@ -54,14 +135,56 @@ class HistoryListState:
             self.detail_scroll_offset = 0
             self.cached_detail_run_id = None
             self.cached_detail_lines = None
+            self.cached_compare_right_run_id = None
+            self.cached_compare_lines = None
             return
         next_index = min(max(self.selected_index + delta, 0), len(self.rows) - 1)
-        if next_index != self.selected_index:
+        if next_index == self.selected_index and delta != 0:
+            self.message = "first run" if delta < 0 else "last run"
+        elif next_index != self.selected_index:
             self.selected_index = next_index
             self.detail_scroll_offset = 0
             self.cached_detail_run_id = None
             self.cached_detail_lines = None
+            self.cached_compare_right_run_id = None
+            self.cached_compare_lines = None
         self.ensure_selection_visible(page_size=page_size)
+
+    def step_compare_target(self, delta: int, *, page_size: int) -> None:
+        if not self.rows:
+            return
+        next_index = self.selected_index
+        while True:
+            next_index += delta
+            if next_index < 0 or next_index >= len(self.rows):
+                self.message = (
+                    "first compare target" if delta < 0 else "last compare target"
+                )
+                break
+            run_id = coerce_int(self.rows[next_index].get("run_id"))
+            if run_id == self.staged_compare_left_run_id:
+                continue
+            self.selected_index = next_index
+            self.detail_scroll_offset = 0
+            self.cached_compare_right_run_id = None
+            self.cached_compare_lines = None
+            self.ensure_selection_visible(page_size=page_size)
+            break
+
+
+def getch() -> str:
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == "\x1b":
+            ch += sys.stdin.read(2)
+            if ch.endswith("5") or ch.endswith("6"):
+                ch += sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
 
 
 def launch_history_tui(*, sqlite_path: str, limit: int) -> int:
@@ -70,81 +193,313 @@ def launch_history_tui(*, sqlite_path: str, limit: int) -> int:
         print("No persisted runs are available for the TUI browser.")
         return 0
     state = HistoryListState(rows=rows, sqlite_path=sqlite_path)
-    curses.wrapper(run_history_list_browser, state)
+    run_history_list_browser(state)
     return 0
 
 
-def run_history_list_browser(
-    stdscr: curses.window,
-    state: HistoryListState,
-) -> None:
-    curses.curs_set(0)
-    stdscr.keypad(True)
-    while True:
-        draw_history_list(stdscr, state)
-        key = stdscr.getch()
-        page_size = max(stdscr.getmaxyx()[0] - 3, 1)
-        if key in (ord("q"), ord("Q")):
+def run_history_list_browser(state: HistoryListState) -> None:
+    console = Console()
+    with Live(screen=True, auto_refresh=False, console=console) as live:
+        while True:
+            height = console.size.height
+            width = console.size.width
+            page_size = max(height - 5, 1)
+
+            layout = build_layout(state, height, width, page_size)
+            live.update(layout, refresh=True)
+
+            key = getch()
+            state.message = None
+
+            if key in ("q", "Q"):
+                if state.show_help:
+                    state.show_help = False
+                    state.message = "help closed"
+                    continue
+                if state.zoomed:
+                    state.zoomed = False
+                    state.message = "zoom off"
+                    continue
+                return
+            if key == "?":
+                state.show_help = not state.show_help
+                state.message = "help opened" if state.show_help else "help closed"
+                continue
             if state.show_help:
                 state.show_help = False
+                state.message = "help closed"
                 continue
-            if state.zoomed:
-                state.zoomed = False
+            if key == "\t":
+                state.focused_pane = (
+                    state.active_view if state.focused_pane == "list" else "list"
+                )
+                state.message = f"focus={state.focused_pane}"
                 continue
-            return
-        if key == ord("?"):
-            state.show_help = not state.show_help
-            continue
-        if state.show_help:
-            state.show_help = False
-            continue
-        if key in (9, ord("\t")):
-            state.focused_pane = "detail" if state.focused_pane == "list" else "list"
-            continue
-        if key in (ord("h"), curses.KEY_LEFT):
-            state.focused_pane = "list"
-            continue
-        if key in (ord("l"), curses.KEY_RIGHT):
-            state.focused_pane = "detail"
-            continue
-        if key in (ord("z"), ord("\n"), curses.KEY_ENTER, 10, 13):
-            state.zoomed = not state.zoomed
-            continue
-        if key == ord("["):
-            state.step_run(-1, page_size=page_size)
-            continue
-        if key == ord("]"):
-            state.step_run(1, page_size=page_size)
-            continue
-        if key in (ord("j"), curses.KEY_DOWN):
-            state.move_selection(1, page_size=page_size)
-            continue
-        if key in (ord("k"), curses.KEY_UP):
-            state.move_selection(-1, page_size=page_size)
-            continue
-        if key in (curses.KEY_NPAGE,):
-            state.move_selection(page_size, page_size=page_size)
-            continue
-        if key in (curses.KEY_PPAGE,):
-            state.move_selection(-page_size, page_size=page_size)
-            continue
-        if key in (ord("g"),):
-            if state.focused_pane == "detail":
-                state.detail_scroll_offset = 0
-            else:
-                state.selected_index = 0
-                state.ensure_selection_visible(page_size=page_size)
-            continue
-        if key in (ord("G"),):
-            if state.focused_pane == "detail":
-                if state.cached_detail_lines:
-                    state.detail_scroll_offset = max(
-                        0, len(state.cached_detail_lines) - page_size
+            if key == "h" or key == "\x1b[D":
+                if state.focused_pane != "list":
+                    state.focused_pane = "list"
+                    state.message = "focus=list"
+                continue
+            if key == "l" or key == "\x1b[C":
+                if state.focused_pane == "list":
+                    state.focused_pane = state.active_view
+                    state.message = f"focus={state.active_view}"
+                continue
+            if key == "c":
+                if not state.rows:
+                    continue
+                current_run_id = coerce_int(
+                    state.rows[state.selected_index].get("run_id")
+                )
+                state.stage_compare(current_run_id, page_size=page_size)
+                continue
+            if key == "C":
+                state.clear_compare()
+                continue
+            if key in ("z", "\r", "\n"):
+                state.zoomed = not state.zoomed
+                state.message = "zoom on" if state.zoomed else "zoom off"
+                continue
+            if key == "[":
+                if state.active_view == "compare" and state.focused_pane == "compare":
+                    state.step_compare_target(-1, page_size=page_size)
+                else:
+                    state.step_run(-1, page_size=page_size)
+                continue
+            if key == "]":
+                if state.active_view == "compare" and state.focused_pane == "compare":
+                    state.step_compare_target(1, page_size=page_size)
+                else:
+                    state.step_run(1, page_size=page_size)
+                continue
+            if key == "j" or key == "\x1b[B":
+                state.move_selection(1, page_size=page_size)
+                continue
+            if key == "k" or key == "\x1b[A":
+                state.move_selection(-1, page_size=page_size)
+                continue
+            if key == "\x1b[6~":
+                state.move_selection(page_size, page_size=page_size)
+                continue
+            if key == "\x1b[5~":
+                state.move_selection(-page_size, page_size=page_size)
+                continue
+            if key == "g":
+                if state.focused_pane != "list":
+                    state.detail_scroll_offset = 0
+                    state.message = f"top of {state.active_view}"
+                else:
+                    state.selected_index = 0
+                    state.ensure_selection_visible(page_size=page_size)
+                    state.message = "first run"
+                continue
+            if key == "G":
+                if state.focused_pane != "list":
+                    lines = (
+                        state.cached_detail_lines
+                        if state.active_view == "detail"
+                        else state.cached_compare_lines
                     )
+                    if lines:
+                        state.detail_scroll_offset = max(0, len(lines) - page_size)
+                    state.message = f"bottom of {state.active_view}"
+                else:
+                    state.selected_index = len(state.rows) - 1
+                    state.ensure_selection_visible(page_size=page_size)
+                    state.message = "last run"
+                continue
+
+
+def build_right_panel(state: HistoryListState, width: int, page_size: int) -> Panel:
+    if state.active_view == "compare":
+        return build_compare_panel(state, width, page_size)
+    return build_detail_panel(state, width, page_size)
+
+
+def build_compare_panel(state: HistoryListState, width: int, page_size: int) -> Panel:
+    inner_width = max(width - 2, 1)
+    title_text = " Compare "
+    if not state.rows or state.staged_compare_left_run_id is None:
+        content = Text("Select a second run to compare.")
+    else:
+        selected_row = state.rows[state.selected_index]
+        right_run_id = coerce_int(selected_row.get("run_id"))
+        title_text = f" Compare L:{state.staged_compare_left_run_id} R:{right_run_id} "
+
+        if right_run_id == state.staged_compare_left_run_id:
+            content = Text("Cannot compare a run with itself.\nSelect a different run.")
+        else:
+            if state.cached_compare_right_run_id != right_run_id:
+                compare_result = compare_runs(
+                    sqlite_path=state.sqlite_path,
+                    left_run_id=state.staged_compare_left_run_id,
+                    right_run_id=right_run_id,
+                )
+                if compare_result:
+                    state.cached_compare_lines = format_compare_detail(
+                        compare_result, width=inner_width
+                    )
+                else:
+                    state.cached_compare_lines = ["Compare details not found."]
+                state.cached_compare_right_run_id = right_run_id
+                state.detail_scroll_offset = 0
+
+            if state.cached_compare_lines:
+                total_lines = len(state.cached_compare_lines)
+                if total_lines > page_size:
+                    end_line = min(state.detail_scroll_offset + page_size, total_lines)
+                    title_text = f"{title_text.rstrip()} {state.detail_scroll_offset + 1}-{end_line}/{total_lines} "
+
+                visible_lines = state.cached_compare_lines[
+                    state.detail_scroll_offset : state.detail_scroll_offset + page_size
+                ]
+                lines = [Text(line) for line in visible_lines]
+                content = Text("\n").join(lines)
             else:
-                state.selected_index = len(state.rows) - 1
-                state.ensure_selection_visible(page_size=page_size)
-            continue
+                content = Text("")
+
+    title = (
+        Text(f" [{title_text.strip()}] ", style="reverse bold")
+        if state.focused_pane != "list"
+        else Text(title_text, style="bold")
+    )
+    return Panel(content, title=title, title_align="left")
+
+
+def build_layout(
+    state: HistoryListState, height: int, width: int, page_size: int
+) -> Layout:
+    state.ensure_selection_visible(page_size=page_size)
+
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=1),
+        Layout(name="body"),
+        Layout(name="message", size=1),
+        Layout(name="footer", size=1),
+    )
+
+    status_line = (
+        " TianJi | j/k move | h/l focus | [/] step | Tab/Enter zoom | ? help | q quit "
+    )
+    layout["header"].update(Text(status_line.ljust(width), style="reverse"))
+
+    if state.show_help:
+        help_text = build_help_text()
+        layout["body"].update(Panel(help_text, title="TianJi TUI Help", expand=False))
+    else:
+        if width < 60 or (state.zoomed and state.focused_pane == "list"):
+            layout["body"].update(build_list_panel(state, width, page_size))
+        elif state.zoomed and state.focused_pane != "list":
+            layout["body"].update(build_right_panel(state, width, page_size))
+        else:
+            left_width = min(width // 2 + 10, 80)
+            layout["body"].split_row(
+                Layout(name="left", size=left_width), Layout(name="right")
+            )
+            layout["left"].update(build_list_panel(state, left_width, page_size))
+            layout["right"].update(
+                build_right_panel(state, width - left_width, page_size)
+            )
+
+    if state.message and height > 3:
+        msg = f" {state.message} "
+        layout["message"].update(Text(msg.ljust(len(msg)), style="reverse"))
+    else:
+        layout["message"].update(Text(""))
+
+    footer_text = format_status_footer(state, width)
+    layout["footer"].update(Text(footer_text, style="reverse"))
+
+    return layout
+
+
+def build_list_panel(state: HistoryListState, width: int, page_size: int) -> Panel:
+    inner_width = max(width - 2, 1)
+    visible_rows = state.rows[state.scroll_offset : state.scroll_offset + page_size]
+    lines = []
+    for index, row in enumerate(visible_rows):
+        absolute_index = state.scroll_offset + index
+        run_id = coerce_int(row.get("run_id"))
+        is_staged_left = run_id == state.staged_compare_left_run_id
+        row_text = format_history_row(
+            row, width=inner_width, is_staged_left=is_staged_left
+        )
+        style = ""
+        if absolute_index == state.selected_index:
+            if state.focused_pane == "list":
+                style = "reverse"
+            else:
+                style = "underline"
+        lines.append(Text(row_text, style=style))
+
+    content = Text("\n").join(lines) if lines else Text("")
+    title = (
+        Text(" [ Runs ] ", style="reverse bold")
+        if state.focused_pane == "list"
+        else Text(" Runs ", style="bold")
+    )
+    return Panel(content, title=title, title_align="left")
+
+
+def build_detail_panel(state: HistoryListState, width: int, page_size: int) -> Panel:
+    inner_width = max(width - 2, 1)
+    if not state.rows:
+        content = Text("")
+    else:
+        selected_row = state.rows[state.selected_index]
+        run_id = coerce_int(selected_row.get("run_id"))
+        if state.cached_detail_run_id != run_id:
+            summary = get_run_summary(sqlite_path=state.sqlite_path, run_id=run_id)
+            if summary:
+                state.cached_detail_lines = format_run_detail(
+                    summary, width=inner_width
+                )
+            else:
+                state.cached_detail_lines = ["Run details not found."]
+            state.cached_detail_run_id = run_id
+            state.detail_scroll_offset = 0
+
+        if state.cached_detail_lines:
+            visible_lines = state.cached_detail_lines[
+                state.detail_scroll_offset : state.detail_scroll_offset + page_size
+            ]
+            lines = [Text(line) for line in visible_lines]
+            content = Text("\n").join(lines)
+        else:
+            content = Text("")
+
+    title = (
+        Text(" [ Details ] ", style="reverse bold")
+        if state.focused_pane == "detail"
+        else Text(" Details ", style="bold")
+    )
+    return Panel(content, title=title, title_align="left")
+
+
+def build_help_text() -> Text:
+    help_lines = [
+        " Navigation:",
+        "   j / Down    : Move down",
+        "   k / Up      : Move up",
+        "   PgDn / PgUp : Page down / up",
+        "   g / G       : Jump to top / bottom",
+        "",
+        " Panes & Zoom:",
+        "   h / l       : Focus List / Detail pane",
+        "   Tab         : Toggle pane focus",
+        "   [ / ]       : Previous / Next run",
+        "   Enter / z   : Toggle zoom on focused pane",
+        "",
+        " Compare:",
+        "   c           : Stage/activate compare",
+        "   C           : Clear compare",
+        "",
+        " General:",
+        "   ?           : Toggle this help",
+        "   q           : Quit / Close help / Unzoom",
+    ]
+    return Text("\n".join(help_lines))
 
 
 def format_status_footer(state: HistoryListState, width: int) -> str:
@@ -167,152 +522,36 @@ def format_status_footer(state: HistoryListState, width: int) -> str:
     focus = state.focused_pane.upper()
     zoom = "ZOOM" if state.zoomed else ""
 
+    compare_state = ""
+    if state.staged_compare_left_run_id is not None:
+        if state.active_view == "compare":
+            compare_state = f"COMPARE L:{state.staged_compare_left_run_id} R:{run_id}"
+        else:
+            compare_state = f"COMPARE L:{state.staged_compare_left_run_id}"
+
     left = f" run {current}/{total} | id:{run_id} | {bounds} "
-    right = f" {zoom} | {focus} " if zoom else f" {focus} "
+
+    right_parts = []
+    if compare_state:
+        right_parts.append(compare_state)
+    if zoom:
+        right_parts.append(zoom)
+    right_parts.append(focus)
+
+    right = " | ".join(right_parts)
+    right = f" {right} "
 
     if len(left) + len(right) <= width:
         return left + " " * (width - len(left) - len(right)) + right
 
-    compact = f" {current}/{total} id:{run_id} {bounds} {zoom} {focus} "
+    compact = f" {current}/{total} id:{run_id} {bounds} {compare_state} {zoom} {focus} "
+    compact = " ".join(compact.split())
     return shorten_text(compact.strip(), width).ljust(width)
 
 
-def draw_history_list(stdscr: curses.window, state: HistoryListState) -> None:
-    height, width = stdscr.getmaxyx()
-    page_size = max(height - 3, 1)
-    state.ensure_selection_visible(page_size=page_size)
-    stdscr.erase()
-
-    status_line = (
-        " TianJi | j/k move | h/l focus | [/] step | Tab/Enter zoom | ? help | q quit "
-    )
-    stdscr.addnstr(0, 0, status_line.ljust(width), width, curses.A_REVERSE)
-
-    if state.show_help:
-        draw_help_overlay(stdscr, height, width)
-        stdscr.refresh()
-        return
-
-    if width < 60 or (state.zoomed and state.focused_pane == "list"):
-        left_width = width
-        right_width = 0
-    elif state.zoomed and state.focused_pane == "detail":
-        left_width = 0
-        right_width = width
-    else:
-        left_width = min(width // 2 + 10, 80)
-        right_width = width - left_width - 1
-
-    if left_width > 0:
-        list_header = " [ Runs ] " if state.focused_pane == "list" else " Runs "
-        header_attr = curses.A_BOLD | (
-            curses.A_REVERSE if state.focused_pane == "list" else 0
-        )
-        stdscr.addnstr(1, 0, list_header.ljust(left_width), left_width, header_attr)
-
-        visible_rows = state.rows[state.scroll_offset : state.scroll_offset + page_size]
-        for index, row in enumerate(visible_rows, start=0):
-            absolute_index = state.scroll_offset + index
-            row_text = format_history_row(row, width=left_width)
-            attributes = (
-                curses.A_REVERSE
-                if absolute_index == state.selected_index
-                and state.focused_pane == "list"
-                else 0
-            )
-            if absolute_index == state.selected_index and state.focused_pane != "list":
-                attributes = curses.A_UNDERLINE
-            stdscr.addnstr(index + 2, 0, row_text, left_width, attributes)
-
-    if left_width > 0 and right_width > 0:
-        for i in range(1, height - 1):
-            try:
-                stdscr.addch(i, left_width, curses.ACS_VLINE)
-            except curses.error:
-                pass
-
-    if right_width > 0 and state.rows:
-        detail_header = (
-            " [ Details ] " if state.focused_pane == "detail" else " Details "
-        )
-        header_attr = curses.A_BOLD | (
-            curses.A_REVERSE if state.focused_pane == "detail" else 0
-        )
-        start_x = left_width + 1 if left_width > 0 else 0
-        stdscr.addnstr(
-            1, start_x, detail_header.ljust(right_width), right_width, header_attr
-        )
-
-        selected_row = state.rows[state.selected_index]
-        run_id = coerce_int(selected_row.get("run_id"))
-        if state.cached_detail_run_id != run_id:
-            summary = get_run_summary(sqlite_path=state.sqlite_path, run_id=run_id)
-            if summary:
-                state.cached_detail_lines = format_run_detail(
-                    summary, width=right_width
-                )
-            else:
-                state.cached_detail_lines = ["Run details not found."]
-            state.cached_detail_run_id = run_id
-            state.detail_scroll_offset = 0
-
-        if state.cached_detail_lines:
-            visible_lines = state.cached_detail_lines[
-                state.detail_scroll_offset : state.detail_scroll_offset + page_size
-            ]
-            for i, line in enumerate(visible_lines):
-                if i + 2 >= height - 1:
-                    break
-                stdscr.addnstr(i + 2, start_x, line, right_width)
-
-    footer_text = format_status_footer(state, width)
-    stdscr.addnstr(height - 1, 0, footer_text, width, curses.A_REVERSE)
-
-    stdscr.refresh()
-
-
-def draw_help_overlay(stdscr: curses.window, height: int, width: int) -> None:
-    help_lines = [
-        " TianJi TUI Help ",
-        "",
-        " Navigation:",
-        "   j / Down    : Move down",
-        "   k / Up      : Move up",
-        "   PgDn / PgUp : Page down / up",
-        "   g / G       : Jump to top / bottom",
-        "",
-        " Panes & Zoom:",
-        "   h / l       : Focus List / Detail pane",
-        "   Tab         : Toggle pane focus",
-        "   [ / ]       : Previous / Next run",
-        "   Enter / z   : Toggle zoom on focused pane",
-        "",
-        " General:",
-        "   ?           : Toggle this help",
-        "   q           : Quit / Close help / Unzoom",
-    ]
-
-    box_width = max(len(line) for line in help_lines) + 4
-    box_height = len(help_lines) + 2
-
-    start_y = max((height - box_height) // 2, 1)
-    start_x = max((width - box_width) // 2, 0)
-
-    if start_y + box_height > height or start_x + box_width > width:
-        start_y, start_x = 1, 0
-
-    for i in range(box_height):
-        if start_y + i >= height:
-            break
-        if i == 0 or i == box_height - 1:
-            line = "+" + "-" * (box_width - 2) + "+"
-        else:
-            text = help_lines[i - 1] if i - 1 < len(help_lines) else ""
-            line = "| " + text.ljust(box_width - 4) + " |"
-        stdscr.addnstr(start_y + i, start_x, line[: width - start_x], width - start_x)
-
-
-def format_history_row(row: dict[str, object], *, width: int) -> str:
+def format_history_row(
+    row: dict[str, object], *, width: int, is_staged_left: bool = False
+) -> str:
     run_id = coerce_int(row.get("run_id"))
     generated_at = str(row.get("generated_at", ""))[:16].replace("T", " ")
     mode = str(row.get("mode", ""))
@@ -321,8 +560,9 @@ def format_history_row(row: dict[str, object], *, width: int) -> str:
     top_divergence_score = format_optional_score(row.get("top_divergence_score"))
     headline = str(row.get("headline", ""))
 
+    marker = "*" if is_staged_left else " "
     prefix = (
-        f" {run_id:>3} {generated_at:<16} {mode:<8.8} {dominant_field:<10.10} "
+        f"{marker}{run_id:>3} {generated_at:<16} {mode:<8.8} {dominant_field:<10.10} "
         f"{risk_level:<4.4} {top_divergence_score:>5} "
     )
     if len(prefix) >= width:
@@ -330,6 +570,274 @@ def format_history_row(row: dict[str, object], *, width: int) -> str:
     available_headline_width = max(width - len(prefix), 0)
     text = prefix + shorten_text(headline, available_headline_width)
     return text.ljust(width)
+
+
+def format_event_group_preview_lines(
+    group: dict[str, object],
+    *,
+    rank: int,
+    width: int,
+) -> list[str]:
+    dominant_field = str(group.get("dominant_field", "uncategorized"))
+    member_count = group.get("member_count", 0)
+    headline_title = str(group.get("headline_title", ""))
+    causal_summary = str(group.get("causal_summary", ""))
+
+    summary_line = shorten_text(
+        f" {rank}. {dominant_field} ({member_count} members)",
+        width,
+    )
+    snippet = causal_summary if causal_summary else headline_title
+    if not snippet:
+        snippet = "No summary available."
+    snippet_line = shorten_text(f"    {snippet}", width)
+    return [summary_line, snippet_line]
+
+
+def format_compare_side_summaries(side: dict[str, object], *, width: int) -> list[str]:
+    lines = []
+    top_group = side.get("top_event_group")
+    if isinstance(top_group, dict):
+        dominant_field = str(top_group.get("dominant_field", "uncategorized"))
+        member_count = top_group.get("member_count", 0)
+        lines.append(
+            shorten_text(
+                f"  Top Group: {dominant_field} ({member_count} members)", width
+            )
+        )
+
+    top_event = side.get("top_scored_event")
+    if isinstance(top_event, dict):
+        dominant_field = str(top_event.get("dominant_field", "uncategorized"))
+        dv = format_optional_score(top_event.get("divergence_score"))
+        im = format_optional_score(top_event.get("impact_score"))
+        lines.append(
+            shorten_text(f"  Top Event: {dominant_field} Dv {dv} Im {im}", width)
+        )
+
+    top_intervention = side.get("top_intervention")
+    if isinstance(top_intervention, dict):
+        target = str(top_intervention.get("target", "unknown"))
+        itype = str(top_intervention.get("intervention_type", "unknown"))
+        lines.append(shorten_text(f"  Top Action: [{itype}] {target}", width))
+
+    return lines
+
+
+def format_top_group_evidence_diff_lines(
+    evidence_diff: dict[str, object], *, width: int
+) -> list[str]:
+    lines = []
+    comparable = evidence_diff.get("comparable", False)
+    mode_text = "Comparable" if comparable else "Contrast"
+    lines.append(shorten_text(f"  • Top group evidence ({mode_text}):", width))
+
+    member_delta = evidence_diff.get("member_count_delta", 0)
+    link_delta = evidence_diff.get("evidence_chain_link_count_delta", 0)
+    if isinstance(member_delta, int) and isinstance(link_delta, int):
+        lines.append(
+            shorten_text(
+                f"      Members: {member_delta:+d}, Links: {link_delta:+d}", width
+            )
+        )
+
+    added_ids = evidence_diff.get("right_only_member_event_ids", [])
+    if isinstance(added_ids, list) and added_ids:
+        lines.append(
+            shorten_text(f"      Added IDs: {', '.join(map(str, added_ids))}", width)
+        )
+
+    removed_ids = evidence_diff.get("left_only_member_event_ids", [])
+    if isinstance(removed_ids, list) and removed_ids:
+        lines.append(
+            shorten_text(
+                f"      Removed IDs: {', '.join(map(str, removed_ids))}", width
+            )
+        )
+
+    added_kw = evidence_diff.get("shared_keywords_added", [])
+    if isinstance(added_kw, list) and added_kw:
+        lines.append(
+            shorten_text(
+                f"      Added keywords: {', '.join(map(str, added_kw))}", width
+            )
+        )
+
+    removed_kw = evidence_diff.get("shared_keywords_removed", [])
+    if isinstance(removed_kw, list) and removed_kw:
+        lines.append(
+            shorten_text(
+                f"      Removed keywords: {', '.join(map(str, removed_kw))}", width
+            )
+        )
+
+    if evidence_diff.get("chain_summary_changed"):
+        lines.append(shorten_text("      Chain summary changed", width))
+
+    return lines
+
+
+def get_compare_similarity_summary(diff: dict[str, object]) -> str | None:
+    if not diff:
+        return None
+
+    major_flags = [
+        diff.get("dominant_field_changed"),
+        diff.get("risk_level_changed"),
+        diff.get("top_event_group_changed"),
+        diff.get("top_scored_event_changed"),
+        diff.get("top_intervention_changed"),
+    ]
+    if any(major_flags):
+        return None
+
+    item_delta = diff.get("raw_item_count_delta", 0)
+    norm_delta = diff.get("normalized_event_count_delta", 0)
+    group_delta = diff.get("event_group_count_delta", 0)
+    has_count_changes = bool(item_delta or norm_delta or group_delta)
+
+    dv_delta = diff.get("top_divergence_score_delta")
+    im_delta = diff.get("top_impact_score_delta")
+    fa_delta = diff.get("top_field_attraction_delta")
+
+    def is_nonzero(val: object) -> bool:
+        if not isinstance(val, int | float):
+            return False
+        return abs(float(val)) > 0.001
+
+    has_score_changes = (
+        is_nonzero(dv_delta) or is_nonzero(im_delta) or is_nonzero(fa_delta)
+    )
+
+    evidence_diff = diff.get("top_event_group_evidence_diff")
+    has_evidence_changes = False
+    if isinstance(evidence_diff, dict):
+        has_evidence_changes = (
+            bool(evidence_diff.get("member_count_delta"))
+            or bool(evidence_diff.get("evidence_chain_link_count_delta"))
+            or bool(evidence_diff.get("right_only_member_event_ids"))
+            or bool(evidence_diff.get("left_only_member_event_ids"))
+            or bool(evidence_diff.get("shared_keywords_added"))
+            or bool(evidence_diff.get("shared_keywords_removed"))
+            or bool(evidence_diff.get("chain_summary_changed"))
+        )
+
+    if not has_count_changes and not has_score_changes and not has_evidence_changes:
+        return "Effectively identical: no meaningful differences found."
+
+    return "No major differences: top signals and fields remain stable."
+
+
+def format_compare_detail(
+    compare_result: dict[str, object], *, width: int
+) -> list[str]:
+    lines = []
+    left = compare_result.get("left", {})
+    right = compare_result.get("right", {})
+    diff = compare_result.get("diff", {})
+
+    if (
+        not isinstance(left, dict)
+        or not isinstance(right, dict)
+        or not isinstance(diff, dict)
+    ):
+        return ["Invalid compare result."]
+
+    left_id = left.get("run_id")
+    right_id = right.get("run_id")
+    lines.append(
+        shorten_text(
+            f"Compare: Run #{left_id} (Left) vs Run #{right_id} (Right)", width
+        )
+    )
+
+    similarity_summary = get_compare_similarity_summary(diff)
+    if similarity_summary:
+        lines.append("")
+        lines.append(shorten_text(f"Summary: {similarity_summary}", width))
+
+    lines.append("")
+
+    left_field = left.get("dominant_field", "uncategorized")
+    left_risk = left.get("risk_level", "low")
+    lines.append(
+        shorten_text(
+            f"[Left] {left.get('mode')} • {left_field} • Risk: {left_risk}", width
+        )
+    )
+    left_headline = str(left.get("headline", ""))
+    if left_headline:
+        lines.extend(wrap_text(f"       {left_headline}", width))
+    lines.extend(format_compare_side_summaries(left, width=width))
+    lines.append("")
+
+    right_field = right.get("dominant_field", "uncategorized")
+    right_risk = right.get("risk_level", "low")
+    lines.append(
+        shorten_text(
+            f"[Right] {right.get('mode')} • {right_field} • Risk: {right_risk}", width
+        )
+    )
+    right_headline = str(right.get("headline", ""))
+    if right_headline:
+        lines.extend(wrap_text(f"        {right_headline}", width))
+    lines.extend(format_compare_side_summaries(right, width=width))
+    lines.append("")
+
+    lines.append(shorten_text("Diff Highlights:", width))
+
+    if diff.get("dominant_field_changed"):
+        lines.append(
+            shorten_text(f"  • Field changed: {left_field} -> {right_field}", width)
+        )
+    if diff.get("risk_level_changed"):
+        lines.append(
+            shorten_text(f"  • Risk changed: {left_risk} -> {right_risk}", width)
+        )
+
+    item_delta = diff.get("raw_item_count_delta", 0)
+    norm_delta = diff.get("normalized_event_count_delta", 0)
+    if isinstance(item_delta, int) and isinstance(norm_delta, int):
+        lines.append(
+            shorten_text(
+                f"  • Items: {item_delta:+d} raw, {norm_delta:+d} normalized", width
+            )
+        )
+
+    group_delta = diff.get("event_group_count_delta", 0)
+    if isinstance(group_delta, int):
+        lines.append(shorten_text(f"  • Event Groups: {group_delta:+d}", width))
+
+    if diff.get("top_event_group_changed"):
+        lines.append(shorten_text("  • Top event group changed", width))
+
+    evidence_diff = diff.get("top_event_group_evidence_diff")
+    if isinstance(evidence_diff, dict):
+        lines.extend(format_top_group_evidence_diff_lines(evidence_diff, width=width))
+
+    if diff.get("top_scored_event_changed"):
+        lines.append(shorten_text("  • Top scored event changed", width))
+    elif diff.get("top_scored_event_comparable"):
+        dv_delta = format_delta(diff.get("top_divergence_score_delta"))
+        im_delta = format_delta(diff.get("top_impact_score_delta"))
+        fa_delta = format_delta(diff.get("top_field_attraction_delta"))
+        lines.append(
+            shorten_text(
+                f"  • Top event score deltas: Dv {dv_delta} Im {im_delta} Fa {fa_delta}",
+                width,
+            )
+        )
+
+    if diff.get("top_intervention_changed"):
+        lines.append(shorten_text("  • Top intervention changed", width))
+
+    return lines
+
+
+def format_delta(value: object) -> str:
+    if not isinstance(value, int | float):
+        return "N/A"
+    return f"{float(value):+.2f}"
 
 
 def format_run_detail(summary: dict[str, object], *, width: int) -> list[str]:
@@ -365,12 +873,14 @@ def format_run_detail(summary: dict[str, object], *, width: int) -> list[str]:
         if isinstance(event_groups, list):
             lines.append("")
             lines.append(shorten_text(f"Event Groups: {len(event_groups)}", width))
-            if event_groups and isinstance(event_groups[0], dict):
-                top_group = event_groups[0]
-                lines.append(
-                    shorten_text(
-                        f"  Top: {top_group.get('dominant_field')} ({top_group.get('member_count')} members)",
-                        width,
+            for group_index, group in enumerate(event_groups[:3], start=1):
+                if not isinstance(group, dict):
+                    continue
+                lines.extend(
+                    format_event_group_preview_lines(
+                        group,
+                        rank=group_index,
+                        width=width,
                     )
                 )
 
@@ -378,14 +888,31 @@ def format_run_detail(summary: dict[str, object], *, width: int) -> list[str]:
     if isinstance(scored_events, list):
         lines.append("")
         lines.append(shorten_text(f"Scored Events: {len(scored_events)}", width))
-        if scored_events and isinstance(scored_events[0], dict):
-            top_event = scored_events[0]
-            lines.append(shorten_text(f"  Top: {top_event.get('title', '')}", width))
+        for event_index, event in enumerate(scored_events[:3], start=1):
+            if not isinstance(event, dict):
+                continue
+            lines.extend(
+                format_scored_event_preview_lines(
+                    event,
+                    rank=event_index,
+                    width=width,
+                )
+            )
 
     interventions = summary.get("intervention_candidates")
     if isinstance(interventions, list):
         lines.append("")
         lines.append(shorten_text(f"Interventions: {len(interventions)}", width))
+        for intervention_index, intervention in enumerate(interventions[:3], start=1):
+            if not isinstance(intervention, dict):
+                continue
+            lines.extend(
+                format_intervention_preview_lines(
+                    intervention,
+                    rank=intervention_index,
+                    width=width,
+                )
+            )
 
     return lines
 
@@ -413,6 +940,46 @@ def wrap_text(text: str, width: int) -> list[str]:
     if current_line:
         lines.append(" ".join(current_line))
     return lines
+
+
+def format_scored_event_preview_lines(
+    event: dict[str, object],
+    *,
+    rank: int,
+    width: int,
+) -> list[str]:
+    dominant_field = str(event.get("dominant_field", "uncategorized"))
+    divergence_score = format_optional_score(event.get("divergence_score"))
+    impact_score = format_optional_score(event.get("impact_score"))
+    field_attraction = format_optional_score(event.get("field_attraction"))
+    title = str(event.get("title", ""))
+
+    summary_line = shorten_text(
+        f" {rank}. {dominant_field} Dv {divergence_score} Im {impact_score} Fa {field_attraction}",
+        width,
+    )
+    title_line = shorten_text(f"    {title}", width)
+    return [summary_line, title_line]
+
+
+def format_intervention_preview_lines(
+    intervention: dict[str, object],
+    *,
+    rank: int,
+    width: int,
+) -> list[str]:
+    target = str(intervention.get("target", "unknown"))
+    intervention_type = str(intervention.get("intervention_type", "unknown"))
+    snippet = str(intervention.get("expected_effect", ""))
+    if not snippet:
+        snippet = str(intervention.get("reason", ""))
+
+    summary_line = shorten_text(
+        f" {rank}. [{intervention_type}] {target}",
+        width,
+    )
+    snippet_line = shorten_text(f"    {snippet}", width)
+    return [summary_line, snippet_line]
 
 
 def coerce_int(value: object) -> int:

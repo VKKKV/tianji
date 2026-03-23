@@ -115,6 +115,7 @@ Goal: finish the operator workflow in the terminal before adding any richer inte
 
 Already shipped on this branch:
 
+- Click-based CLI implementation while preserving the existing command/flag surface
 - persisted run history with mode / dominant-field / risk-level filters
 - generated-time filtering for persisted runs
 - top scored-event threshold filtering on persisted runs
@@ -148,7 +149,7 @@ Still open before Phase 4 can be called complete:
 - wait for a concrete operator pain point before expanding the command surface
   again
 
-## Phase 5 — Terminal UI (Vim-Motion TUI)
+## Phase 5 — Terminal UI (Rich-based Vim-Motion TUI)
 
 Goal: add a keyboard-first terminal interface after the CLI surface is complete.
 
@@ -159,6 +160,8 @@ Principles:
 - navigation should be Vim-oriented by default
 - TUI should reuse the same local run/history/artifact concepts the CLI already exposes
 - no duplication of business logic inside the TUI layer
+- built on Rich (`Console`, `Live`, `Layout`) for robust terminal rendering
+- built on top of the Click-based CLI/storage semantics rather than a second command model
 
 Planned shape:
 
@@ -169,12 +172,17 @@ Planned shape:
 
 Current planning status:
 
-- a first contract-only draft now exists in `TUI_CONTRACT.md`
-- the planned first TUI slice is read-only and persisted-analysis-first:
+- a first contract draft exists in `TUI_CONTRACT.md`
+- the first TUI slice is now shipping on the current branch as a read-only, persisted-analysis-first Rich interface:
   - history list
   - run detail
-  - run compare
-- the TUI contract intentionally reuses current `history`, `history-show`, and
+  - run compare (planned)
+- current implemented detail surface already includes:
+  - split-pane list/detail layout
+  - Vim-style movement and focus switching
+  - help overlay, footer, and transient minibuffer feedback
+  - compact scored-event and intervention previews
+- the TUI intentionally reuses current `history`, `history-show`, and
   `history-compare` semantics instead of depending on a new daemon or local API
 
 Do not do:
@@ -211,6 +219,7 @@ Principles:
 - backend contract should already exist before UI work starts
 - CLI and TUI should already be mature before UI work starts
 - CLI remains the source-of-truth operator surface
+- `tianji/cli.py` is Click-based; keep framework swaps separate from storage/scoring behavior changes
 
 Planned shape:
 
@@ -286,7 +295,7 @@ Recent progress on the now-mostly-shipped CLI workflow:
 - `history` now exposes top event-group summary fields and filters for grouped-run triage across persisted runs
 - `history-compare` now supports the same scored-event and event-group projection filters as `history-show` for lens-specific persisted comparison
 
-Draft contract notes now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; implementation remains future work.
+Draft contract notes now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; the local API remains future work, while Phase 5 now has an early Rich-based implementation.
 
 ## Next Recommended Milestone
 

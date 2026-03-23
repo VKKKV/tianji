@@ -239,7 +239,7 @@ These are reference inputs, not part of the initial TianJi repo history.
 
 ### Current
 
-- one-shot CLI
+- Click-based one-shot CLI
 - local fixture-first execution
 - optional one-time live fetch
 - config-driven source registry
@@ -262,16 +262,17 @@ These are reference inputs, not part of the initial TianJi repo history.
 - deterministic scoring and backtracking JSON report
 - schema-versioned artifacts
 - hardened input and fetch failure handling
+- Rich-based read-only TUI for persisted run list/detail browsing
 
-Future contract drafts now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; they are planning artifacts only, not shipped server/TUI implementations.
+Future contract drafts now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; the local API remains planning-only, while the TUI now has an early Rich-based implementation that still follows the contract draft.
+The operator CLI implementation now uses Click while preserving the existing `run`, `history`, `history-show`, `history-compare`, and `tui` command semantics.
 
 ### Next
 
 - more formalized `Im` / `Fa`-style scoring model
 - richer backtracking and causal grouping
-- finish the CLI-first operator workflow for persisted analysis
-- keep the new Vim-motion TUI planning work contract-only until the persisted read workflow is stable enough to implement
-- later design and implement a Vim-motion TUI on top of the stable local contracts documented in `TUI_CONTRACT.md`
+- finish the Click-based CLI-first operator workflow for persisted analysis
+- expand the Rich-based Vim-motion TUI from list/detail browsing toward fuller persisted operator workflows
 - future local API implementation only when a real local service boundary is chosen
 
 ### Later

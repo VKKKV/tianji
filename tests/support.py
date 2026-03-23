@@ -25,6 +25,9 @@ from tianji.tui import (
     format_run_detail,
     wrap_text,
     format_status_footer,
+    format_compare_detail,
+    format_delta,
+    build_compare_panel,
 )
 from tianji.pipeline import run_pipeline
 from tianji.scoring import score_event, summarize_scenario

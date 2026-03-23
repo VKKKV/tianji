@@ -2,10 +2,11 @@
 
 ## Purpose
 
-This document defines the first contract for a future TianJi terminal UI.
+This document defines the contract for TianJi's terminal UI.
 
-It is a **contract draft**, not a claim that TianJi already ships a TUI. The goal
-is to preserve alignment between:
+It is still a **contract draft** because the Phase 5 surface is incomplete, but
+TianJi now does ship an early Rich-based read-only implementation. The goal is
+to preserve alignment between:
 
 - the current CLI-first operator workflow
 - the current SQLite-backed persisted read surface
@@ -29,13 +30,19 @@ The TUI should browse:
 
 This draft does **not** define:
 
-- TUI implementation details or framework choice
 - live run execution screens
 - progress/status polling
 - daemon, scheduler, or IPC behavior
 - web/API transport requirements
 - new scoring logic or storage schema changes
 - exact keybinding maps beyond high-level Vim-style navigation intent
+
+## Implementation
+
+The current implementation path uses `rich` (`Console`, `Live`, `Layout`) plus a
+small stdlib raw-key loop for Vim-style navigation. This keeps the shipped Phase
+5 slice lightweight and local-first while preserving room to revise the
+framework choice later if the browser grows beyond Rich's comfortable scope.
 
 ## Design Principles
 
@@ -58,6 +65,8 @@ This draft does **not** define:
 ## Source-of-Truth Surfaces
 
 The future TUI should mirror these existing owned surfaces:
+
+- the Click-based `python3 -m tianji ...` CLI remains the semantic source of truth for command behavior
 
 - `python3 -m tianji history --sqlite-path ...`
   - persisted run list / triage view
@@ -146,6 +155,7 @@ Stable detail behaviors:
 Purpose:
 - compare two persisted runs under one operator lens
 - inspect both side summaries plus explicit diff fields
+- surface a compact top-group evidence diff subsection inside the compare panel
 
 Stable compare payload:
 
@@ -216,7 +226,7 @@ keybinding details.
 Minimum state:
 
 - selected `run_id` in history list
-- selected compare pair
+- selected compare pair, including a visible staged left run before compare activates
 - active scored-event lens
 - active event-group lens
 - intervention alignment toggle
@@ -228,7 +238,7 @@ Minimum Vim-style navigation intent:
 - open selected run detail
 - switch back to history list
 - move to previous / next persisted run from detail view
-- stage a left/right compare pair from list selection
+- stage a left/right compare pair from list selection with visible staged-pair feedback
 - switch focus between compare left/right/diff panes
 - apply or clear filter lenses without mutating stored data
 

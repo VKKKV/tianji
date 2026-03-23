@@ -140,7 +140,7 @@ For runs with no grouped scenarios:
 - `DEV_PLAN.md` — roadmap and recent progress
 - `SCORING_SPEC.md` — deterministic scoring + current grouping semantics
 - `tianji/scoring.py` — explicit `Im` / `Fa` math including text-signal-intensity bonus, thresholded field-diversity credit, and deterministic field selection rules
-- `tianji/cli.py` — operator surface and parser validation
+- `tianji/cli.py` — Click-based operator surface, validation rules, and `main(argv)` entry compatibility
 - `tianji/storage.py` — persistence + all history/history-show/history-compare read logic
 - `tianji/pipeline.py` — orchestration, grouping, causal clustering
 - `tianji/backtrack.py` — intervention generation and grouped reasoning text
@@ -174,11 +174,15 @@ slices have also landed. The next session should default to a **small doc/spec
 cleanup or a fresh scoring issue only if a new concrete weakness is found**, not
 to reopening already-shipped tie-handling or residual-noise work.
 
-Phase 5 planning has now started at the contract layer:
+The CLI implementation now uses Click while preserving the existing operator command surface and `main(argv)` entry semantics used by the unittest suite.
 
-- `TUI_CONTRACT.md` now exists as a read-only persisted-analysis TUI draft
+Phase 5 is now underway beyond the contract layer:
+
+- `TUI_CONTRACT.md` defines the read-only persisted-analysis TUI
+- a first Rich-based implementation now exists for history list and detail views
 - it reuses current `history`, `history-show`, and `history-compare` semantics
-- it does **not** imply any shipped TUI runtime or daemon/API dependency
+- it does **not** imply any daemon/API dependency
+- current Rich detail browsing already includes compact scored-event and intervention previews
 
 Given the current branch stack, the default resume path should be:
 
@@ -209,10 +213,10 @@ Best smaller default next step:
 
 Best larger next branch after scoring:
 
-3. **Start TUI contract planning**
-   - first contract-only draft now exists in `TUI_CONTRACT.md`
-   - next work here should refine the read-only list/detail/compare contract only if operator workflow gaps appear
-   - do not start TUI implementation until CLI/storage semantics feel stable enough to freeze
+3. **Continue Rich-based TUI implementation**
+   - `TUI_CONTRACT.md` now exists and the first Rich-based list/detail implementation has started from it
+   - next work here should keep refining the read-only list/detail browser and only then expand toward compare mode
+   - continue reusing CLI/storage semantics rather than inventing a daemon/API boundary
 
 ## Suggested Commands For The Next Session
 
