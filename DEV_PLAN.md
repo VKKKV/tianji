@@ -185,11 +185,28 @@ Current planning status:
 - the TUI intentionally reuses current `history`, `history-show`, and
   `history-compare` semantics instead of depending on a new daemon or local API
 
+Next explicit slice for this phase:
+
+- add shared read-only detail/compare lens controls that mirror the existing
+  CLI and `storage.py` projection vocabulary for:
+  - `dominant_field`
+  - `limit_scored_events`
+  - `group_dominant_field`
+  - `limit_event_groups`
+  - `only_matching_interventions`
+- keep the history list pane on persisted truth rather than introducing in-TUI
+  list filtering
+- defer numeric threshold entry for score windows to a later branch
+- keep CLI and storage semantics as the source of truth instead of inventing a
+  TUI-only projection model
+
 Do not do:
 
 - do not turn the TUI into a second orchestration runtime
 - do not bypass CLI/storage contracts with ad hoc state
 - do not let TUI-specific UX force premature web/API design
+- do not treat list-pane filtering or numeric threshold entry as part of this
+  next slice
 
 ## Phase 6 — Hongmeng Lite
 

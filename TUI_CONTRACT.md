@@ -176,26 +176,35 @@ These presets remain mutually exclusive.
 
 ## Lens and Projection Semantics
 
-The TUI should reuse current projection rules exactly.
+The shipped TUI still exposes the persisted list, detail, and compare browser
+without full in-TUI projection controls.
+
+The next explicit Phase 5 slice should reuse current CLI and storage projection
+rules for read-only detail and compare panes only.
 
 ### Scored-event lens
 
-Shared lens controls:
+Next planned shared lens controls:
 
 - `dominant_field`
-- `min_impact_score` / `max_impact_score`
-- `min_field_attraction` / `max_field_attraction`
-- `min_divergence_score` / `max_divergence_score`
 - `limit_scored_events`
+
+Explicitly deferred from this slice:
+
+- numeric threshold entry for `min_impact_score` / `max_impact_score`
+- numeric threshold entry for `min_field_attraction` / `max_field_attraction`
+- numeric threshold entry for `min_divergence_score` / `max_divergence_score`
 
 ### Event-group lens
 
-Shared lens controls:
+Next planned shared lens controls:
 
 - `group_dominant_field`
 - `limit_event_groups`
 
 ### Intervention alignment lens
+
+Next planned shared lens control:
 
 - `only_matching_interventions=false`
   - keep full persisted intervention list
@@ -203,6 +212,10 @@ Shared lens controls:
 - `only_matching_interventions=true`
   - keep only interventions whose `event_id` remains in the final visible
     scored-event set
+
+This Phase 5 slice should keep those controls shared across detail and compare
+panes. It should not add list-pane filtering, text entry, or any new storage
+semantics.
 
 ### Persisted truth vs projected view
 
@@ -217,6 +230,10 @@ Shared lens controls:
     on the active lens
   - stored run-summary fields like `headline`, `dominant_field`, and
     `risk_level` still describe the persisted run itself
+
+For the next planned TUI slice, those projected lenses should stay confined to
+detail and compare rendering. The persisted history list should continue to show
+storage-backed truth rather than a separately filtered list pane.
 
 ## Navigation and State Model
 
