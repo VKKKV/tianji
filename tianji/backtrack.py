@@ -6,6 +6,21 @@ from typing import TypedDict
 from .models import InterventionCandidate, ScoredEvent
 
 
+FIELD_INTERVENTION_TYPES = {
+    "conflict": "de-escalation",
+    "diplomacy": "negotiation",
+    "economy": "economic-pressure",
+    "technology": "capability-control",
+}
+
+STRONG_GROUP_INTERVENTION_TYPES = {
+    "conflict": "escalation-override",
+    "diplomacy": "treaty-invalidation",
+    "economy": "market-freeze",
+    "technology": "capability-freeze",
+}
+
+
 class EventChainLink(TypedDict):
     from_event_id: str
     to_event_id: str
@@ -46,16 +61,20 @@ def backtrack_candidates(
     }
     selected_events = select_backtrack_events(scored_events, limit, event_groups)
     for index, event in enumerate(selected_events, start=1):
-        target = (
-            event.actors[0]
-            if event.actors
-            else event.regions[0]
-            if event.regions
-            else event.source
+        event_group = event_group_by_headline_id.get(event.event_id)
+        target = select_intervention_target(
+            event,
+            event_group=event_group,
         )
-        intervention_type = infer_intervention_type(event)
-        expected_effect = infer_expected_effect(event)
-        reason = build_reason(event, event_group_by_headline_id.get(event.event_id))
+        intervention_type = infer_intervention_type(
+            event,
+            event_group=event_group,
+        )
+        expected_effect = infer_expected_effect(
+            event,
+            event_group=event_group,
+        )
+        reason = build_reason(event, event_group)
         candidates.append(
             InterventionCandidate(
                 priority=index,
@@ -102,19 +121,57 @@ def select_backtrack_events(
     return selected[:limit]
 
 
-def infer_intervention_type(event: ScoredEvent) -> str:
-    if event.dominant_field == "conflict":
-        return "de-escalation"
-    if event.dominant_field == "diplomacy":
-        return "negotiation"
-    if event.dominant_field == "economy":
-        return "economic-pressure"
-    if event.dominant_field == "technology":
-        return "capability-control"
-    return "information-gathering"
+def select_intervention_target(
+    event: ScoredEvent,
+    *,
+    event_group: EventGroupSummary | None = None,
+) -> str:
+    if event_group is not None:
+        if event_group["shared_actors"]:
+            return event_group["shared_actors"][0]
+        if event_group["shared_regions"]:
+            return event_group["shared_regions"][0]
+    if event.actors:
+        return event.actors[0]
+    if event.regions:
+        return event.regions[0]
+    return event.source
 
 
-def infer_expected_effect(event: ScoredEvent) -> str:
+def infer_intervention_type(
+    event: ScoredEvent,
+    *,
+    event_group: EventGroupSummary | None = None,
+) -> str:
+    if event_group is not None:
+        grouped_intervention_type = infer_group_intervention_type(event_group)
+        if grouped_intervention_type is not None:
+            return grouped_intervention_type
+    return infer_field_intervention_type(event.dominant_field)
+
+
+def infer_group_intervention_type(
+    event_group: EventGroupSummary,
+) -> str | None:
+    if event_group["member_count"] < 3 or len(event_group["evidence_chain"]) < 2:
+        return None
+    return STRONG_GROUP_INTERVENTION_TYPES.get(
+        event_group["dominant_field"],
+        "pattern-disruption",
+    )
+
+
+def infer_field_intervention_type(dominant_field: str) -> str:
+    return FIELD_INTERVENTION_TYPES.get(dominant_field, "information-gathering")
+
+
+def infer_expected_effect(
+    event: ScoredEvent,
+    *,
+    event_group: EventGroupSummary | None = None,
+) -> str:
+    if event_group is not None:
+        return infer_group_expected_effect(event, event_group)
     if event.dominant_field == "conflict":
         return "Reduce near-term escalation incentives around the triggering event."
     if event.dominant_field == "diplomacy":
@@ -124,6 +181,24 @@ def infer_expected_effect(event: ScoredEvent) -> str:
     if event.dominant_field == "technology":
         return "Constrain a fast-moving capability race before spillover grows."
     return "Collect better evidence before attempting stronger intervention."
+
+
+def infer_group_expected_effect(
+    event: ScoredEvent,
+    event_group: EventGroupSummary,
+) -> str:
+    member_count = event_group["member_count"]
+    link_count = len(event_group["evidence_chain"])
+    chain_type = "reinforcing chain" if link_count >= 2 else "linked cluster"
+    if event.dominant_field == "conflict":
+        return f"Disrupt the {chain_type} before escalation compounds across {member_count} related events."
+    if event.dominant_field == "diplomacy":
+        return f"Stabilize the {chain_type} so {member_count} related diplomatic moves do not harden into a wider standoff."
+    if event.dominant_field == "economy":
+        return f"Interrupt the {chain_type} before {member_count} linked economic signals compound into a broader shock."
+    if event.dominant_field == "technology":
+        return f"Disrupt the {chain_type} before {member_count} related capability moves harden into a broader race."
+    return f"Break the {chain_type} and collect better evidence before {member_count} related events reinforce the branch further."
 
 
 def build_reason(
@@ -138,7 +213,25 @@ def build_reason(
     )
     if event_group is None:
         return base_reason
+    shared_actor_text = (
+        f" shared actors={', '.join(event_group['shared_actors'])};"
+        if event_group["shared_actors"]
+        else ""
+    )
+    shared_region_text = (
+        f" shared regions={', '.join(event_group['shared_regions'])};"
+        if event_group["shared_regions"]
+        else ""
+    )
+    span_text = (
+        f" over {event_group['causal_span_hours']}h"
+        if event_group["causal_span_hours"] is not None
+        else ""
+    )
     return (
-        f"{base_reason} Evidence chain: {event_group['chain_summary']} "
+        f"{base_reason} Grouped context: {event_group['member_count']}-event {event_group['dominant_field']} cluster"
+        f" with {len(event_group['evidence_chain'])} causal link(s){span_text};"
+        f"{shared_actor_text}{shared_region_text}"
+        f" Evidence chain: {event_group['chain_summary']} "
         f"Causal cluster: {event_group['causal_summary']}"
     )
