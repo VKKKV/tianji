@@ -215,20 +215,42 @@ def infer_group_expected_effect(
     member_count = event_group["member_count"]
     link_count = len(event_group["evidence_chain"])
     chain_type = "reinforcing chain" if link_count >= 2 else "linked cluster"
+    relationship_phrase = infer_group_effect_relationship_phrase(event_group)
+    role_phrase = infer_group_effect_role_phrase(event_group)
     urgency_prefix = infer_group_effect_urgency_prefix(event_group, link_count)
     conflict_action = "disrupt" if urgency_prefix else "Disrupt"
     diplomacy_action = "stabilize" if urgency_prefix else "Stabilize"
     economy_action = "interrupt" if urgency_prefix else "Interrupt"
     generic_action = "break" if urgency_prefix else "Break"
     if event.dominant_field == "conflict":
-        return f"{urgency_prefix}{conflict_action} the {chain_type} before escalation compounds across {member_count} related events."
+        return f"{urgency_prefix}{conflict_action} the {chain_type}{relationship_phrase}{role_phrase} before escalation compounds across {member_count} related events."
     if event.dominant_field == "diplomacy":
-        return f"{urgency_prefix}{diplomacy_action} the {chain_type} so {member_count} related diplomatic moves do not harden into a wider standoff."
+        return f"{urgency_prefix}{diplomacy_action} the {chain_type}{relationship_phrase}{role_phrase} so {member_count} related diplomatic moves do not harden into a wider standoff."
     if event.dominant_field == "economy":
-        return f"{urgency_prefix}{economy_action} the {chain_type} before {member_count} linked economic signals compound into a broader shock."
+        return f"{urgency_prefix}{economy_action} the {chain_type}{relationship_phrase}{role_phrase} before {member_count} linked economic signals compound into a broader shock."
     if event.dominant_field == "technology":
-        return f"{urgency_prefix}{conflict_action} the {chain_type} before {member_count} related capability moves harden into a broader race."
-    return f"{urgency_prefix}{generic_action} the {chain_type} and collect better evidence before {member_count} related events reinforce the branch further."
+        return f"{urgency_prefix}{conflict_action} the {chain_type}{relationship_phrase}{role_phrase} before {member_count} related capability moves harden into a broader race."
+    return f"{urgency_prefix}{generic_action} the {chain_type}{relationship_phrase}{role_phrase} and collect better evidence before {member_count} related events reinforce the branch further."
+
+
+def infer_group_effect_relationship_phrase(event_group: EventGroupSummary) -> str:
+    dominant_relationship = infer_group_dominant_relationship(event_group)
+    return (
+        ""
+        if dominant_relationship == "reinforcing"
+        else f" in the {dominant_relationship} pattern"
+    )
+
+
+def infer_group_effect_role_phrase(event_group: EventGroupSummary) -> str:
+    headline_role_text = infer_group_headline_role_text(event_group)
+    if headline_role_text == " headline role=chain origin;":
+        return " at the chain origin"
+    if headline_role_text == " headline role=chain endpoint;":
+        return " at the chain endpoint"
+    if headline_role_text == " headline role=chain pivot;":
+        return " at the chain pivot"
+    return ""
 
 
 def infer_group_effect_urgency_prefix(
@@ -252,15 +274,19 @@ def infer_group_corroboration_text(event_group: EventGroupSummary) -> str:
     return " moderate corroboration across causal links;"
 
 
-def infer_group_relationship_text(event_group: EventGroupSummary) -> str:
+def infer_group_dominant_relationship(event_group: EventGroupSummary) -> str:
     relationship_counts: dict[str, int] = {}
     for link in event_group["evidence_chain"]:
         relationship = link["relationship"]
         relationship_counts[relationship] = relationship_counts.get(relationship, 0) + 1
-    dominant_relationship = min(
+    return min(
         relationship_counts.items(),
         key=lambda item: (-item[1], item[0]),
     )[0]
+
+
+def infer_group_relationship_text(event_group: EventGroupSummary) -> str:
+    dominant_relationship = infer_group_dominant_relationship(event_group)
     return f" dominant relationship={dominant_relationship};"
 
 
@@ -288,6 +314,18 @@ def infer_group_link_tempo_text(event_group: EventGroupSummary) -> str:
     if min_link_delta == max_link_delta:
         return f" link tempo={min_link_delta}h;"
     return f" link tempo range={min_link_delta}-{max_link_delta}h;"
+
+
+def infer_group_headline_role_text(event_group: EventGroupSummary) -> str:
+    causal_ordered_event_ids = event_group["causal_ordered_event_ids"]
+    headline_event_id = event_group["headline_event_id"]
+    if not causal_ordered_event_ids or len(causal_ordered_event_ids) == 1:
+        return " headline role=standalone;"
+    if headline_event_id == causal_ordered_event_ids[0]:
+        return " headline role=chain origin;"
+    if headline_event_id == causal_ordered_event_ids[-1]:
+        return " headline role=chain endpoint;"
+    return " headline role=chain pivot;"
 
 
 def build_reason(
@@ -321,6 +359,7 @@ def build_reason(
     relationship_text = infer_group_relationship_text(event_group)
     signal_support_text = infer_group_signal_support_text(event_group)
     link_tempo_text = infer_group_link_tempo_text(event_group)
+    headline_role_text = infer_group_headline_role_text(event_group)
     return (
         f"{base_reason} Grouped context: {event_group['member_count']}-event {event_group['dominant_field']} cluster"
         f" with {len(event_group['evidence_chain'])} causal link(s){span_text};"
@@ -328,6 +367,7 @@ def build_reason(
         f"{relationship_text}"
         f"{signal_support_text}"
         f"{link_tempo_text}"
+        f"{headline_role_text}"
         f"{shared_actor_text}{shared_region_text}"
         f" Evidence chain: {event_group['chain_summary']} "
         f"Causal cluster: {event_group['causal_summary']}"

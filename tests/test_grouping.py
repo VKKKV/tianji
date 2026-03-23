@@ -387,9 +387,10 @@ class GroupingTests(unittest.TestCase):
         self.assertIn("dominant relationship=capability-race", candidates[0].reason)
         self.assertIn("signal support=7", candidates[0].reason)
         self.assertIn("link tempo=1.0h", candidates[0].reason)
+        self.assertIn("headline role=chain origin", candidates[0].reason)
         self.assertIn("shared actors=china, usa", candidates[0].reason)
         self.assertIn(
-            "Quickly disrupt the linked cluster before 2 related capability moves harden into a broader race.",
+            "Quickly disrupt the linked cluster in the capability-race pattern at the chain origin before 2 related capability moves harden into a broader race.",
             candidates[0].expected_effect,
         )
         self.assertIn("Evidence chain:", candidates[0].reason)
@@ -460,9 +461,10 @@ class GroupingTests(unittest.TestCase):
         self.assertIn("high corroboration across causal links", candidates[0].reason)
         self.assertIn("signal support range=6-7", candidates[0].reason)
         self.assertIn("link tempo range=1.0-2.0h", candidates[0].reason)
+        self.assertIn("headline role=chain origin", candidates[0].reason)
         self.assertIn("with 2 causal link(s) over 2.0h", candidates[0].reason)
         self.assertIn(
-            "Urgently disrupt the reinforcing chain before 3 related capability moves harden into a broader race.",
+            "Urgently disrupt the reinforcing chain in the capability-race pattern at the chain origin before 3 related capability moves harden into a broader race.",
             candidates[0].expected_effect,
         )
 
@@ -501,7 +503,7 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(candidates[0].intervention_type, "capability-containment")
         self.assertEqual(
             candidates[0].expected_effect,
-            "Disrupt the linked cluster before 2 related capability moves harden into a broader race.",
+            "Disrupt the linked cluster in the capability-race pattern at the chain origin before 2 related capability moves harden into a broader race.",
         )
 
     def test_backtrack_candidates_keep_low_signal_three_event_group_on_weak_type(
