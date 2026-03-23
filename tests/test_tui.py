@@ -1347,7 +1347,7 @@ class TuiTests(unittest.TestCase):
         )
 
     @mock.patch("tianji.tui.get_run_summary", return_value=None)
-    def test_build_detail_panel_uses_lens_empty_copy_without_missing_data_wording(
+    def test_build_detail_panel_uses_missing_data_copy_for_missing_summary(
         self, mock_get_run_summary
     ) -> None:
         state = HistoryListState(
@@ -1359,9 +1359,8 @@ class TuiTests(unittest.TestCase):
         panel = build_detail_panel(state, width=70, page_size=20)
 
         detail_text = cast(Text, panel.renderable).plain
-        self.assertIn("No detail rows match the active lens.", detail_text)
-        self.assertIn("Persisted run data is unchanged.", detail_text)
-        self.assertNotIn("Run details not found.", detail_text)
+        self.assertIn("No persisted detail view is available.", detail_text)
+        self.assertNotIn("No detail rows match the active lens.", detail_text)
         mock_get_run_summary.assert_called_once_with(
             sqlite_path="dummy.sqlite3",
             run_id=10,
@@ -1370,6 +1369,236 @@ class TuiTests(unittest.TestCase):
             group_dominant_field=None,
             limit_event_groups=None,
             only_matching_interventions=False,
+        )
+
+    @mock.patch(
+        "tianji.tui.get_run_summary",
+        return_value={
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Persisted truth remains visible.",
+                "event_groups": [],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        },
+    )
+    def test_build_detail_panel_shows_lens_empty_copy_for_filtered_empty_summary(
+        self, mock_get_run_summary
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            dominant_field="economy",
+            group_dominant_field="conflict",
+            only_matching_interventions=True,
+        )
+
+        panel = build_detail_panel(state, width=70, page_size=20)
+
+        detail_text = cast(Text, panel.renderable).plain
+        self.assertIn("Run #10", detail_text)
+        self.assertIn("Persisted truth remains visible.", detail_text)
+        self.assertIn("No event-group rows match the active lens.", detail_text)
+        self.assertIn("No scored-event rows match the active lens.", detail_text)
+        self.assertIn("No intervention rows match the active lens.", detail_text)
+        self.assertIn("Persisted run data is", detail_text)
+        self.assertIn("unchanged.", detail_text)
+        self.assertIn("Event Groups: 0", detail_text)
+        self.assertIn("Scored Events: 0", detail_text)
+        self.assertIn("Interventions: 0", detail_text)
+        self.assertNotIn("No persisted detail view is available.", detail_text)
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            run_id=10,
+            dominant_field="economy",
+            limit_scored_events=None,
+            group_dominant_field="conflict",
+            limit_event_groups=None,
+            only_matching_interventions=True,
+        )
+
+    @mock.patch(
+        "tianji.tui.get_run_summary",
+        return_value={
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Persisted truth remains visible.",
+                "event_groups": [
+                    {
+                        "dominant_field": "technology",
+                        "member_count": 2,
+                        "headline_title": "Grouped signal stays visible.",
+                    }
+                ],
+            },
+            "scored_events": [],
+            "intervention_candidates": [
+                {
+                    "target": "usa",
+                    "intervention_type": "monitor",
+                    "expected_effect": "Remain visible.",
+                }
+            ],
+        },
+    )
+    def test_build_detail_panel_explains_empty_scored_events_slice(
+        self, mock_get_run_summary
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            dominant_field="economy",
+        )
+
+        panel = build_detail_panel(state, width=72, page_size=20)
+
+        detail_text = cast(Text, panel.renderable).plain
+        self.assertIn("Scored Events: 0", detail_text)
+        self.assertIn("No scored-event rows match the active lens.", detail_text)
+        self.assertIn("Event Groups: 1", detail_text)
+        self.assertIn("Grouped signal stays visible.", detail_text)
+        self.assertIn("Interventions: 1", detail_text)
+        self.assertNotIn("No event-group rows match the active lens.", detail_text)
+        self.assertNotIn("No intervention rows match the active lens.", detail_text)
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            run_id=10,
+            dominant_field="economy",
+            limit_scored_events=None,
+            group_dominant_field=None,
+            limit_event_groups=None,
+            only_matching_interventions=False,
+        )
+
+    @mock.patch(
+        "tianji.tui.get_run_summary",
+        return_value={
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Persisted truth remains visible.",
+                "event_groups": [],
+            },
+            "scored_events": [
+                {
+                    "title": "Scored event stays visible.",
+                    "dominant_field": "technology",
+                    "impact_score": 14.0,
+                    "field_attraction": 7.0,
+                    "divergence_score": 19.0,
+                }
+            ],
+            "intervention_candidates": [
+                {
+                    "target": "usa",
+                    "intervention_type": "monitor",
+                    "expected_effect": "Remain visible.",
+                }
+            ],
+        },
+    )
+    def test_build_detail_panel_explains_empty_event_groups_slice(
+        self, mock_get_run_summary
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            group_dominant_field="economy",
+        )
+
+        panel = build_detail_panel(state, width=72, page_size=20)
+
+        detail_text = cast(Text, panel.renderable).plain
+        self.assertIn("Event Groups: 0", detail_text)
+        self.assertIn("No event-group rows match the active lens.", detail_text)
+        self.assertIn("Scored Events: 1", detail_text)
+        self.assertIn("Scored event stays visible.", detail_text)
+        self.assertIn("Interventions: 1", detail_text)
+        self.assertNotIn("No scored-event rows match the active lens.", detail_text)
+        self.assertNotIn("No intervention rows match the active lens.", detail_text)
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            run_id=10,
+            dominant_field=None,
+            limit_scored_events=None,
+            group_dominant_field="economy",
+            limit_event_groups=None,
+            only_matching_interventions=False,
+        )
+
+    @mock.patch(
+        "tianji.tui.get_run_summary",
+        return_value={
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Persisted truth remains visible.",
+                "event_groups": [
+                    {
+                        "dominant_field": "technology",
+                        "member_count": 2,
+                        "headline_title": "Grouped signal stays visible.",
+                    }
+                ],
+            },
+            "scored_events": [
+                {
+                    "title": "Scored event stays visible.",
+                    "dominant_field": "technology",
+                    "impact_score": 14.0,
+                    "field_attraction": 7.0,
+                    "divergence_score": 19.0,
+                }
+            ],
+            "intervention_candidates": [],
+        },
+    )
+    def test_build_detail_panel_explains_empty_interventions_slice(
+        self, mock_get_run_summary
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            only_matching_interventions=True,
+        )
+
+        panel = build_detail_panel(state, width=72, page_size=20)
+
+        detail_text = cast(Text, panel.renderable).plain
+        self.assertIn("Interventions: 0", detail_text)
+        self.assertIn("No intervention rows match the active lens.", detail_text)
+        self.assertIn("Event Groups: 1", detail_text)
+        self.assertIn("Scored Events: 1", detail_text)
+        self.assertIn("Scored event stays visible.", detail_text)
+        self.assertNotIn("No scored-event rows match the active lens.", detail_text)
+        self.assertNotIn("No event-group rows match the active lens.", detail_text)
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            run_id=10,
+            dominant_field=None,
+            limit_scored_events=None,
+            group_dominant_field=None,
+            limit_event_groups=None,
+            only_matching_interventions=True,
         )
 
     @mock.patch("tianji.tui.compare_runs")
@@ -1438,7 +1667,7 @@ class TuiTests(unittest.TestCase):
             only_matching_interventions=True,
         )
 
-        panel = build_compare_panel(state, width=70, page_size=20)
+        panel = build_compare_panel(state, width=70, page_size=40)
 
         compare_text = cast(Text, panel.renderable).plain
         self.assertIn("Compare: Run #10 (Left) vs Run #20 (Right)", compare_text)
@@ -1464,7 +1693,7 @@ class TuiTests(unittest.TestCase):
         )
 
     @mock.patch("tianji.tui.compare_runs", return_value=None)
-    def test_build_compare_panel_uses_lens_empty_copy_without_missing_data_wording(
+    def test_build_compare_panel_uses_missing_data_copy_for_missing_compare(
         self, mock_compare_runs
     ) -> None:
         state = HistoryListState(
@@ -1475,12 +1704,11 @@ class TuiTests(unittest.TestCase):
             dominant_field="technology",
         )
 
-        panel = build_compare_panel(state, width=70, page_size=20)
+        panel = build_compare_panel(state, width=70, page_size=40)
 
         compare_text = cast(Text, panel.renderable).plain
-        self.assertIn("No compare rows match the active lens.", compare_text)
-        self.assertIn("Persisted run data is unchanged.", compare_text)
-        self.assertNotIn("Compare details not found.", compare_text)
+        self.assertIn("No persisted compare view is available.", compare_text)
+        self.assertNotIn("No compare rows match the active lens.", compare_text)
         mock_compare_runs.assert_called_once_with(
             sqlite_path="dummy.sqlite3",
             left_run_id=10,
@@ -1490,6 +1718,98 @@ class TuiTests(unittest.TestCase):
             group_dominant_field=None,
             limit_event_groups=None,
             only_matching_interventions=False,
+        )
+
+    @mock.patch(
+        "tianji.tui.compare_runs",
+        return_value={
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left persisted truth.",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+                "event_group_count": 0,
+                "intervention_event_ids": [],
+            },
+            "right": {
+                "run_id": 20,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Right persisted truth.",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+                "event_group_count": 0,
+                "intervention_event_ids": [],
+            },
+            "diff": {
+                "dominant_field_changed": False,
+                "risk_level_changed": False,
+                "raw_item_count_delta": 0,
+                "normalized_event_count_delta": 0,
+                "event_group_count_delta": 0,
+                "top_event_group_changed": False,
+                "top_event_group_evidence_diff": {
+                    "comparable": False,
+                    "member_count_delta": 0,
+                    "evidence_chain_link_count_delta": 0,
+                    "right_only_member_event_ids": [],
+                    "left_only_member_event_ids": [],
+                    "shared_keywords_added": [],
+                    "shared_keywords_removed": [],
+                    "chain_summary_changed": False,
+                },
+                "top_scored_event_changed": False,
+                "top_scored_event_comparable": False,
+                "top_impact_score_delta": None,
+                "top_field_attraction_delta": None,
+                "top_divergence_score_delta": None,
+                "top_intervention_changed": False,
+                "left_top_scored_event_id": None,
+                "right_top_scored_event_id": None,
+            },
+        },
+    )
+    def test_build_compare_panel_shows_lens_empty_copy_for_filtered_empty_compare(
+        self, mock_compare_runs
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            staged_compare_left_run_id=10,
+            dominant_field="economy",
+            group_dominant_field="conflict",
+            only_matching_interventions=True,
+        )
+
+        panel = build_compare_panel(state, width=70, page_size=40)
+
+        compare_text = cast(Text, panel.renderable).plain
+        self.assertIn("Compare: Run #10 (Left) vs Run #20 (Right)", compare_text)
+        self.assertIn("Left persisted truth.", compare_text)
+        self.assertIn("Right persisted truth.", compare_text)
+        self.assertIn("No event-group rows match the active lens.", compare_text)
+        self.assertIn("No scored-event rows match the active lens.", compare_text)
+        self.assertIn("No intervention rows match the active lens.", compare_text)
+        self.assertIn("Persisted run data is", compare_text)
+        self.assertIn("unchanged.", compare_text)
+        self.assertIn("Diff Highlights:", compare_text)
+        self.assertNotIn("No persisted compare view is available.", compare_text)
+        mock_compare_runs.assert_called_once_with(
+            sqlite_path="dummy.sqlite3",
+            left_run_id=10,
+            right_run_id=20,
+            dominant_field="economy",
+            limit_scored_events=None,
+            group_dominant_field="conflict",
+            limit_event_groups=None,
+            only_matching_interventions=True,
         )
 
     @mock.patch(

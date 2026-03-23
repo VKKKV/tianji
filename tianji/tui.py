@@ -459,11 +459,16 @@ def build_compare_panel(state: HistoryListState, width: int, page_size: int) -> 
                 )
                 if compare_result:
                     state.cached_compare_lines = format_compare_detail(
-                        compare_result, width=inner_width
+                        compare_result,
+                        width=inner_width,
+                        projected_empty_messages=build_compare_projected_empty_messages(
+                            compare_result,
+                            state=state,
+                        ),
                     )
                 else:
                     state.cached_compare_lines = [
-                        format_projected_empty_message(state, subject="compare")
+                        "No persisted compare view is available."
                     ]
                 state.cached_compare_right_run_id = right_run_id
                 state.cached_compare_lens_key = compare_lens_key
@@ -591,12 +596,15 @@ def build_detail_panel(state: HistoryListState, width: int, page_size: int) -> P
             )
             if summary:
                 state.cached_detail_lines = format_run_detail(
-                    summary, width=inner_width
+                    summary,
+                    width=inner_width,
+                    projected_empty_messages=build_detail_projected_empty_messages(
+                        summary,
+                        state=state,
+                    ),
                 )
             else:
-                state.cached_detail_lines = [
-                    format_projected_empty_message(state, subject="detail")
-                ]
+                state.cached_detail_lines = ["No persisted detail view is available."]
             state.cached_detail_run_id = run_id
             state.cached_detail_lens_key = detail_lens_key
             state.detail_scroll_offset = 0
@@ -757,6 +765,103 @@ def format_projected_empty_message(state: HistoryListState, *, subject: str) -> 
     return f"No {subject} rows match the active lens. Persisted run data is unchanged."
 
 
+def has_active_projection_lens(state: HistoryListState) -> bool:
+    return format_active_lens_summary(state) != "lens:all-runs"
+
+
+def format_projected_empty_slice_message(slice_name: str) -> str:
+    return (
+        f"No {slice_name} rows match the active lens. Persisted run data is unchanged."
+    )
+
+
+def build_detail_projected_empty_messages(
+    summary: dict[str, object], *, state: HistoryListState
+) -> dict[str, str]:
+    messages: dict[str, str] = {}
+    if not has_active_projection_lens(state):
+        return messages
+
+    scenario = summary.get("scenario_summary")
+    event_groups = scenario.get("event_groups") if isinstance(scenario, dict) else None
+    scored_events = summary.get("scored_events")
+    interventions = summary.get("intervention_candidates")
+
+    if (
+        (state.group_dominant_field is not None or state.limit_event_groups is not None)
+        and isinstance(event_groups, list)
+        and not event_groups
+    ):
+        messages["event_groups"] = format_projected_empty_slice_message("event-group")
+
+    if (
+        (state.dominant_field is not None or state.limit_scored_events is not None)
+        and isinstance(scored_events, list)
+        and not scored_events
+    ):
+        messages["scored_events"] = format_projected_empty_slice_message("scored-event")
+
+    if (
+        state.only_matching_interventions
+        and isinstance(interventions, list)
+        and not interventions
+    ):
+        messages["interventions"] = format_projected_empty_slice_message("intervention")
+
+    return messages
+
+
+def build_compare_projected_empty_messages(
+    compare_result: dict[str, object], *, state: HistoryListState
+) -> dict[str, list[str]]:
+    messages = {"left": [], "right": []}
+    if not has_active_projection_lens(state):
+        return messages
+
+    left = compare_result.get("left")
+    right = compare_result.get("right")
+    if isinstance(left, dict):
+        messages["left"] = build_compare_side_projected_empty_messages(
+            left,
+            state=state,
+        )
+    if isinstance(right, dict):
+        messages["right"] = build_compare_side_projected_empty_messages(
+            right,
+            state=state,
+        )
+    return messages
+
+
+def build_compare_side_projected_empty_messages(
+    side: dict[str, object], *, state: HistoryListState
+) -> list[str]:
+    messages: list[str] = []
+
+    if (
+        (state.group_dominant_field is not None or state.limit_event_groups is not None)
+        and side.get("top_event_group") is None
+        and side.get("event_group_count") == 0
+    ):
+        messages.append(format_projected_empty_slice_message("event-group"))
+
+    if (
+        state.dominant_field is not None or state.limit_scored_events is not None
+    ) and side.get("top_scored_event") is None:
+        messages.append(format_projected_empty_slice_message("scored-event"))
+
+    intervention_event_ids = side.get("intervention_event_ids")
+    if (
+        state.only_matching_interventions
+        and side.get("top_intervention") is None
+        and isinstance(intervention_event_ids, list)
+        and not intervention_event_ids
+    ):
+        messages.append(format_projected_empty_slice_message("intervention"))
+
+    return messages
+
+
 def format_event_group_preview_lines(
     group: dict[str, object],
     *,
@@ -779,7 +884,12 @@ def format_event_group_preview_lines(
     return [summary_line, snippet_line]
 
 
-def format_compare_side_summaries(side: dict[str, object], *, width: int) -> list[str]:
+def format_compare_side_summaries(
+    side: dict[str, object],
+    *,
+    width: int,
+    projected_empty_messages: list[str] | None = None,
+) -> list[str]:
     lines = []
     top_group = side.get("top_event_group")
     if isinstance(top_group, dict):
@@ -805,6 +915,10 @@ def format_compare_side_summaries(side: dict[str, object], *, width: int) -> lis
         target = str(top_intervention.get("target", "unknown"))
         itype = str(top_intervention.get("intervention_type", "unknown"))
         lines.append(shorten_text(f"  Top Action: [{itype}] {target}", width))
+
+    if projected_empty_messages:
+        for message in projected_empty_messages:
+            lines.extend(wrap_text(f"  {message}", width))
 
     return lines
 
@@ -914,7 +1028,10 @@ def get_compare_similarity_summary(diff: dict[str, object]) -> str | None:
 
 
 def format_compare_detail(
-    compare_result: dict[str, object], *, width: int
+    compare_result: dict[str, object],
+    *,
+    width: int,
+    projected_empty_messages: dict[str, list[str]] | None = None,
 ) -> list[str]:
     lines = []
     left = compare_result.get("left", {})
@@ -953,7 +1070,18 @@ def format_compare_detail(
     left_headline = str(left.get("headline", ""))
     if left_headline:
         lines.extend(wrap_text(f"       {left_headline}", width))
-    lines.extend(format_compare_side_summaries(left, width=width))
+    left_empty_messages = (
+        projected_empty_messages.get("left", [])
+        if isinstance(projected_empty_messages, dict)
+        else []
+    )
+    lines.extend(
+        format_compare_side_summaries(
+            left,
+            width=width,
+            projected_empty_messages=left_empty_messages,
+        )
+    )
     lines.append("")
 
     right_field = right.get("dominant_field", "uncategorized")
@@ -966,7 +1094,18 @@ def format_compare_detail(
     right_headline = str(right.get("headline", ""))
     if right_headline:
         lines.extend(wrap_text(f"        {right_headline}", width))
-    lines.extend(format_compare_side_summaries(right, width=width))
+    right_empty_messages = (
+        projected_empty_messages.get("right", [])
+        if isinstance(projected_empty_messages, dict)
+        else []
+    )
+    lines.extend(
+        format_compare_side_summaries(
+            right,
+            width=width,
+            projected_empty_messages=right_empty_messages,
+        )
+    )
     lines.append("")
 
     lines.append(shorten_text("Diff Highlights:", width))
@@ -1025,7 +1164,12 @@ def format_delta(value: object) -> str:
     return f"{float(value):+.2f}"
 
 
-def format_run_detail(summary: dict[str, object], *, width: int) -> list[str]:
+def format_run_detail(
+    summary: dict[str, object],
+    *,
+    width: int,
+    projected_empty_messages: dict[str, str] | None = None,
+) -> list[str]:
     lines = []
     run_id = summary.get("run_id")
     generated_at = str(summary.get("generated_at", ""))[:19].replace("T", " ")
@@ -1058,6 +1202,13 @@ def format_run_detail(summary: dict[str, object], *, width: int) -> list[str]:
         if isinstance(event_groups, list):
             lines.append("")
             lines.append(shorten_text(f"Event Groups: {len(event_groups)}", width))
+            event_groups_empty_message = (
+                projected_empty_messages.get("event_groups")
+                if isinstance(projected_empty_messages, dict)
+                else None
+            )
+            if event_groups_empty_message:
+                lines.extend(wrap_text(event_groups_empty_message, width))
             for group_index, group in enumerate(event_groups[:3], start=1):
                 if not isinstance(group, dict):
                     continue
@@ -1073,6 +1224,13 @@ def format_run_detail(summary: dict[str, object], *, width: int) -> list[str]:
     if isinstance(scored_events, list):
         lines.append("")
         lines.append(shorten_text(f"Scored Events: {len(scored_events)}", width))
+        scored_events_empty_message = (
+            projected_empty_messages.get("scored_events")
+            if isinstance(projected_empty_messages, dict)
+            else None
+        )
+        if scored_events_empty_message:
+            lines.extend(wrap_text(scored_events_empty_message, width))
         for event_index, event in enumerate(scored_events[:3], start=1):
             if not isinstance(event, dict):
                 continue
@@ -1088,6 +1246,13 @@ def format_run_detail(summary: dict[str, object], *, width: int) -> list[str]:
     if isinstance(interventions, list):
         lines.append("")
         lines.append(shorten_text(f"Interventions: {len(interventions)}", width))
+        interventions_empty_message = (
+            projected_empty_messages.get("interventions")
+            if isinstance(projected_empty_messages, dict)
+            else None
+        )
+        if interventions_empty_message:
+            lines.extend(wrap_text(interventions_empty_message, width))
         for intervention_index, intervention in enumerate(interventions[:3], start=1):
             if not isinstance(intervention, dict):
                 continue
