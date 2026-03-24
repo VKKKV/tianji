@@ -13,8 +13,10 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
   - In the current slice, it is a bounded additive score built from:
      - actor weight
      - region weight
+     - a bounded actor/region title-salience bonus for headline mentions
      - keyword density
      - a small dominant-field evidence bonus
+     - a bounded dominant-field-specific impact-scaling bonus
      - a small thresholded field-diversity bonus for fields with meaningful scored support
      - a bounded text-signal-intensity bonus for dominant-field cue concentration across normalized text surfaces
 
@@ -33,6 +35,33 @@ It is intentionally narrower than the long-term Phase 2 goal. The purpose of thi
   - The current formula remains a transparent bounded blend:
     - `divergence_score = 0.65 * Im + 1.35 * Fa`
 
+## Rationale Transparency Contract
+
+This scoring-spec update documents the shipped rationale output more explicitly. It does not revise the scoring formula.
+
+Current rationale remains additive, explicit, transparent, inspectable, and bounded:
+
+- `build_rationale()` in `tianji/scoring.py` always starts with top-level `Im=<value>` and `Fa=<value>` entries
+- the rationale then exposes the additive `Im` components with the exact shipped labels:
+  - `im_base`
+  - `im_actor_weight`
+  - `im_region_weight`
+  - `im_keyword_density`
+  - `im_dominant_field_bonus`
+  - `im_nonzero_field_bonus`
+- the rationale also exposes additive `Im` components conditionally when those shipped terms are active:
+  - `im_title_salience`, only when the bounded title-salience bonus is greater than zero
+  - `im_field_impact_scaling`, only when the bounded dominant-field impact-scaling bonus is greater than zero
+  - `im_text_signal_intensity`, whenever the selected dominant field has first-party field keyword vocabulary, including zero-valued cases for that shipped text-signal term
+- when field-score mass exists, the rationale exposes the additive and subtractive `Fa` components with the exact shipped labels:
+  - `fa_dominant_field_strength`
+  - `fa_dominance_margin_bonus`
+  - `fa_coherence_bonus`
+  - `fa_near_tie_penalty`
+  - `fa_diffuse_third_field_penalty`
+
+This contract keeps score inspection aligned with shipped behavior. The rationale labels name the current additive `Im` and `Fa` terms directly so operators and tests can inspect how each bounded component contributed, without claiming any broader scoring-model revision.
+
 ## Why This Slice Is Small
 
 This first scoring-focused Phase 2 change does **not**:
@@ -43,6 +72,116 @@ This first scoring-focused Phase 2 change does **not**:
 - add model-driven or cloud-based scoring
 
 It only makes the existing deterministic scoring language explicit and testable in first-party TianJi terms.
+
+## Current Actor / Region Title-Salience Expansion
+
+The current Phase 2 scoring slice now also includes:
+
+- **a bounded title-salience bonus inside `Im` for actor and region mentions already present in the normalized event**
+
+Intent:
+
+- reward events whose already-extracted actors or regions are important enough to
+  appear directly in the headline rather than only in the body text
+- deepen `Im` without changing the meaning of `Fa`
+- preserve the current split where `Im` represents branch-moving force and `Fa`
+  represents dominant-field alignment
+
+Allowed inputs for this slice:
+
+- normalized `title`
+- normalized `actors`
+- normalized `regions`
+- existing actor and region pattern vocabulary already used during normalization
+
+Disallowed inputs for this slice:
+
+- any new stored title-only actor or region fields in the artifact or SQLite
+- cross-event corroboration
+- prior runs or baseline history
+
+Constraints implemented in this slice:
+
+- the bonus is additive inside `Im`
+- the bonus only rewards actors and regions already matched by TianJi's existing
+  normalization vocabulary; it does not introduce a second entity extractor
+- title salience remains smaller than the base actor/region contribution so the
+  headline can sharpen an existing signal without overpowering the event's
+  broader normalized evidence
+- `Fa` and the top-level artifact shape remain unchanged
+
+Current implementation shape:
+
+- TianJi re-checks the normalized `title` against the existing actor and region
+  pattern maps from normalization
+- actor title-salience adds a small bounded bonus per actor whose canonical label
+  is both present in `event.actors` and matched in the title
+- region title-salience adds a small bounded bonus per region whose canonical
+  label is both present in `event.regions` and matched in the title
+- the combined title-salience bonus is capped so headline mentions sharpen `Im`
+  but do not outweigh the full actor + region base contribution
+
+Recommended verification for this slice:
+
+- paired synthetic-event tests where `field_scores`, keywords, body text, and
+  extracted actor/region sets stay fixed
+- moving a matched actor or region mention into the title should raise
+  `impact_score`
+- the same paired tests should leave `field_attraction` unchanged
+
+## Current Dominant-Field Impact-Scaling Expansion
+
+The current Phase 2 scoring slice now also includes:
+
+- **a bounded dominant-field-specific impact-scaling bonus inside `Im`**
+
+Intent:
+
+- let TianJi distinguish equally structured events whose branch-moving force
+  should differ slightly by dominant field even before any historical baseline
+  exists
+- keep the scoring model local and inspectable by deriving the adjustment from
+  the same first-party field vocabulary TianJi already uses for normalization
+- preserve the current split where `Im` remains branch-moving force and `Fa`
+  remains field-alignment strength
+
+Allowed inputs for this slice:
+
+- the selected `dominant_field`
+- the dominant field's current strength from `field_scores`
+- first-party field keyword weights already defined in `tianji/normalize.py`
+
+Disallowed inputs for this slice:
+
+- any external taxonomy or reference-repo runtime logic
+- persistence history, novelty, or spike detection
+- changes to the `divergence_score` blend itself
+
+Constraints implemented in this slice:
+
+- the adjustment stays additive inside `Im`
+- the adjustment is field-specific but derived from first-party TianJi field
+  vocabulary rather than hidden manual overrides at runtime
+- the bonus remains smaller than the dominant-field base contribution so it
+  refines impact rather than rewriting the ranking model
+- `Fa` stays field-alignment-only for this slice
+
+Current implementation shape:
+
+- TianJi computes a small field-impact factor from the dominant field's keyword
+  vocabulary profile in `tianji/normalize.py`
+- stronger dominant-field vocabularies contribute a modestly larger bounded bonus
+  when the event's dominant-field strength is otherwise the same
+- uncategorized events do not receive this bonus
+
+Recommended verification for this slice:
+
+- paired synthetic-event tests where actor, region, keyword-density, and
+  dominant-field strength stay fixed while the dominant field changes
+- a stronger-impact dominant field should score a modestly higher `impact_score`
+  than a weaker-impact field with the same structural inputs
+- `field_attraction` should continue to reflect only field-score shape, not this
+  `Im`-side refinement
 
 Later Phase 2 grouping work now adds lightweight evidence-chain metadata inside
 `scenario_summary.event_groups` so grouped backtracking can cite corroborating
@@ -55,13 +194,30 @@ Current grouping work now also supports transitive causal clustering inside
 `causal_span_hours`, per-link relationship metadata, and `causal_summary`
 without changing SQLite table shape.
 
+## Shipped `Fa` Contract
+
+The shipped `Fa` model is intentionally narrow and fully local to one normalized event.
+
+Current rule set in `tianji/scoring.py`:
+
+- start from the dominant field strength
+- add a bounded dominance-margin bonus over the second-best field
+- add a bounded coherence bonus from dominant-field share of total positive field mass
+- subtract a bounded near-tie penalty when the rounded top-two margin is below `1.0`
+- subtract a bounded diffuse-third-field penalty only when the rounded top-two margin is already at least `1.0` and the third-best field is above `2.5`
+- if total positive field mass is zero, return `Fa = 0.0` and keep the event `uncategorized`
+- if multiple positive fields tie for the top score, keep the event categorized but resolve the dominant-field label deterministically by canonical field-name order
+
+This is the whole shipped `Fa` rule set for the current branch. It is a bounded field-shape heuristic, not a broader contradiction, corroboration, grouping, persistence, or history model.
+
 ## Deferred Work
 
 Still deferred after this slice:
 
-- richer `Fa` from corroboration and contradiction handling beyond field-score concentration
-- richer `Im` from novelty/spike and baseline deviation signals
-- deeper event grouping and causal clustering beyond the current transitive evidence-chain summaries
+- richer `Fa` from corroboration, contradiction, or other mixed-field reasoning beyond current top-two and third-field concentration checks
+- richer `Im` from novelty, spike, or baseline-deviation signals
+- any grouped or cross-event ambiguity logic
+- any persistence-driven or history-driven scoring logic
 - broader persisted analysis beyond top scored-event run-history queries
 
 ## Current Text-Signal-Intensity Expansion
@@ -191,6 +347,8 @@ Constraints implemented in this slice:
 - the near-tie penalty remains the primary top-two ambiguity adjustment
 - the new diffuse penalty only applies when the rounded top-two margin is already
   at least `1.0`
+- in the current implementation, unusually strong third-field support means the
+  rounded third-best field is above `2.5`
 - the new diffuse penalty is driven by unusually strong third-field support, not
   by any persistence, history, or grouped context
 - the penalty stays bounded and smaller than the dominant-field base
@@ -223,48 +381,14 @@ Recommended verification for this slice:
 - `impact_score` in the artifact corresponds to current TianJi `Im`.
 - `field_attraction` in the artifact corresponds to current TianJi `Fa`.
 
+## Next-Refinement Decision Gate
+
+No additional `Fa` refinement should land next just because mixed-field cases exist in the abstract. The next refinement is allowed only if one still-unhandled mixed-field weakness is proven first with one canonical synthetic event pair that keeps `Im` inputs fixed and shows a meaningful `Fa` failure not already explained by the shipped near-tie rule or the shipped diffuse-third-field rule.
+
+Task 5 completed that proof check for this branch and did not find a meaningful uncovered mixed-field weakness. Until a later branch proves otherwise, this spec treats the current `Fa` model as the shipped baseline and records that no new `Fa` rule landed here.
+
+## Branch Guardrail
+
+This branch is formula-focused. It must not change persistence, CLI behavior, artifact schema, grouped analysis, or any `Im` rule.
+
 This preserves backward compatibility while making the Phase 2 vocabulary real inside first-party code.
-
-Current persisted operator workflow now also exposes top scored-event `impact_score`,
-`field_attraction`, and `divergence_score` in `history`, along with threshold filters
-over those top-event values. Those thresholds apply only to the single persisted
-top scored event for each run, and runs without scored events expose `null` top
-metrics that will not match numeric score filters. `history-compare` now also
-reports additive deltas for those same top-event score metrics, while broader
-per-event or aggregate scoring queries remain future work.
-
-`history` now also exposes grouped-run summary fields such as `event_group_count`
-and the top event group's dominant field, so persisted run triage can use grouped
-scenario signals without opening `history-show` or `history-compare` first.
-
-For compare semantics, `top_scored_event_comparable=true` means both runs share
-the same top scored `event_id`, so the score deltas can be read as one persisted
-leading signal evolving over time. When `top_scored_event_comparable=false`, the
-same delta fields remain populated but represent contrast between different top
-events rather than longitudinal change of one event.
-
-Single-run persisted analysis now also supports score-aware `history-show`
-filtering over stored `scored_events`, including dominant-field, `impact_score`,
-`field_attraction`, and `divergence_score` selectors plus per-run event limits.
-That drill-down still operates on persisted scored events for one chosen run,
-not on broader cross-run aggregate scoring queries. When operators want the
-intervention list to stay aligned with the visible scored-event selection,
-`history-show` can now optionally keep only intervention candidates whose
-`event_id` remains in that final visible scored-event set after filters and
-limits.
-
-Single-run grouped analysis now also supports read-time `history-show`
-filtering over persisted `scenario_summary.event_groups`, including dominant-field
-selection and per-run event-group limits. This is still a view over the stored
-scenario summary, not a new grouping or persistence contract.
-
-That same read-time projection model now also applies to `history-compare`, so
-paired run comparison can be scoped to one scored-event dominant field, score
-window, visible intervention subset, or event-group dominant field/limit without
-changing the persisted runs themselves.
-
-Within grouped summaries, `causal_ordered_event_ids` follows the admission-path
-tree used to attach members to a cluster, not guaranteed timestamp order.
-`causal_span_hours` uses the earliest and latest known timestamps when at least
-two are present; otherwise it remains `null`, and `causal_summary` falls back to
-non-span wording instead of implying a known timeline.

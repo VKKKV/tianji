@@ -960,7 +960,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = cli.main(
             args=argv,
-            prog_name="python -m unittest",
+            prog_name="python -m tianji",
             standalone_mode=False,
         )
     except click.ClickException as error:

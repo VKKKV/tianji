@@ -1,0 +1,34 @@
+Task 5 Fa ambiguity proof review
+
+Date: 2026-03-23
+Scope: Read-only review of current `Fa` code/tests/spec to determine whether one canonical mixed-field ambiguity weakness still survives outside the shipped near-tie and diffuse-third-field rules.
+
+Files reviewed:
+- `tianji/scoring.py`
+- `tests/test_scoring.py`
+- `SCORING_SPEC.md`
+
+Shipped `Fa` coverage confirmed from code and tests:
+- bounded dominance-margin bonus
+- bounded coherence bonus
+- bounded near-tie penalty when top-two margin is below `1.0`
+- bounded diffuse-third-field penalty when top-two margin is already at least `1.0` and third field exceeds `2.5`
+- zero-field `uncategorized` handling
+- deterministic top-field tie resolution
+
+Targeted synthetic search result:
+- I searched synthetic three-field shapes while holding title, summary, keywords, actors, regions, dominant field, and `Im`-relevant nonzero-field count fixed.
+- I excluded shapes already covered by the shipped near-tie rule (`margin < 1.0`) and shipped diffuse-third-field rule (`third > 2.5` with clear top-two margin).
+- The only inversion found under those constraints was a residual-noise pair:
+  - clearer runner-up: `technology=6.5, diplomacy=0.2, economy=0.0, conflict=0.0` -> `Im=12.3`, `Fa=8.17`
+  - more split residual: `technology=6.5, diplomacy=0.1, economy=0.1, conflict=0.0` -> `Im=12.3`, `Fa=8.19`
+- Difference: the more split residual case scores `Fa` higher by only `0.02`, driven by a slightly larger top-two margin while both cases remain outside the shipped penalty zones.
+
+Conclusion:
+- No canonical in-scope surviving `Fa` ambiguity weakness was proven.
+- The only fixed-`Im` inversion located is too small and too low-signal to justify a new ambiguity rule; it reads as expected interaction between the already-shipped margin and coherence terms, not as a meaningful uncovered mixed-field failure.
+- Per task instructions, no scoring-code change was attempted and `tests/test_scoring.py` was left unchanged.
+
+Targeted verification:
+- `python3 -m unittest discover -s tests -p 'test_scoring.py' -v`
+- Result: 29 tests run, OK

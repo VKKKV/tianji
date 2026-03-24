@@ -4,7 +4,7 @@ from collections import Counter
 import re
 
 from .models import NormalizedEvent, ScoredEvent
-from .normalize import FIELD_KEYWORDS
+from .normalize import ACTOR_PATTERNS, FIELD_KEYWORDS, REGION_PATTERNS, match_patterns
 
 
 REGION_WEIGHTS = {
@@ -35,11 +35,19 @@ FA_NEAR_TIE_MARGIN_THRESHOLD = 1.0
 FA_NEAR_TIE_WEIGHT = 0.35
 FA_MAX_NEAR_TIE_PENALTY = 0.3
 FA_DIFFUSE_THIRD_FIELD_THRESHOLD = 2.5
-FA_DIFFUSE_THIRD_FIELD_WEIGHT = 0.08
+FA_DIFFUSE_THIRD_FIELD_WEIGHT = 0.1
 FA_MAX_DIFFUSE_THIRD_FIELD_PENALTY = 0.2
 IM_DOMINANT_FIELD_WEIGHT = 0.25
 IM_NONZERO_FIELD_WEIGHT = 0.2
 IM_NONZERO_FIELD_MIN_SCORE = 1.0
+IM_TITLE_SALIENCE_ACTOR_MULTIPLIER = 0.2
+IM_TITLE_SALIENCE_REGION_MULTIPLIER = 0.2
+IM_TITLE_SALIENCE_ACTOR_MAX_PER_MATCH = 0.35
+IM_TITLE_SALIENCE_REGION_MAX_PER_MATCH = 0.4
+IM_TITLE_SALIENCE_MAX_BONUS = 0.8
+IM_FIELD_IMPACT_BASELINE_AVERAGE_WEIGHT = 1.5
+IM_FIELD_IMPACT_SCALE_WEIGHT = 0.06
+IM_FIELD_IMPACT_MAX_BONUS = 0.5
 IM_TEXT_SIGNAL_KEYWORD_WEIGHT = 0.12
 IM_TEXT_SIGNAL_TITLE_WEIGHT = 0.2
 IM_TEXT_SIGNAL_SUMMARY_WEIGHT = 0.1
@@ -57,12 +65,19 @@ def score_events(events: list[NormalizedEvent]) -> list[ScoredEvent]:
 
 def score_event(event: NormalizedEvent) -> ScoredEvent:
     dominant_field, dominant_field_strength = select_dominant_field(event)
+    title_salience_bonus = compute_title_salience_bonus(event)
+    field_impact_scaling_bonus = compute_field_impact_scaling_bonus(
+        dominant_field=dominant_field,
+        dominant_field_strength=dominant_field_strength,
+    )
     text_signal_intensity = compute_text_signal_intensity(event, dominant_field)
     fa_score = compute_fa(event, dominant_field_strength)
     im_score = compute_im(
         event,
         dominant_field_strength,
         event.field_scores,
+        title_salience_bonus,
+        field_impact_scaling_bonus,
         text_signal_intensity,
     )
     divergence_score = compute_divergence_score(im_score, fa_score)
@@ -71,6 +86,8 @@ def score_event(event: NormalizedEvent) -> ScoredEvent:
         dominant_field=dominant_field,
         im_score=im_score,
         fa_score=fa_score,
+        title_salience_bonus=title_salience_bonus,
+        field_impact_scaling_bonus=field_impact_scaling_bonus,
         text_signal_intensity=text_signal_intensity,
     )
     return ScoredEvent(
@@ -94,6 +111,8 @@ def compute_im(
     event: NormalizedEvent,
     dominant_field_strength: float,
     field_scores: dict[str, float],
+    title_salience_bonus: float,
+    field_impact_scaling_bonus: float,
     text_signal_intensity: float,
 ) -> float:
     actor_weight = sum(ACTOR_WEIGHTS.get(actor, 0.6) for actor in event.actors)
@@ -111,9 +130,54 @@ def compute_im(
         3.0
         + actor_weight
         + region_weight
+        + title_salience_bonus
         + keyword_density
         + evidence_bonus
+        + field_impact_scaling_bonus
         + text_signal_intensity,
+        2,
+    )
+
+
+def compute_title_salience_bonus(event: NormalizedEvent) -> float:
+    title_actors = set(match_patterns(event.title, ACTOR_PATTERNS))
+    title_regions = set(match_patterns(event.title, REGION_PATTERNS))
+    actor_bonus = sum(
+        min(
+            ACTOR_WEIGHTS.get(actor, 0.6) * IM_TITLE_SALIENCE_ACTOR_MULTIPLIER,
+            IM_TITLE_SALIENCE_ACTOR_MAX_PER_MATCH,
+        )
+        for actor in event.actors
+        if actor in title_actors
+    )
+    region_bonus = sum(
+        min(
+            REGION_WEIGHTS.get(region, 0.5) * IM_TITLE_SALIENCE_REGION_MULTIPLIER,
+            IM_TITLE_SALIENCE_REGION_MAX_PER_MATCH,
+        )
+        for region in event.regions
+        if region in title_regions
+    )
+    return round(min(actor_bonus + region_bonus, IM_TITLE_SALIENCE_MAX_BONUS), 2)
+
+
+def compute_field_impact_scaling_bonus(
+    *, dominant_field: str, dominant_field_strength: float
+) -> float:
+    dominant_keywords = FIELD_KEYWORDS.get(dominant_field)
+    if not dominant_keywords or dominant_field_strength <= 0:
+        return 0.0
+    average_keyword_weight = sum(dominant_keywords.values()) / len(dominant_keywords)
+    return round(
+        min(
+            max(
+                average_keyword_weight - IM_FIELD_IMPACT_BASELINE_AVERAGE_WEIGHT,
+                0.0,
+            )
+            * dominant_field_strength
+            * IM_FIELD_IMPACT_SCALE_WEIGHT,
+            IM_FIELD_IMPACT_MAX_BONUS,
+        ),
         2,
     )
 
@@ -240,9 +304,15 @@ def build_rationale(
     dominant_field: str,
     im_score: float,
     fa_score: float,
+    title_salience_bonus: float,
+    field_impact_scaling_bonus: float,
     text_signal_intensity: float,
 ) -> list[str]:
     rationale = [f"Im={im_score}", f"Fa={fa_score}"]
+    if title_salience_bonus > 0:
+        rationale.append(f"im_title_salience={title_salience_bonus}")
+    if field_impact_scaling_bonus > 0:
+        rationale.append(f"im_field_impact_scaling={field_impact_scaling_bonus}")
     dominant_field_keywords = FIELD_KEYWORDS.get(dominant_field, {})
     if dominant_field_keywords:
         rationale.append(f"im_text_signal_intensity={text_signal_intensity}")

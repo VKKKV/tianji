@@ -1,0 +1,181 @@
+TASK 4 SCORING SPEC EVIDENCE
+
+Spec excerpts
+
+## Shipped `Fa` Contract
+
+The shipped `Fa` model is intentionally narrow and fully local to one normalized event.
+
+Current rule set in `tianji/scoring.py`:
+
+- start from the dominant field strength
+- add a bounded dominance-margin bonus over the second-best field
+- add a bounded coherence bonus from dominant-field share of total positive field mass
+- subtract a bounded near-tie penalty when the rounded top-two margin is below `1.0`
+- subtract a bounded diffuse-third-field penalty only when the rounded top-two margin is already at least `1.0` and the third-best field is above `2.5`
+- if total positive field mass is zero, return `Fa = 0.0` and keep the event `uncategorized`
+- if multiple positive fields tie for the top score, keep the event categorized but resolve the dominant-field label deterministically by canonical field-name order
+
+This is the whole shipped `Fa` rule set for the current branch. It is a bounded field-shape heuristic, not a broader contradiction, corroboration, grouping, persistence, or history model.
+
+## Current Near-Tie Fa Refinement
+
+The current Phase 2 scoring slice now also includes:
+
+- **a bounded near-tie ambiguity penalty inside `Fa`**
+
+Constraints implemented in this slice:
+
+- dominant field strength remains the base of `Fa`
+- the existing margin bonus and coherence bonus remain in place
+- the new adjustment is a small bounded subtraction driven only by the margin
+  between the top two fields
+- in the current implementation, that bounded subtraction applies when the
+  rounded top-two margin is below `1.0`
+- broad contradiction/corroboration logic is still deferred
+
+## Current Diffuse Mixed-Field Fa Refinement
+
+The current Phase 2 scoring slice now also includes:
+
+- **a bounded diffuse mixed-field penalty inside `Fa` when the top-two margin is already clear**
+
+Constraints implemented in this slice:
+
+- the near-tie penalty remains the primary top-two ambiguity adjustment
+- the new diffuse penalty only applies when the rounded top-two margin is already
+  at least `1.0`
+- in the current implementation, unusually strong third-field support means the
+  rounded third-best field is above `2.5`
+- the new diffuse penalty is driven by unusually strong third-field support, not
+  by any persistence, history, or grouped context
+- the penalty stays bounded and smaller than the dominant-field base
+
+Current implementation shape:
+
+- cleaner two-field cases with a clear dominant margin still behave like the
+  prior shipped formula
+- when a strong third field remains after the top-two margin is already clear,
+  `Fa` subtracts a small bounded diffuse-support penalty
+- this remains a surgical ambiguity adjustment rather than a broad contradiction
+  model
+- when all field scores are zero, TianJi does not infer a dominant field from
+  dict order; it treats the event as `uncategorized` with `Fa = 0.0`
+- when multiple positive fields share the exact top score, TianJi keeps the event
+  categorized but resolves the dominant-field label deterministically by
+  canonical field-name order so `Im` text-signal matching and rationale output do
+  not depend on field-score dict insertion order
+
+## Next-Refinement Decision Gate
+
+No additional `Fa` refinement should land next just because mixed-field cases exist in the abstract. The next refinement is allowed only if one still-unhandled mixed-field weakness is proven first with one canonical synthetic event pair that keeps `Im` inputs fixed and shows a meaningful `Fa` failure not already explained by the shipped near-tie rule or the shipped diffuse-third-field rule.
+
+Until that proof exists, this spec treats the current `Fa` model as the shipped baseline.
+
+## Branch Guardrail
+
+This branch is formula-focused. It must not change persistence, CLI behavior, artifact schema, grouped analysis, or any `Im` rule.
+
+Code excerpts
+
+def compute_fa(event: NormalizedEvent, dominant_field_strength: float) -> float:
+    ordered_scores = sorted(event.field_scores.values(), reverse=True)
+    second_best_strength = (
+        round(ordered_scores[1], 2) if len(ordered_scores) > 1 else 0.0
+    )
+    third_best_strength = (
+        round(ordered_scores[2], 2) if len(ordered_scores) > 2 else 0.0
+    )
+    total_strength = sum(score for score in event.field_scores.values() if score > 0)
+    if total_strength <= 0:
+        return 0.0
+    dominant_margin = max(dominant_field_strength - second_best_strength, 0.0)
+
+    margin_bonus = min(
+        dominant_margin * FA_MARGIN_WEIGHT,
+        FA_MAX_MARGIN_BONUS,
+    )
+    coherence_bonus = 0.0
+    if total_strength > 0:
+        coherence_bonus = (
+            dominant_field_strength / total_strength
+        ) * FA_COHERENCE_WEIGHT
+    near_tie_penalty = min(
+        max(FA_NEAR_TIE_MARGIN_THRESHOLD - dominant_margin, 0.0) * FA_NEAR_TIE_WEIGHT,
+        FA_MAX_NEAR_TIE_PENALTY,
+    )
+    diffuse_third_field_penalty = 0.0
+    if dominant_margin >= FA_NEAR_TIE_MARGIN_THRESHOLD:
+        diffuse_third_field_penalty = min(
+            max(third_best_strength - FA_DIFFUSE_THIRD_FIELD_THRESHOLD, 0.0)
+            * FA_DIFFUSE_THIRD_FIELD_WEIGHT,
+            FA_MAX_DIFFUSE_THIRD_FIELD_PENALTY,
+        )
+
+    return round(
+        dominant_field_strength
+        + margin_bonus
+        + coherence_bonus
+        - near_tie_penalty
+        - diffuse_third_field_penalty,
+        2,
+    )
+
+def build_rationale(
+    *,
+    event: NormalizedEvent,
+    dominant_field: str,
+    im_score: float,
+    fa_score: float,
+    actor_weight: float,
+    region_weight: float,
+    keyword_density: float,
+    im_dominant_field_bonus: float,
+    im_nonzero_field_bonus: float,
+    title_salience_bonus: float,
+    field_impact_scaling_bonus: float,
+    text_signal_intensity: float,
+    dominant_field_strength: float,
+    total_strength: float,
+    fa_margin_bonus: float,
+    fa_coherence_bonus: float,
+    fa_near_tie_penalty: float,
+    fa_diffuse_third_field_penalty: float,
+) -> list[str]:
+    rationale = [f"Im={im_score}", f"Fa={fa_score}"]
+    rationale.extend(
+        [
+            "im_base=3.0",
+            f"im_actor_weight={actor_weight}",
+            f"im_region_weight={region_weight}",
+            f"im_keyword_density={keyword_density}",
+            f"im_dominant_field_bonus={im_dominant_field_bonus}",
+            f"im_nonzero_field_bonus={im_nonzero_field_bonus}",
+        ]
+    )
+    if title_salience_bonus > 0:
+        rationale.append(f"im_title_salience={title_salience_bonus}")
+    if field_impact_scaling_bonus > 0:
+        rationale.append(f"im_field_impact_scaling={field_impact_scaling_bonus}")
+    dominant_field_keywords = FIELD_KEYWORDS.get(dominant_field, {})
+    if dominant_field_keywords:
+        rationale.append(f"im_text_signal_intensity={text_signal_intensity}")
+    if total_strength > 0:
+        rationale.extend(
+            [
+                f"fa_dominant_field_strength={round(dominant_field_strength, 2)}",
+                f"fa_dominance_margin_bonus={fa_margin_bonus}",
+                f"fa_coherence_bonus={fa_coherence_bonus}",
+                f"fa_near_tie_penalty={fa_near_tie_penalty}",
+                f"fa_diffuse_third_field_penalty={fa_diffuse_third_field_penalty}",
+            ]
+        )
+    if event.actors:
+        rationale.append(f"actors={', '.join(event.actors)}")
+    if event.regions:
+        rationale.append(f"regions={', '.join(event.regions)}")
+    if fa_score > 0:
+        rationale.append(f"dominant_field={dominant_field}:{fa_score}")
+    else:
+        rationale.append("dominant_field=uncategorized:0")
+    return rationale

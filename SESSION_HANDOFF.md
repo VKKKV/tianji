@@ -18,7 +18,7 @@ Latest verified state in this session:
 - current count: `117` tests
 - local `main` branch now exists and already includes the merged scoring-refinement work
 - active continuation branch is `feat/scoring-fa-threshold-boundaries`
-- history/history-show/history-compare operator workflows are substantially richer than at the start of the branch
+- history/history-show/history-compare operator workflows are substantially richer than at the start of the branch and now already support the shipped read-only TUI slice
 - Candidate A scoring slice is now shipped: `Im` includes a bounded text-signal-intensity bonus while `Fa` remains field-alignment-only
 - Candidate B has now advanced through two narrow shipped refinements: `Fa` includes a bounded near-tie ambiguity penalty when the top two fields nearly tie and a bounded diffuse mixed-field penalty when a strong third field remains after the top-two margin is already clear
 - scoring determinism has now been tightened in three more narrow shipped slices:
@@ -33,6 +33,7 @@ Latest verified state in this session:
 - scoring coverage now includes isolated `Im` tests for actor weighting, region weighting, raw keyword-density cap behavior, dominant-field-strength bonus behavior, thresholded field-diversity behavior, direct text-signal surface contributions, and isolated `Fa` tests for dominance-margin and coherence behavior
 - `Fa` threshold-boundary coverage now explicitly pins both ambiguity gates: the near-tie penalty starts below the `1.0` top-two margin threshold and the diffuse-third-field penalty starts above the `2.5` third-field threshold
 - scoring coverage now also explicitly pins zero-field uncategorized behavior, exact dominant-field tie determinism, and scenario-summary tie determinism
+- Task 5's fixed-`Im` mixed-field proof found no meaningful uncovered `Fa` weakness beyond the shipped near-tie and diffuse-third-field rules, so no additional `Fa` rule landed on this branch
 
 ## What Ships Now
 
@@ -169,20 +170,24 @@ The just-completed slices pushed far into:
 - Phase 4: CLI-first persisted-analysis ergonomics
 
 At this point, the biggest obvious CLI gap was already closed by making
-`history-compare` projection-aware, and the next several narrow scoring cleanup
-slices have also landed. The next session should default to a **small doc/spec
-cleanup or a fresh scoring issue only if a new concrete weakness is found**, not
-to reopening already-shipped tie-handling or residual-noise work.
+`history-compare` projection-aware, and the scoring branch has already reached
+its intended stop point: docs alignment plus a verified no-gap result for the
+remaining in-scope mixed-field `Fa` question. The first read-only TUI slice is
+already real. The next session should default to a **small doc/spec cleanup or
+continued read-only TUI refinement**, with a fresh scoring issue only if a new
+concrete weakness is found. It should not reopen already-shipped tie-handling,
+residual-noise work, or Candidate A design work without new evidence.
 
 The CLI implementation now uses Click while preserving the existing operator command surface and `main(argv)` entry semantics used by the unittest suite.
 
 Phase 5 is now underway beyond the contract layer:
 
 - `TUI_CONTRACT.md` defines the read-only persisted-analysis TUI
-- a first Rich-based implementation now exists for history list and detail views
+- a first Rich-based implementation already ships for history list and detail browsing
 - it reuses current `history`, `history-show`, and `history-compare` semantics
 - it does **not** imply any daemon/API dependency
 - current Rich detail browsing already includes compact scored-event and intervention previews
+- current Rich interaction also includes split-pane navigation, help and zoom states, compare staging, and a compare panel backed by persisted compare output
 
 Given the current branch stack, the default resume path should be:
 
@@ -193,30 +198,18 @@ Given the current branch stack, the default resume path should be:
 
 Best next milestone:
 
-1. **Refine the first-party scoring model from the now-shipped Candidate A base**
-   - only if a fresh concrete scoring weakness appears after the now-shipped determinism cleanup
-   - keep the next step narrow and deterministic
-   - strongest likely next target is either:
-     - a small follow-up to the shipped `Fa` ambiguity refinements only if a new mixed-field weakness remains after the pinned threshold tests, or
-     - one more tightly bounded text-signal edge-case pass only if a real cue-boundary bug appears,
-   - likely files: `tianji/scoring.py`, `SCORING_SPEC.md`, `tests/test_pipeline.py`
-   - preserve current branch guardrails:
-     - no persistence or schema changes
-     - no CLI/history surface expansion unless a score-driven test truly requires it
-     - no novelty/baseline scoring yet
+1. **Refresh handoff/spec/docs around shipped scoring semantics**
+   - capture the now-shipped determinism stack and the Task 5 no-gap outcome in `SESSION_HANDOFF.md`, `DEV_PLAN.md`, `README.md`, and `SCORING_SPEC.md`
+   - keep the next session from reopening already-shipped tie-handling, residual-noise work, or raw nonzero-field assumptions
 
-Best smaller default next step:
+Best larger next branch after docs alignment:
 
-2. **Refresh handoff/spec/docs around shipped scoring semantics**
-   - capture the now-shipped determinism stack in `SESSION_HANDOFF.md`, `DEV_PLAN.md`, and `SCORING_SPEC.md`
-   - keep the next session from reopening already-shipped tie-handling or raw nonzero-field assumptions
-
-Best larger next branch after scoring:
-
-3. **Continue Rich-based TUI implementation**
-   - `TUI_CONTRACT.md` now exists and the first Rich-based list/detail implementation has started from it
-   - next work here should keep refining the read-only list/detail browser and only then expand toward compare mode
+2. **Continue Rich-based TUI implementation**
+   - `TUI_CONTRACT.md` now exists and the first Rich-based read-only slice already ships from it
+   - next work here should keep refining the read-only history/detail/compare browser instead of inventing a second runtime
    - continue reusing CLI/storage semantics rather than inventing a daemon/API boundary
+
+Scoring should be reopened only later, and only if a new concrete weakness is proven after the current no-gap result. No new `Fa` formula, threshold, or rationale term shipped in this branch beyond the already-documented rules.
 
 ## Suggested Commands For The Next Session
 

@@ -7,7 +7,7 @@ class GroupingTests(unittest.TestCase):
         *,
         event_id: str,
         title: str,
-        published_at: str,
+        published_at: str | None,
         keywords: list[str],
         dominant_field: str,
         actors: list[str],
@@ -379,13 +379,18 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(candidates[0].event_id, "evt-a")
         self.assertEqual(candidates[1].event_id, "evt-c")
         self.assertEqual(candidates[0].target, "china")
-        self.assertEqual(candidates[0].intervention_type, "capability-control")
+        self.assertEqual(candidates[0].intervention_type, "capability-containment")
         self.assertIn(
             "Grouped context: 2-event technology cluster", candidates[0].reason
         )
+        self.assertIn("high corroboration across causal links", candidates[0].reason)
+        self.assertIn("dominant relationship=capability-race", candidates[0].reason)
+        self.assertIn("signal support=7", candidates[0].reason)
+        self.assertIn("link tempo=1.0h", candidates[0].reason)
+        self.assertIn("headline role=chain origin", candidates[0].reason)
         self.assertIn("shared actors=china, usa", candidates[0].reason)
         self.assertIn(
-            "Disrupt the linked cluster before 2 related capability moves harden into a broader race.",
+            "Quickly disrupt the linked cluster in the capability-race pattern at the chain origin before 2 related capability moves harden into a broader race.",
             candidates[0].expected_effect,
         )
         self.assertIn("Evidence chain:", candidates[0].reason)
@@ -453,11 +458,110 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual([candidate.event_id for candidate in candidates], ["evt-a"])
         self.assertEqual(candidates[0].target, "china")
         self.assertEqual(candidates[0].intervention_type, "capability-freeze")
+        self.assertIn("high corroboration across causal links", candidates[0].reason)
+        self.assertIn("signal support range=6-7", candidates[0].reason)
+        self.assertIn("link tempo range=1.0-2.0h", candidates[0].reason)
+        self.assertIn("headline role=chain origin", candidates[0].reason)
         self.assertIn("with 2 causal link(s) over 2.0h", candidates[0].reason)
         self.assertIn(
-            "Disrupt the reinforcing chain before 3 related capability moves harden into a broader race.",
+            "Urgently disrupt the reinforcing chain in the capability-race pattern at the chain origin before 3 related capability moves harden into a broader race.",
             candidates[0].expected_effect,
         )
+
+    def test_backtrack_candidates_keep_missing_span_effect_wording_neutral(
+        self,
+    ) -> None:
+        unknown_time_a = self.make_group_event(
+            event_id="evt-a",
+            title="China and USA expand chip controls",
+            published_at=None,
+            keywords=["chip", "controls", "export", "dispute"],
+            dominant_field="technology",
+            actors=["china", "usa"],
+            regions=["east-asia", "united-states"],
+            divergence_score=19.58,
+        )
+        unknown_time_b = self.make_group_event(
+            event_id="evt-b",
+            title="USA and China deepen export chip restrictions",
+            published_at=None,
+            keywords=["chip", "restrictions", "export", "controls"],
+            dominant_field="technology",
+            actors=["usa", "china"],
+            regions=["east-asia", "united-states"],
+            divergence_score=18.31,
+        )
+
+        groups: list[EventGroupSummary] = pipeline_module.group_events(
+            [unknown_time_a, unknown_time_b]
+        )
+        candidates = backtrack_candidates(
+            [unknown_time_a, unknown_time_b],
+            event_groups=groups,
+        )
+
+        self.assertEqual(candidates[0].intervention_type, "capability-containment")
+        self.assertEqual(
+            candidates[0].expected_effect,
+            "Disrupt the linked cluster in the capability-race pattern at the chain origin before 2 related capability moves harden into a broader race.",
+        )
+
+    def test_backtrack_candidates_keep_low_signal_three_event_group_on_weak_type(
+        self,
+    ) -> None:
+        anchor = self.make_group_event(
+            event_id="evt-a",
+            title="Chip dispute review opens export track",
+            published_at="2026-03-22T08:00:00Z",
+            keywords=["chip", "export", "review", "alpha"],
+            dominant_field="technology",
+            actors=["china"],
+            regions=["east-asia"],
+            divergence_score=18.4,
+        )
+        bridge = self.make_group_event(
+            event_id="evt-b",
+            title="Export review widens around chip track",
+            published_at="2026-03-22T09:00:00Z",
+            keywords=["chip", "export", "track", "beta"],
+            dominant_field="technology",
+            actors=["china"],
+            regions=["east-asia"],
+            divergence_score=17.8,
+        )
+        transitive = self.make_group_event(
+            event_id="evt-c",
+            title="Chip track shifts into export controls review",
+            published_at="2026-03-22T10:00:00Z",
+            keywords=["chip", "track", "controls", "gamma"],
+            dominant_field="technology",
+            actors=["china"],
+            regions=["east-asia"],
+            divergence_score=17.1,
+        )
+
+        groups: list[EventGroupSummary] = pipeline_module.group_events(
+            [anchor, bridge, transitive]
+        )
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(len(groups[0]["evidence_chain"]), 2)
+        self.assertEqual(
+            [link["shared_signal_count"] for link in groups[0]["evidence_chain"]],
+            [4, 4],
+        )
+
+        candidates = backtrack_candidates(
+            [anchor, bridge, transitive],
+            event_groups=groups,
+        )
+
+        self.assertEqual([candidate.event_id for candidate in candidates], ["evt-a"])
+        self.assertEqual(candidates[0].intervention_type, "capability-containment")
+        self.assertIn(
+            "moderate corroboration across causal links", candidates[0].reason
+        )
+        self.assertIn("dominant relationship=capability-race", candidates[0].reason)
+        self.assertIn("signal support=4", candidates[0].reason)
 
     def test_backtrack_candidates_fall_back_to_shared_region_target_when_group_lacks_shared_actors(
         self,
@@ -498,6 +602,130 @@ class GroupingTests(unittest.TestCase):
 
         self.assertEqual([candidate.event_id for candidate in candidates], ["evt-a"])
         self.assertEqual(candidates[0].target, "gulf")
+
+    def test_backtrack_candidates_prefer_headline_actor_for_chain_endpoint_target(
+        self,
+    ) -> None:
+        origin = self.make_group_event(
+            event_id="evt-a",
+            title="Supply corridor review triggers market alarm",
+            published_at="2026-03-22T08:00:00Z",
+            keywords=["supply", "corridor", "market", "review"],
+            dominant_field="economy",
+            actors=["shared-coalition"],
+            regions=["gulf"],
+            divergence_score=17.8,
+        )
+        endpoint = self.make_group_event(
+            event_id="evt-b",
+            title="Port authority freezes corridor access after alarm",
+            published_at="2026-03-22T09:00:00Z",
+            keywords=["corridor", "market", "alarm", "freeze"],
+            dominant_field="economy",
+            actors=["port-authority"],
+            regions=["gulf"],
+            divergence_score=17.1,
+        )
+
+        event_group: EventGroupSummary = {
+            "group_id": "grp-endpoint",
+            "headline_event_id": "evt-b",
+            "headline_title": endpoint.title,
+            "member_event_ids": ["evt-a", "evt-b"],
+            "member_count": 2,
+            "dominant_field": "economy",
+            "shared_keywords": ["corridor", "market"],
+            "shared_actors": ["shared-coalition"],
+            "shared_regions": ["gulf"],
+            "group_score": 17.45,
+            "causal_ordered_event_ids": ["evt-a", "evt-b"],
+            "causal_span_hours": 1.0,
+            "evidence_chain": [
+                {
+                    "from_event_id": "evt-a",
+                    "to_event_id": "evt-b",
+                    "shared_keywords": ["corridor", "market"],
+                    "shared_actors": [],
+                    "shared_regions": ["gulf"],
+                    "relationship": "pressure",
+                    "shared_signal_count": 5,
+                    "time_delta_hours": 1.0,
+                }
+            ],
+            "chain_summary": "2 related economy events reinforce the freeze signal.",
+            "causal_summary": "pressure cluster from 'Supply corridor review triggers market alarm' to 'Port authority freezes corridor access after alarm' across 2 events over 1.0h.",
+        }
+
+        candidates = backtrack_candidates(
+            [origin, endpoint],
+            event_groups=[event_group],
+        )
+
+        self.assertEqual([candidate.event_id for candidate in candidates], ["evt-b"])
+        self.assertEqual(candidates[0].intervention_type, "market-stabilization")
+        self.assertEqual(candidates[0].target, "port-authority")
+
+    def test_backtrack_candidates_fall_back_to_shared_actor_when_endpoint_lacks_local_target(
+        self,
+    ) -> None:
+        origin = self.make_group_event(
+            event_id="evt-a",
+            title="Treaty dispute opens a regional channel review",
+            published_at="2026-03-22T08:00:00Z",
+            keywords=["treaty", "dispute", "channel", "review"],
+            dominant_field="diplomacy",
+            actors=["shared-bloc"],
+            regions=["europe"],
+            divergence_score=17.5,
+        )
+        endpoint = self.make_group_event(
+            event_id="evt-b",
+            title="Regional review stalls after treaty dispute",
+            published_at="2026-03-22T09:00:00Z",
+            keywords=["treaty", "review", "stall", "channel"],
+            dominant_field="diplomacy",
+            actors=[],
+            regions=[],
+            divergence_score=16.9,
+        )
+
+        event_group: EventGroupSummary = {
+            "group_id": "grp-endpoint-fallback",
+            "headline_event_id": "evt-b",
+            "headline_title": endpoint.title,
+            "member_event_ids": ["evt-a", "evt-b"],
+            "member_count": 2,
+            "dominant_field": "diplomacy",
+            "shared_keywords": ["treaty", "review", "channel"],
+            "shared_actors": ["shared-bloc"],
+            "shared_regions": ["europe"],
+            "group_score": 17.2,
+            "causal_ordered_event_ids": ["evt-a", "evt-b"],
+            "causal_span_hours": 1.0,
+            "evidence_chain": [
+                {
+                    "from_event_id": "evt-a",
+                    "to_event_id": "evt-b",
+                    "shared_keywords": ["treaty", "review", "channel"],
+                    "shared_actors": [],
+                    "shared_regions": ["europe"],
+                    "relationship": "negotiation",
+                    "shared_signal_count": 5,
+                    "time_delta_hours": 1.0,
+                }
+            ],
+            "chain_summary": "2 related diplomacy events reinforce the review signal.",
+            "causal_summary": "negotiation cluster from 'Treaty dispute opens a regional channel review' to 'Regional review stalls after treaty dispute' across 2 events over 1.0h.",
+        }
+
+        candidates = backtrack_candidates(
+            [origin, endpoint],
+            event_groups=[event_group],
+        )
+
+        self.assertEqual([candidate.event_id for candidate in candidates], ["evt-b"])
+        self.assertEqual(candidates[0].intervention_type, "channel-stabilization")
+        self.assertEqual(candidates[0].target, "shared-bloc")
 
     def test_backtrack_candidates_use_strong_conflict_group_type(self) -> None:
         anchor = self.make_group_event(
@@ -541,6 +769,33 @@ class GroupingTests(unittest.TestCase):
 
         self.assertEqual(candidates[0].intervention_type, "escalation-override")
 
+    def test_backtrack_candidates_use_weak_conflict_group_type(self) -> None:
+        anchor = self.make_group_event(
+            event_id="evt-a",
+            title="Border alert follows strike exchange",
+            published_at="2026-03-22T08:00:00Z",
+            keywords=["border", "strike", "alert", "troops"],
+            dominant_field="conflict",
+            actors=["state-a", "state-b"],
+            regions=["frontier"],
+            divergence_score=18.9,
+        )
+        linked = self.make_group_event(
+            event_id="evt-b",
+            title="Troop review follows renewed border alert",
+            published_at="2026-03-22T09:00:00Z",
+            keywords=["border", "alert", "troops", "review"],
+            dominant_field="conflict",
+            actors=["state-a", "state-b"],
+            regions=["frontier"],
+            divergence_score=18.1,
+        )
+
+        groups: list[EventGroupSummary] = pipeline_module.group_events([anchor, linked])
+        candidates = backtrack_candidates([anchor, linked], event_groups=groups)
+
+        self.assertEqual(candidates[0].intervention_type, "escalation-containment")
+
     def test_backtrack_candidates_use_strong_diplomacy_group_type(self) -> None:
         anchor = self.make_group_event(
             event_id="evt-a",
@@ -583,6 +838,33 @@ class GroupingTests(unittest.TestCase):
 
         self.assertEqual(candidates[0].intervention_type, "treaty-invalidation")
 
+    def test_backtrack_candidates_use_weak_diplomacy_group_type(self) -> None:
+        anchor = self.make_group_event(
+            event_id="evt-a",
+            title="Treaty channel opens after sanctions dispute",
+            published_at="2026-03-22T08:00:00Z",
+            keywords=["treaty", "channel", "accord", "sanctions"],
+            dominant_field="diplomacy",
+            actors=["bloc-a", "bloc-b"],
+            regions=["europe"],
+            divergence_score=17.8,
+        )
+        linked = self.make_group_event(
+            event_id="evt-b",
+            title="Accord review deepens inside treaty channel",
+            published_at="2026-03-22T09:00:00Z",
+            keywords=["treaty", "accord", "review", "channel"],
+            dominant_field="diplomacy",
+            actors=["bloc-a", "bloc-b"],
+            regions=["europe"],
+            divergence_score=17.1,
+        )
+
+        groups: list[EventGroupSummary] = pipeline_module.group_events([anchor, linked])
+        candidates = backtrack_candidates([anchor, linked], event_groups=groups)
+
+        self.assertEqual(candidates[0].intervention_type, "channel-stabilization")
+
     def test_backtrack_candidates_use_strong_economy_group_type(self) -> None:
         anchor = self.make_group_event(
             event_id="evt-a",
@@ -624,6 +906,33 @@ class GroupingTests(unittest.TestCase):
         )
 
         self.assertEqual(candidates[0].intervention_type, "market-freeze")
+
+    def test_backtrack_candidates_use_weak_economy_group_type(self) -> None:
+        anchor = self.make_group_event(
+            event_id="evt-a",
+            title="Market shock hits major supply corridor",
+            published_at="2026-03-22T08:00:00Z",
+            keywords=["market", "supply", "corridor", "shock"],
+            dominant_field="economy",
+            actors=["trade-ministry", "port-authority"],
+            regions=["gulf"],
+            divergence_score=18.3,
+        )
+        linked = self.make_group_event(
+            event_id="evt-b",
+            title="Supply shock widens across market corridor",
+            published_at="2026-03-22T09:00:00Z",
+            keywords=["market", "supply", "shock", "corridor"],
+            dominant_field="economy",
+            actors=["trade-ministry", "port-authority"],
+            regions=["gulf"],
+            divergence_score=17.6,
+        )
+
+        groups: list[EventGroupSummary] = pipeline_module.group_events([anchor, linked])
+        candidates = backtrack_candidates([anchor, linked], event_groups=groups)
+
+        self.assertEqual(candidates[0].intervention_type, "market-stabilization")
 
     def test_pipeline_reduces_duplicate_interventions_for_grouped_events(self) -> None:
         fixture_a = ScoredEvent(

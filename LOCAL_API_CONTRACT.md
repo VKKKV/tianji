@@ -43,6 +43,11 @@ These are the current product-aligned surfaces the future API should mirror:
   - returns persisted run-level detail
   - includes `input_summary`, `scenario_summary`, `scored_events`, and `intervention_candidates`
 
+- `python3 -m tianji history-compare --sqlite-path ...`
+  - compares two persisted runs, or resolves relative/latest compare presets first
+  - reuses the same scored-event and event-group projection vocabulary as `history-show`
+  - confirms that compare is already part of the mirrored backend surface, even though compare endpoints stay deferred from the first API slice
+
 ## Recommended First API Resources
 
 ### 1. `GET /api/v1/meta`
@@ -150,7 +155,7 @@ Do **not** include these in the first local API slice:
 - WebSocket streaming
 - scheduler or daemon control endpoints
 - source-registry management endpoints
-- compare endpoints across runs
+- compare endpoints across runs, even though `history-compare` already exists in the CLI/storage mirror surface
 - standalone resources for `event_groups`, `scored_events`, or `intervention_candidates`
 - auth, users, sessions, or multi-tenant concepts
 
@@ -159,7 +164,7 @@ These either do not exist in the current product surface or would force architec
 ## Mapping to Current TianJi Code
 
 - `tianji/cli.py`
-  - current operator commands: `run`, `history`, `history-show`
+  - current operator commands: `run`, `history`, `history-show`, `history-compare`, and `tui`
 
 - `tianji/pipeline.py`
   - defines the unit of work: one run -> one artifact
@@ -168,7 +173,7 @@ These either do not exist in the current product surface or would force architec
   - current artifact schema vocabulary
 
 - `tianji/storage.py`
-  - current persisted read/write boundary for runs and run details
+  - current persisted read/write boundary for runs, run details, and run comparison payloads
 
 ## Risks to Avoid
 

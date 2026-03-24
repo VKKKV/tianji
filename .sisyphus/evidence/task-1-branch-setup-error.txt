@@ -1,0 +1,18 @@
+Task 1 branch setup warning
+
+Unrelated working-tree changes were present before branch setup and were surfaced rather than ignored.
+
+Starting branch: feat/grouped-backtracking-next
+Starting HEAD (short): b960acf
+Dirty status:
+ M DEV_PLAN.md
+ M README.md
+ M SCORING_SPEC.md
+ M tests/test_scoring.py
+ M tianji/scoring.py
+?? .sisyphus/boulder.json
+?? .sisyphus/notepads/
+?? .sisyphus/plans/tianji-docs-and-fa-ambiguity-refinement.md
+?? .sisyphus/plans/tianji-rationale-transparency.md
+
+Branch switch proceeded without staging, resetting, or editing those files.
