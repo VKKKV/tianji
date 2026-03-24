@@ -7,7 +7,13 @@ import json
 from pathlib import Path
 
 from .backtrack import EventChainLink, EventGroupSummary, backtrack_candidates
-from .fetch import fetch_url, parse_feed, read_fixture, source_name_from_url
+from .fetch import (
+    assign_canonical_hashes,
+    fetch_url,
+    parse_feed,
+    read_fixture,
+    source_name_from_url,
+)
 from .models import RawItem, RunArtifact, ScoredEvent
 from .normalize import normalize_items
 from .scoring import score_events, summarize_scenario
@@ -23,24 +29,36 @@ def run_pipeline(
     fixture_paths: list[str],
     fetch: bool,
     source_urls: list[str],
+    fetch_policy: str = "always",
+    source_fetch_details: list[dict[str, str]] | None = None,
     output_path: str | None,
     sqlite_path: str | None = None,
 ) -> RunArtifact:
     raw_items: list[RawItem] = []
     loaded_sources: list[str] = []
+    resolved_source_fetch_details = source_fetch_details or [
+        {
+            "name": source_url,
+            "url": source_url,
+            "fetch_policy": fetch_policy,
+        }
+        for source_url in source_urls
+    ]
 
     for fixture_path in fixture_paths:
         source = f"fixture:{Path(fixture_path).name}"
         feed_text = read_fixture(fixture_path)
         loaded_sources.append(source)
-        raw_items.extend(parse_feed(feed_text, source=source))
+        raw_items.extend(assign_canonical_hashes(parse_feed(feed_text, source=source)))
 
     if fetch:
         for source_url in source_urls:
             source = source_name_from_url(source_url)
             feed_text = fetch_url(source_url)
             loaded_sources.append(source)
-            raw_items.extend(parse_feed(feed_text, source=source))
+            raw_items.extend(
+                assign_canonical_hashes(parse_feed(feed_text, source=source))
+            )
 
     if not loaded_sources:
         raise ValueError(
@@ -66,6 +84,8 @@ def run_pipeline(
             "raw_item_count": len(raw_items),
             "normalized_event_count": len(normalized_events),
             "sources": sorted({item.source for item in raw_items}) if raw_items else [],
+            "fetch_policy": fetch_policy,
+            "source_fetch_details": resolved_source_fetch_details,
         },
         scenario_summary=scenario_summary,
         scored_events=scored_events,

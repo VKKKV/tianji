@@ -14,6 +14,8 @@ class RawItem:
     summary: str
     link: str
     published_at: str | None
+    entry_identity_hash: str = ""
+    content_hash: str = ""
 
 
 @dataclass(slots=True)
@@ -28,6 +30,8 @@ class NormalizedEvent:
     actors: list[str]
     regions: list[str]
     field_scores: dict[str, float]
+    entry_identity_hash: str = ""
+    content_hash: str = ""
 
 
 @dataclass(slots=True)
