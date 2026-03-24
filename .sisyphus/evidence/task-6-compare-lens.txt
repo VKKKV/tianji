@@ -1,0 +1,23 @@
+Task 6 verification evidence
+
+Modified files:
+- tianji/tui.py
+- tests/test_tui.py
+
+Implemented:
+- compare pane now forwards the active shared TUI lens kwargs to compare_runs()
+- compare cache invalidation now tracks both right_run_id and the active five-lens tuple
+- existing compare staging, self-compare protection, compare-target stepping, and left/right id behavior preserved
+
+Diagnostics:
+- lsp_diagnostics tianji/tui.py: no errors
+- lsp_diagnostics tests/test_tui.py: no errors
+
+Tests:
+- .venv/bin/python -m unittest discover -s tests -p "test_tui.py" -v
+- Result: 34 tests ran, OK
+
+Key assertions added/updated:
+- build_compare_panel() passes exact active lens kwargs plus left/right run ids to compare_runs()
+- compare interaction semantics still work with active lenses and cache invalidation
+- cached compare scroll-indicator test now seeds compare-lens cache key to match the new cache contract
