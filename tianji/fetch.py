@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from hashlib import sha256
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -41,6 +42,13 @@ def source_name_from_url(url: str) -> str:
     return parsed.netloc or parsed.path or "fixture"
 
 
+def assign_canonical_hashes(items: list[RawItem]) -> list[RawItem]:
+    for item in items:
+        item.entry_identity_hash = derive_canonical_entry_identity_hash(item)
+        item.content_hash = derive_canonical_content_hash(item)
+    return items
+
+
 def parse_feed(feed_text: str, source: str) -> list[RawItem]:
     try:
         root = ET.fromstring(feed_text)
@@ -57,6 +65,31 @@ def parse_feed(feed_text: str, source: str) -> list[RawItem]:
     raise TianJiInputError(
         f"Unsupported feed format for source {source}: expected RSS or Atom"
     )
+
+
+def derive_canonical_entry_identity_hash(item: RawItem) -> str:
+    canonical_identity = "|".join(
+        [
+            _clean_text(item.link),
+            _clean_text(item.published_at or ""),
+        ]
+    )
+    return sha256(canonical_identity.encode("utf-8")).hexdigest()
+
+
+def derive_canonical_content_hash(item: RawItem) -> str:
+    canonical_content = "|".join(
+        [
+            _clean_text(item.title),
+            _clean_text(item.summary),
+            _clean_text(item.published_at or ""),
+        ]
+    )
+    return sha256(canonical_content.encode("utf-8")).hexdigest()
+
+
+def _clean_text(text: str) -> str:
+    return " ".join(text.split())
 
 
 def _text(element: ET.Element | None, tag: str) -> str:

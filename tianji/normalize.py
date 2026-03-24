@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from hashlib import sha256
 import re
+from hashlib import sha256
 
+from .fetch import derive_canonical_content_hash, derive_canonical_entry_identity_hash
 from .models import NormalizedEvent, RawItem
 
 
@@ -65,7 +66,13 @@ def normalize_items(items: list[RawItem]) -> list[NormalizedEvent]:
 
 
 def normalize_item(item: RawItem) -> NormalizedEvent:
-    text = clean_text(f"{item.title}\n{item.summary}")
+    title = clean_text(item.title)
+    summary = clean_text(item.summary)
+    entry_identity_hash = (
+        item.entry_identity_hash or derive_canonical_entry_identity_hash(item)
+    )
+    content_hash = item.content_hash or derive_canonical_content_hash(item)
+    text = clean_text(f"{title}\n{summary}")
     keywords = extract_keywords(text)
     actors = match_patterns(text, ACTOR_PATTERNS)
     regions = match_patterns(text, REGION_PATTERNS)
@@ -76,14 +83,16 @@ def normalize_item(item: RawItem) -> NormalizedEvent:
     return NormalizedEvent(
         event_id=event_id,
         source=item.source,
-        title=clean_text(item.title),
-        summary=clean_text(item.summary),
+        title=title,
+        summary=summary,
         link=item.link,
         published_at=item.published_at,
         keywords=keywords,
         actors=actors,
         regions=regions,
         field_scores=field_scores,
+        entry_identity_hash=entry_identity_hash,
+        content_hash=content_hash,
     )
 
 
