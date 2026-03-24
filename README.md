@@ -2,11 +2,11 @@
 
 TianJi is a local-first intelligence prototype aimed at one core loop: fetch signals, infer the current branch, and backtrack likely intervention points.
 
-The repository currently ships a **one-shot CLI MVP**, not the full daemonized "God Engine" yet. The near-term goal is to prove the end-to-end value of `单次数据获取 -> 推演 -> 反推` with deterministic, inspectable output before expanding into a long-running orchestration system.
+The repository now ships a mature local stack with clear boundaries: the CLI remains the write authority, the TUI is read-only and storage-backed, the daemon and HTTP API stay local-only and loopback-bound, and the web UI is optional and off by default. The long-term "God Engine" vision is still broader than what ships here, but the current local operator stack is real, tested, and runnable now.
 
 ![TianJi concept diagram](img/Gemini_Generated_Image_h1wiykh1wiykh1wi.png)
 
-_Concept illustration for TianJi's long-term direction. The currently shipped product surface is still the CLI-first MVP described below._
+_Concept illustration for TianJi's long-term direction. The currently shipped product surface is the terminal-first local stack described below._
 
 ## Current Reality
 
@@ -20,11 +20,18 @@ What ships now:
 - schema-versioned JSON artifact output
 - optional SQLite persistence through `tianji/storage.py`
 - persisted run browsing with `history`, `history-show`, and `history-compare`
+- thin daemon CLI controls for local `start`, `status`, `stop`, bounded queued `run`, and bounded `schedule`
+- read-first loopback HTTP API routes for local `meta`, persisted `runs`, run detail, latest-run detail, and explicit-pair compare reads
 - read-time scored-event and event-group lenses that shape the operator view without mutating stored runs
 - an early Rich-based `tui` command for read-only persisted list, detail, and compare browsing
+- an optional local web UI served separately from `tianji/webui_server.py`, with plain static HTML/CSS/JS over the same loopback API for run history, detail, compare, and intervention browsing
 - operator-facing validation for malformed feeds, bad filter windows, invalid compare presets, and missing relative-history targets
 
-This keeps the shipped slice testable, local, and reproducible while leaving daemon, API, and web-runtime ideas clearly in the future bucket.
+This keeps the shipped slice testable, local, and reproducible while keeping write-triggering HTTP endpoints and broader web-runtime ideas clearly outside the current boundary.
+
+The synchronous `run` command remains the source-of-truth write path for one immediate pipeline invocation. The `daemon` subcommands are a separate local control surface over the Task 11 UNIX socket backend: `daemon run` queues one pipeline unit for background execution, `daemon schedule` queues that same one-run pipeline unit repeatedly with a bounded local `--every-seconds` + `--count` contract, and `daemon status` reports either process-level daemon availability or one queued job's lifecycle state. The currently documented job lifecycle states are exactly `queued`, `running`, `succeeded`, and `failed`.
+
+The local API slice is intentionally read-first and loopback-only. Inside the existing local daemon/server boundary, TianJi now serves `GET /api/v1/meta`, `GET /api/v1/runs`, `GET /api/v1/runs/{run_id}`, optional `GET /api/v1/runs/latest`, and `GET /api/v1/compare?left_run_id=<id>&right_run_id=<id>`, all under the stable JSON envelope `api_version` / `data` / `error` while reusing the existing storage payload vocabulary directly. The shipped startup path is `python -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765`, which keeps the UNIX socket as the control plane and exposes the read API at `http://127.0.0.1:8765/api/v1/...`.
 
 ## Quick Start
 
@@ -66,20 +73,31 @@ Create a JSON file shaped like:
 
 ```json
 {
+  "default_fetch_policy": "if-missing",
   "sources": [
     {
       "name": "example-feed",
       "url": "https://example.com/feed.xml"
+    },
+    {
+      "name": "priority-feed",
+      "url": "https://example.com/priority.xml",
+      "fetch_policy": "if-changed"
     }
   ]
 }
 ```
 
+`default_fetch_policy` and per-source `fetch_policy` use the same bounded vocabulary: `always`, `if-missing`, and `if-changed`. `tianji/cli.py` resolves that policy in this order for one run: CLI `--fetch-policy` override, then per-source `fetch_policy`, then config-level `default_fetch_policy`, with ad hoc `--source-url` inputs defaulting to `always` unless the CLI override is present.
+
 Then run:
 
 ```bash
 .venv/bin/python -m tianji run --fetch --source-config /path/to/sources.json --source-name example-feed
+.venv/bin/python -m tianji run --fetch --source-config /path/to/sources.json --source-name priority-feed --fetch-policy if-changed
 ```
+
+This operator contract is now part of the shipped Phase 3 persistence model. The fetch-policy vocabulary stays intentionally bounded to `always`, `if-missing`, and `if-changed`, and that same vocabulary is what persisted runs record in `input_summary` for each one-shot invocation. Persistence reuse happens at canonical source-item storage, not by suppressing run creation: each successful invocation still creates one `runs` row, while identical canonical content can reuse existing `source_items` rows underneath that run-centric history surface.
 
 ### Inspect persisted run history
 
@@ -109,12 +127,46 @@ Then run:
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
+### Control the local daemon
+
+```bash
+.venv/bin/python -m tianji daemon start
+.venv/bin/python -m tianji daemon status --socket-path runs/tianji.sock
+.venv/bin/python -m tianji daemon run --socket-path runs/tianji.sock --fixture tests/fixtures/sample_feed.xml
+.venv/bin/python -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
+.venv/bin/python -m tianji daemon stop --socket-path runs/tianji.sock
+```
+
+This daemon surface stays intentionally narrow. `daemon start` now also hosts the read-only loopback HTTP API using the same process, with default startup values `--sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765`. `daemon run` and `daemon schedule` still submit the same one-run pipeline work unit that synchronous `run` executes directly; they do not introduce a second artifact vocabulary, a new persistence model, or cron-style calendar recurrence. The default daemon socket path is `runs/tianji.sock`, the default API port is `8765`, and interval scheduling is intentionally bounded to `--every-seconds N` where `N >= 60`.
+
+### Inspect the loopback HTTP API
+
+Start the daemon first, because the local API is hosted inside that process:
+
+```bash
+.venv/bin/python -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
+curl http://127.0.0.1:8765/api/v1/meta
+curl http://127.0.0.1:8765/api/v1/runs
+curl http://127.0.0.1:8765/api/v1/runs/latest
+curl "http://127.0.0.1:8765/api/v1/compare?left_run_id=1&right_run_id=2"
+```
+
+The HTTP API is read-first and loopback-only. It exists to expose persisted metadata and run history for local readers. It is not the write authority for starting new runs or mutating stored state.
+
+### Start the optional web UI
+
+```bash
+.venv/bin/python -m tianji.webui_server --api-base-url http://127.0.0.1:8765 --host 127.0.0.1 --port 8766
+```
+
+Then open `http://127.0.0.1:8766/` in a browser. The web UI is optional, separate from the daemon, and off by default. It reuses the same local API payload vocabulary and stays a convenience read surface rather than a second source of truth.
+
 ## What the Pipeline Does
 
 The current MVP flow is:
 
 1. **Fetch / Load**  
-   Load RSS or Atom input from local fixture files, or fetch a feed once from a URL.
+   Load RSS or Atom input from local fixture files, or fetch a feed once from a URL. When `--fetch` is used, the operator surface now carries a bounded fetch policy contract (`always`, `if-missing`, `if-changed`) from CLI/config resolution into the pipeline boundary so repeated local runs can later reuse the same vocabulary.
 
 2. **Normalize**  
    Convert raw feed items into normalized events with extracted keywords, actors, regions, and field scores.
@@ -129,13 +181,16 @@ The current MVP flow is:
    Write a JSON report with input summary, scenario summary, scored events, and intervention candidates.
 
 6. **Persist Run (Optional)**  
-   Store run metadata plus raw, normalized, scored, and intervention rows in SQLite when `--sqlite-path` is provided.
+   Store run metadata plus raw, normalized, scored, and intervention rows in SQLite when `--sqlite-path` is provided. Each successful one-shot invocation creates exactly one persisted `runs` row. Persistence remains run-centric for history/detail/compare reads, but source-item storage is now content-addressed underneath that read model: `entry_identity_hash` identifies the same logical feed entry across runs, `content_hash` identifies the canonicalized content body stored for that entry, replayed identical entries reuse the same canonical stored content in `source_items` while still creating a fresh `runs` row, and changed content under the same identity creates a new canonical content row while preserving both runs.
 
 7. **Inspect Run History (Optional)**  
-   Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, generated-at range, top scored-event `impact_score` / `field_attraction` / `divergence_score`, or grouped-analysis fields. Inspect one stored run with `history-show`, `history-show --latest`, `history-show --previous`, or `history-show --next`. `history-show` can also narrow visible scored events, event groups, and optionally aligned interventions, while stored run-summary fields remain the persisted truth.
+   Query persisted run summaries later with `history`, optionally filter them by mode, dominant field, risk level, generated-at range, top scored-event `impact_score` / `field_attraction` / `divergence_score`, or grouped-analysis fields. Inspect one stored run with `history-show --run-id N`, jump to the newest persisted run with `history-show --latest`, move to an immediate predecessor with `history-show --run-id N --previous`, or move to an immediate successor with `history-show --run-id N --next`. `history-show` can also narrow visible scored events, event groups, and optionally aligned interventions, while stored run-summary fields remain the persisted truth.
 
 8. **Compare Persisted Runs (Optional)**  
    Compare two stored runs with `history-compare`, compare the newest two stored runs with `history-compare --latest-pair`, compare one chosen run against the newest run with `history-compare --run-id N --against-latest`, or compare one chosen run against its immediate predecessor with `history-compare --run-id N --against-previous`. `history-compare` reuses the same read-time scored-event and event-group lenses as `history-show`, so compare-side projections can be focused without rewriting stored run data.
+
+9. **Queue Background Runs (Optional)**  
+   Start the local daemon with `daemon start`, inspect process or job status with `daemon status`, queue one background pipeline unit with `daemon run`, or queue a bounded repeated set of those same one-run pipeline units with `daemon schedule --every-seconds N --count M`. Queued jobs move through exactly four lifecycle states: `queued`, `running`, `succeeded`, and `failed`.
 
 ## Output Artifact
 
@@ -157,7 +212,7 @@ History list items now also expose the persisted run's top scored-event identity
 
 History list items now also expose grouped-run triage fields such as `event_group_count`, `top_event_group_headline_event_id`, `top_event_group_dominant_field`, and `top_event_group_member_count`, so operators can query stored runs by whether grouped scenarios emerged at all and what kind of top group led the run. Runs with no event groups report `event_group_count=0` and `null` top-group fields.
 
-`history-show` now supports score-aware filtering and limiting over the selected run's persisted `scored_events`, using the same `impact_score` / `field_attraction` / `divergence_score` vocabulary as the stored scored-event details while leaving the run summary intact. By default the intervention list remains intact even if scored-event filters hide some events, but `--only-matching-interventions` can align intervention candidates to the final visible scored-event selection after both filters and limits. In other words, stored run-summary fields remain persisted truth, while `scored_events`, grouped-analysis slices, and optionally aligned interventions can be projected into a narrower operator lens. Inverted score windows and non-positive explicit `--run-id` values are rejected at parse time.
+`history-show` now supports score-aware filtering and limiting over the selected run's persisted `scored_events`, using the same `impact_score` / `field_attraction` / `divergence_score` vocabulary as the stored scored-event details while leaving the run summary intact. By default the intervention list remains intact even if scored-event filters hide some events, but `--only-matching-interventions` (storage field: `only_matching_interventions`) can align intervention candidates to the final visible scored-event selection after both filters and limits. In other words, stored run-summary fields remain persisted truth, while `scored_events`, grouped-analysis slices, and optionally aligned interventions can be projected into a narrower operator lens. Inverted score windows and non-positive explicit `--run-id` values are rejected at parse time.
 
 `history-show` now also supports group-aware drill-down over persisted `scenario_summary.event_groups` via `--group-dominant-field` and `--limit-event-groups`, so single-run grouped analysis can be narrowed without changing the stored scenario summary itself.
 
@@ -204,8 +259,10 @@ Scoring-contract coverage now also includes isolated `Im` checks for actor weigh
 │   ├── test_cli_inputs.py
 │   └── support.py
 ├── pyproject.toml
+├── DAEMON_CONTRACT.md
 ├── LOCAL_API_CONTRACT.md
 ├── TUI_CONTRACT.md
+├── WEB_UI_CONTRACT.md
 └── README.md
 ```
 
@@ -214,7 +271,7 @@ Scoring-contract coverage now also includes isolated `Im` checks for actor weigh
 - **Language:** Python first, to keep the MVP small and fast to iterate
 - **Style:** stdlib-first, deterministic where possible
 - **Verification:** fixture-first tests plus history list/detail/compare, TUI, grouping, scoring, fetch, Atom, mixed-input, config, and failure-path coverage
-- **Current scope:** one-shot execution only; no daemon, scheduler, IPC bus, or web UI yet
+- **Current scope:** one-shot execution plus a thin local daemon CLI wrapper for bounded queueing and status, a read-first loopback HTTP API hosted by that daemon, and an optional separate web UI process for local browsing and queue proxying
 
 ## Long-Term Vision
 
@@ -227,49 +284,48 @@ The broader TianJi direction remains the same:
 
 But those are still future architecture targets. The repository is intentionally starting from a narrower vertical slice that can be tested end-to-end now.
 
-## Local Reference Repositories
+## Upstream Inspiration
 
-The workspace also includes four local reference projects that informed the design direction:
+TianJi no longer carries local vendored copies of the projects that helped shape the early roadmap. Historical inspiration still comes from earlier upstream work on ingestion and signal ranking, divergence vocabulary like `Im` and `Fa`, parsing and workflow decomposition, and orchestration and tool-boundary patterns.
 
-- `worldmonitor/` — one-shot ingestion and deterministic signal-scoring patterns
-- `DivergenceMeter/` — conceptual divergence vocabulary such as `Im` and `Fa`
-- `MiroFish/` — parsing and backtracking-oriented workflow ideas
-- `oh-my-openagent/` — orchestration and tool-chain structure patterns
-
-These are reference inputs, not part of the initial TianJi repo history.
+Those projects are now citation-level context only. TianJi's shipped code, tests, and docs stand on first-party modules in this repository.
 
 ## Roadmap
 
 ### Current
 
-- Click-based CLI commands for `run`, `history`, `history-show`, `history-compare`, and `tui`
+- Click-based CLI commands for synchronous `run`, persisted history reads, TUI access, and thin local `daemon` controls
 - local fixture-first execution plus optional one-time live fetch
 - config-driven source registry
+- bounded fetch policy semantics for source-registry defaults, per-source overrides, and one-run CLI override
 - optional SQLite persistence
 - persisted history list, single-run detail, and run-compare read surfaces
 - score-aware and group-aware read-time lenses over persisted runs
 - deterministic scoring, grouped analysis, and backtracking JSON artifacts
 - Rich-based read-only TUI for persisted list, detail, and compare browsing
+- daemon-hosted loopback HTTP API at `127.0.0.1:8765` with read-first `meta`, `runs`, `runs/latest`, run-detail, and explicit compare routes
+- optional separate web UI at `127.0.0.1:8766`, off by default, reusing the same local API payloads
 - schema-versioned artifacts and hardened operator-facing validation
 
-Future contract drafts live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`. The local API is still planning-only. The TUI draft now documents a read-only slice that already ships.
+`LOCAL_API_CONTRACT.md`, `DAEMON_CONTRACT.md`, `TUI_CONTRACT.md`, and `WEB_UI_CONTRACT.md` document the shipped mature local stack. The boundary remains strict: CLI writes are authoritative, the TUI is storage-backed and read-only, the daemon and API stay loopback-only, and the web UI remains optional.
 
 ### Next
 
 - keep scoring docs aligned with the shipped additive `Im` / `Fa` contract; no new `Fa` rule landed on this branch because the mixed-field no-gap review did not prove a meaningful uncovered weakness
 - richer backtracking and causal grouping
-- finish the Click-based CLI-first operator workflow for persisted analysis
-- expand the Rich-based Vim-motion TUI by adding the next planned read-only Phase 5 slice, shared detail/compare lens controls for `dominant_field`, `limit_scored_events`, `group_dominant_field`, `limit_event_groups`, and `only_matching_interventions`, while keeping the list pane on persisted truth
+- tighten the remaining CLI/docs wording so projected compare fields versus stored run-summary fields are explained in one place without ambiguity
+- expand the Rich-based Vim-motion TUI through the remaining Phase 5 slice: treat the already-shipped shared detail/compare lens controls as current behavior, then focus on stronger persisted-navigation parity, input/render separation, and higher-fidelity verification while keeping the list pane on persisted truth
 - keep numeric threshold entry and list-pane filtering out of that next TUI slice for now
-- future local API implementation only when a real local service boundary is chosen
+- keep the local API read-first and loopback-only until a broader local service boundary is justified
+- keep daemon scheduling bounded to repeated submission of the same one-run pipeline unit; no cron/calendar expansion in this slice
 
 ### Later
 
-- Hongmeng daemon and UNIX socket IPC
-- scheduled ingestion
+- broader Hongmeng daemon/runtime work beyond the current thin CLI wrapper
+- richer scheduled ingestion beyond the current bounded repeated queue submission
 - local LLM-assisted inference as an optional layer
 - constrained Nuwa replay / perturbation sandbox
-- optional decoupled web UI after CLI and TUI are mature
+- optional queued-run browser controls only if they remain behind the separate local web UI proxy rather than widening `/api/v1/*`
 
 ## Principles
 

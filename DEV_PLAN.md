@@ -7,7 +7,7 @@ Owned TianJi source is intentionally narrow:
 - `tianji/` — Python one-shot CLI pipeline
 - `tests/` — fixture-first verification
 
-Everything else at the workspace root is reference material, not the long-term product codebase.
+Everything else at the workspace root is support material and product documentation, not the long-term product codebase.
 
 ## Product Direction
 
@@ -90,14 +90,11 @@ Deliverables:
 - broaden deterministic score inputs without making the default path opaque
 - keep backtracking tied to explicit evidence and grouped context
 
-Use references from:
-
-- `DivergenceMeter/README.md` for vocabulary and conceptual framing
-- `worldmonitor/` for signal extraction and ranking patterns
+Use upstream inspiration from prior projects for vocabulary and conceptual framing, but keep the actual formulas, tests, and operator language in first-party TianJi docs and code.
 
 Do not do:
 
-- direct runtime dependency on DivergenceMeter code
+- direct runtime dependency on external reference code
 - opaque LLM scoring as the default path
 
 ## Phase 3 — Persistence to Local Operating System
@@ -108,8 +105,14 @@ Deliverables:
 
 - storage module in first-party TianJi code
 - run history and replayable artifacts
-- source configuration file and fetch policies
-- idempotent dedupe and content-hash storage
+- source configuration file and bounded fetch policy operator contract (`always`, `if-missing`, `if-changed`) with CLI override precedence over per-source and config defaults
+- idempotent dedupe and content-hash storage using explicit duplicate taxonomy terms: `entry_identity_hash`, `content_hash`, replayed fetch, and changed content under the same identity
+- one run row per successful invocation, even when canonical source content is reused underneath that run-centric read model
+
+Current branch note:
+
+- the Phase 3 closure state is now shipped: the operator-surface fetch policy contract is formalized in CLI/docs, persistence uses content-hash storage through `source_items`, and each successful invocation still writes one run row even when canonical content is reused
+- duplicate taxonomy wording now matches the implemented storage seam instead of describing future-only terminology
 
 This is the point where TianJi starts owning “source code” for ingestion and state instead of leaning on nearby references for design inspiration.
 
@@ -146,10 +149,8 @@ This phase ends when TianJi feels coherent as a terminal-first tool even without
 
 Still open before Phase 4 can be called complete:
 
-- tighten parser/validation coverage for compare-projection misuse and negative
-  limits
-- do a doc pass so projected compare fields versus stored run-summary fields are
-  explained in one place without ambiguity
+- keep the shipped docs lightly polished so projected compare fields versus
+  stored run-summary fields stay explained in one place without ambiguity
 - wait for a concrete operator pain point before expanding the command surface
   again
 
@@ -195,15 +196,23 @@ Current status:
 - the TUI intentionally reuses current `history`, `history-show`, and
   `history-compare` semantics instead of depending on a new daemon or local API
 
-Next explicit slice for this phase:
+Next work for this phase:
 
-- add shared read-only detail/compare lens controls that mirror the existing
-  CLI and `storage.py` projection vocabulary for:
+- keep the already-shipped shared read-only detail/compare lens controls aligned
+  with the CLI and `storage.py` projection vocabulary, treating them as current
+  behavior and extending this phase only through parity and verification work for:
   - `dominant_field`
   - `limit_scored_events`
   - `group_dominant_field`
   - `limit_event_groups`
   - `only_matching_interventions`
+- improve persisted-navigation parity so detail-view previous/next behavior and
+  compare-target stepping keep matching stored-run semantics rather than only the
+  current list window
+- separate key/input handling from render-state formatting so the Rich TUI stays
+  easier to test without changing the read model
+- strengthen automated TUI verification for compare flow, projected-empty states,
+  and lens-driven read-only behavior
 - keep the history list pane on persisted truth rather than introducing in-TUI
   list filtering
 - defer numeric threshold entry for score windows to a later branch
@@ -229,6 +238,14 @@ Deliverables:
 - job execution for on-demand and scheduled runs
 - status inspection from CLI
 
+Current branch note:
+
+- Phase 6 now has a thin shipped CLI control surface over the Task 11 UNIX socket backend: `tianji daemon start`, `status`, `stop`, `run`, and `schedule`
+- synchronous `tianji run` remains the source-of-truth direct write path for one immediate pipeline invocation
+- daemon job lifecycle state vocabulary is frozen to `queued`, `running`, `succeeded`, and `failed`
+- the default daemon socket path is `runs/tianji.sock`
+- `daemon schedule` is intentionally bounded repeated local queue submission of that same one-run pipeline unit via `--every-seconds` and `--count`, with `--every-seconds >= 60`, not cron/calendar scheduling or a new persistence model
+
 Keep it narrow:
 
 - no distributed system
@@ -237,7 +254,7 @@ Keep it narrow:
 
 ## Phase 7 — Optional Web UI
 
-Goal: add a future web UI without coupling it to the core engine.
+Goal: add an optional web UI without coupling it to the core engine.
 
 Principles:
 
@@ -248,50 +265,48 @@ Principles:
 - CLI remains the source-of-truth operator surface
 - `tianji/cli.py` is Click-based; keep framework swaps separate from storage/scoring behavior changes
 
-Planned shape:
+Shipped first slice:
 
-- lightweight API layer exposing run history, current status, artifacts, and intervention candidates
-- WebSocket or polling for live run progress later, not in the first UI slice
-- initial UI scope limited to:
-  - run a pipeline
-  - inspect artifacts
-  - compare historical runs
-  - browse intervention candidates
+- separate local-only `tianji/webui_server.py` stdlib server for static assets, off by default
+- plain `tianji/webui/index.html`, `app.js`, and `styles.css` thin client over the frozen loopback API payloads
+- browser browsing for persisted run history, run detail, explicit-pair compare, grouped analysis, and intervention candidates
+- same-origin `/api/v1/*` proxying through the optional web UI server so the daemon API contract stays unchanged
+- no heavy frontend toolchain and no new write HTTP API routes in this slice
 
-TUI remains the preferred rich local interface before this phase exists.
+TUI remains the preferred rich local interface for terminal-first operators even now that this optional browser slice exists.
 
 Reference use:
 
-- borrow workflow presentation ideas from `MiroFish/frontend/`
-- borrow decoupled service thinking from `worldmonitor/` and `oh-my-openagent/`
-- do not adopt any reference frontend wholesale
+- borrow workflow presentation ideas from earlier upstream simulation and reporting work
+- borrow decoupled service thinking from earlier upstream ingestion and orchestration work
+- do not adopt any external frontend wholesale
 
 ## Phase 8 — Reference Repo Retirement
 
-Goal: remove the embedded local reference repositories from the long-term TianJi workspace.
+Goal: keep TianJi free of embedded local reference repositories while preserving concise upstream attribution in first-party docs.
 
 Strategy:
 
-1. classify what each reference repo contributes
+1. classify what each upstream reference project contributed
 2. reimplement only the useful pieces inside first-party TianJi modules
-3. keep external links or notes to upstream repos for historical context
-4. remove the embedded copies once TianJi no longer needs local side-by-side study
+3. keep short upstream notes for historical context
+4. avoid reintroducing embedded copies once TianJi no longer needs side-by-side study
 
 Recommended contribution map:
 
-- `worldmonitor/`
+- WorldMonitor
   - keep as inspiration for ingestion, signal extraction, caching, and service boundaries
   - reimplement only the narrow server/data ideas TianJi actually needs
 
-- `DivergenceMeter/`
+- divergence-focused upstream work
   - keep as conceptual input for divergence terminology
   - reimplement the formulas and tests in owned TianJi code
 
-- `MiroFish/`
+- simulation and workflow upstream work
   - keep as inspiration for simulation-stage decomposition and future web workflow ideas
   - reimplement a much smaller simulation/report boundary later
 
-- `oh-my-openagent/`
+- Oh My OpenAgent
   - keep as inspiration for orchestration, terminal integration, and modular tool boundaries
   - reimplement only if TianJi truly needs those operating patterns
 
@@ -304,9 +319,9 @@ Retirement trigger:
 
 1. keep first-party TianJi `Im` / `Fa` docs and tests aligned with the shipped additive rationale contract, then extend them only when later bounded scoring changes truly land
 2. add focused doc and handoff cleanup for shipped scoring determinism, compare-projection semantics, and the already-shipped first TUI slice when a short slice is needed
-3. continue the read-only Rich TUI carefully, staying on top of current history/detail/compare semantics rather than inventing a second command model
+3. continue the read-only Rich TUI carefully by finishing persisted-navigation parity, keeping input/render separation clean, and hardening verification around current history/detail/compare semantics rather than inventing a second command model
 4. open another scoring branch only if a newly proven mixed-field weakness escapes the current near-tie and diffuse-third-field `Fa` coverage
-5. keep the future local API contract as documentation until a real process boundary is chosen
+5. keep the shipped local API read-first and loopback-only, and keep CLI writes as the source of truth until a broader local service boundary is justified
 
 Recent progress on the now-mostly-shipped CLI workflow:
 
@@ -322,7 +337,7 @@ Recent progress on the now-mostly-shipped CLI workflow:
 - `history` now exposes top event-group summary fields and filters for grouped-run triage across persisted runs
 - `history-compare` now supports the same scored-event and event-group projection filters as `history-show` for lens-specific persisted comparison
 
-Draft contract notes now live in `LOCAL_API_CONTRACT.md` and `TUI_CONTRACT.md`; the local API remains future work, while Phase 5 now has an early Rich-based implementation.
+Shipped contract notes now live in `LOCAL_API_CONTRACT.md`, `DAEMON_CONTRACT.md`, `TUI_CONTRACT.md`, and `WEB_UI_CONTRACT.md`; the local API is now implemented as a read-first loopback surface hosted by the daemon, while Phase 5 already has an early Rich-based read-only implementation and the web UI remains optional.
 
 ## Next Recommended Milestone
 

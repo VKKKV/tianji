@@ -5,17 +5,13 @@
 **Branch:** feat/one-shot-mvp
 
 ## OVERVIEW
-TianJi currently ships as a small Python CLI for one-shot `fetch -> normalize -> score -> backtrack -> emit` runs. This workspace is unusual because it also contains four large local reference repositories that inform future work but are not first-party TianJi source.
+TianJi currently ships a terminal-first local stack: synchronous CLI writes for one-shot `fetch -> normalize -> score -> backtrack -> emit` runs, SQLite-backed history reads, a read-only Rich TUI, a thin local daemon for bounded queueing and status, a loopback read-first HTTP API, and an optional separate web UI. Upstream inspiration still matters historically, but the active workspace now centers on first-party TianJi source, tests, and docs only.
 
 ## STRUCTURE
 ```text
 tianji/
 ├── tianji/                # Owned Python source; current product surface
 ├── tests/                 # Owned verification surface; fixture-first unittest suite
-├── worldmonitor/          # Reference repo; existing AGENTS.md present
-├── oh-my-openagent/       # Reference repo; existing AGENTS.md present
-├── MiroFish/              # Reference repo; no prior AGENTS.md in this snapshot
-├── DivergenceMeter/       # Reference repo; concept-heavy divergence vocabulary
 ├── README.md              # Product-facing status and roadmap
 └── DEV_PLAN.md            # TianJi build and extraction roadmap
 ```
@@ -32,8 +28,8 @@ tianji/
 | Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` lists/filters runs; `history-show` supports run id, latest, previous, or next; `history-compare` supports explicit ids and latest/relative presets |
 | Change heuristics | `tianji/normalize.py`, `tianji/scoring.py`, `tianji/backtrack.py` | Deterministic first |
 | Verify changes | `tests/test_pipeline.py`, `tests/fixtures/sample_feed.xml` | Local fixture + local HTTP server |
-| Plan future divergence ideas | `DivergenceMeter/`, `DEV_PLAN.md` | Use as concept source, not owned runtime |
-| Plan future orchestration/UI ideas | `worldmonitor/`, `MiroFish/`, `oh-my-openagent/` | Reference only unless explicitly reimplemented |
+| Plan future divergence ideas | `DEV_PLAN.md` | Keep concept notes first-party and cite upstream work only as history |
+| Plan future orchestration/UI ideas | `README.md`, `DEV_PLAN.md` | Keep planning first-party and cite upstream work only as history |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
@@ -52,12 +48,12 @@ tianji/
 - Prefer the repo-local uv environment: `uv venv .venv` and `.venv/bin/python -m tianji`.
 - Python 3.12+; stdlib-first; no heavy framework implied by current code.
 - Verification is `unittest`-based even though `pyproject.toml` includes a minimal pytest stanza.
-- Current CLI also supports `--source-config`, `--source-name`, `--sqlite-path`, `history`, `history-show`, and `history-compare`.
+- Current CLI also supports `--source-config`, `--source-name`, `--sqlite-path`, `history`, `history-show`, `history-compare`, `tui`, and `daemon`.
 - `runs/` contains generated artifacts and is not source.
-- `worldmonitor/`, `oh-my-openagent/`, `MiroFish/`, and `DivergenceMeter/` are workspace references, not the default edit target.
+- Earlier upstream projects may still be cited in docs, but they are not part of the checked-out TianJi workspace.
 
 ## ANTI-PATTERNS (THIS PROJECT)
-- Do not treat reference repos as first-party TianJi implementation.
+- Do not treat upstream inspiration as first-party TianJi implementation.
 - Do not design for daemon/IPC/web UI before the one-shot flow stays correct.
 - Do not replace deterministic logic with opaque model-driven behavior prematurely.
 - Do not add cloud-required dependencies to the owned MVP.
@@ -65,14 +61,14 @@ tianji/
 
 ## UNIQUE STYLES
 - Flat owned package: `fetch.py`, `normalize.py`, `scoring.py`, `backtrack.py`, `pipeline.py` stay as explicit stages.
-- Reference repos are kept nearby for extraction-by-reimplementation, not by tight coupling.
+- Historical upstream ideas should be cited briefly in docs, then reimplemented inside TianJi rather than mirrored locally.
 - Root docs must distinguish current reality from future architecture.
 
 ## REFERENCE REPO EXIT PLAN
 - Extract concepts into TianJi specs, tests, and first-party modules.
-- Reimplement useful ideas inside `tianji/` rather than cross-importing from sibling repos.
-- Keep upstream names and links in docs if historical context still matters.
-- Remove local embedded references once TianJi no longer needs side-by-side study.
+- Reimplement useful ideas inside `tianji/` rather than depending on external local checkouts.
+- Keep upstream names or links in docs if historical context still matters.
+- Avoid rebuilding a side-by-side embedded reference workspace.
 
 ## COMMANDS
 ```bash
@@ -91,11 +87,17 @@ uv venv .venv
 .venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --latest-pair
 .venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-latest
 .venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-previous
+.venv/bin/python -m tianji tui --sqlite-path runs/tianji.sqlite3
+.venv/bin/python -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
+.venv/bin/python -m tianji daemon status --socket-path runs/tianji.sock
+.venv/bin/python -m tianji daemon run --socket-path runs/tianji.sock --fixture tests/fixtures/sample_feed.xml
+.venv/bin/python -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
+.venv/bin/python -m tianji daemon stop --socket-path runs/tianji.sock
+.venv/bin/python -m tianji.webui_server --api-base-url http://127.0.0.1:8765 --host 127.0.0.1 --port 8766
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
 ## NOTES
-- Workspace scale is dominated by embedded repos, not by TianJi itself.
-- Future local API contract is documented in `LOCAL_API_CONTRACT.md`; no HTTP server ships in this repo yet.
-- Existing AGENTS already live in `worldmonitor/` and `oh-my-openagent/`; prefer those if you intentionally work there.
-- Missing AGENTS coverage existed mainly in `MiroFish/` and `DivergenceMeter/`; local files below cover only the highest-value boundaries.
+- Workspace scale is now centered on first-party TianJi code, tests, and docs.
+- The shipped local API contract is documented in `LOCAL_API_CONTRACT.md`; the daemon hosts the loopback HTTP server at `127.0.0.1:8765` by default, and the optional web UI is served separately at `127.0.0.1:8766`.
+- Historical upstream repos may still matter for attribution, but this AGENTS file covers the active TianJi workspace itself.
