@@ -1,14 +1,16 @@
-# TianJi Local API Contract (Draft)
+# TianJi Local API Contract (v1)
 
 ## Purpose
 
-This document defines the first future-facing local API contract for TianJi.
+This document defines the shipped local HTTP API contract for TianJi.
 
-It is a **contract draft**, not a claim that TianJi already ships an HTTP server, daemon, or web UI. The goal is to preserve alignment between:
+TianJi now ships a narrow read-first loopback HTTP API inside the local daemon/server boundary. This document preserves alignment between:
 
 - the current CLI operator surface
 - the current SQLite-backed run-history surface
-- a later optional local API layer for a decoupled web UI
+- the shipped local API layer for a decoupled web UI or other local readers
+
+The shipped startup contract is the daemon runtime path: `python -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765`, which keeps the UNIX socket control plane and binds the read API at `http://127.0.0.1:8765/api/v1` by default.
 
 ## Design Principles
 
@@ -21,16 +23,16 @@ It is a **contract draft**, not a claim that TianJi already ships an HTTP server
    - Field names should stay aligned with current output such as `schema_version`, `scenario_summary`, `scored_events`, and `intervention_candidates`.
 
 3. **Local-only assumptions**
-   - No cloud dependency, auth layer, or distributed service assumptions in this contract draft.
-   - The API is intended for a future local process boundary only.
+   - No cloud dependency, auth layer, or distributed service assumptions in this contract.
+   - The API is loopback-only and hosted by the local daemon process.
 
 4. **Read-only first**
    - Expose current persisted data and metadata first.
-   - Defer write-triggering endpoints until a real local service runtime exists.
+   - Defer write-triggering endpoints until a broader local service runtime exists.
 
 ## Current Stable Backend Surfaces
 
-These are the current product-aligned surfaces the future API should mirror:
+These are the current product-aligned surfaces the shipped API mirrors:
 
 - `python3 -m tianji run ...`
   - one synchronous pipeline execution
@@ -46,7 +48,7 @@ These are the current product-aligned surfaces the future API should mirror:
 - `python3 -m tianji history-compare --sqlite-path ...`
   - compares two persisted runs, or resolves relative/latest compare presets first
   - reuses the same scored-event and event-group projection vocabulary as `history-show`
-  - confirms that compare is already part of the mirrored backend surface, even though compare endpoints stay deferred from the first API slice
+  - confirms that compare is already part of the mirrored backend surface that the first API slice must name explicitly for direct pair comparison
 
 ## Recommended First API Resources
 
@@ -54,7 +56,7 @@ These are the current product-aligned surfaces the future API should mirror:
 
 Purpose:
 - expose static contract metadata for a future UI
-- avoid implying live runtime status before a daemon exists
+- avoid implying live runtime or job status through this read-first metadata route
 
 Recommended response:
 
@@ -118,9 +120,41 @@ Purpose:
 - convenience alias for the newest persisted run
 
 Notes:
-- optional in the first implementation
+- implemented as an optional convenience route in the first implementation
 - should return the same payload shape as `GET /api/v1/runs/{run_id}`
 - undefined when no persisted runs exist yet
+
+### 5. `GET /api/v1/compare?left_run_id=<id>&right_run_id=<id>`
+
+Purpose:
+- API form of the existing explicit-pair `history-compare` surface
+- keep the web UI thin by reusing the frozen compare payload vocabulary directly
+
+Notes:
+- this freezes exactly one compare route name for v1
+- latest/relative compare preset routes stay deferred
+- the `data` payload should mirror `history_compare_v1.json` field names rather than remapping compare-side or diff vocabulary
+
+## Frozen v1 Vocabulary Fixtures
+
+The v1 vocabulary is frozen by checked-in machine-readable fixtures:
+
+- `tests/fixtures/contracts/run_artifact_v1.json`
+  - top-level `RunArtifact.to_dict()` vocabulary
+- `tests/fixtures/contracts/history_list_item_v1.json`
+  - persisted `history` list-item vocabulary
+- `tests/fixtures/contracts/history_detail_v1.json`
+  - persisted `history-show` detail vocabulary
+- `tests/fixtures/contracts/history_compare_v1.json`
+  - persisted `history-compare` side/diff vocabulary
+- `tests/fixtures/contracts/local_api_meta_v1.json`
+  - frozen `/api/v1/meta` envelope + resource manifest vocabulary
+- `tests/fixtures/contracts/local_api_runs_v1.json`
+  - frozen `/api/v1/runs` envelope/resource vocabulary
+- `tests/fixtures/contracts/local_api_compare_v1.json`
+  - frozen compare route and envelope vocabulary for `GET /api/v1/compare?left_run_id=<id>&right_run_id=<id>`
+
+These fixtures intentionally freeze field vocabulary and envelope/resource names for the shipped read-only runtime.
 
 ## Response Envelope
 
@@ -147,19 +181,31 @@ Error example:
 }
 ```
 
+## Compare Vocabulary Freeze Before Runtime
+
+`history-compare` is part of the current mirrored backend read surface, so its payload vocabulary is frozen now through `tests/fixtures/contracts/history_compare_v1.json`.
+
+For the first local API contract, compare is frozen as **exactly one explicit v1 route**:
+
+- mirrored backend surface: `history-compare`
+- v1 HTTP route: `GET /api/v1/compare?left_run_id=<id>&right_run_id=<id>`
+- compare route fixture marker: `tests/fixtures/contracts/local_api_compare_v1.json`
+
+This means future daemon/API work must preserve the frozen compare side/diff field names and expose that exact explicit-pair route, while still deferring compare preset routes such as latest-pair or relative-run shortcuts.
+
 ## What To Defer
 
 Do **not** include these in the first local API slice:
 
-- live progress or status endpoints
+- live progress or status endpoints over HTTP
 - WebSocket streaming
 - scheduler or daemon control endpoints
 - source-registry management endpoints
-- compare endpoints across runs, even though `history-compare` already exists in the CLI/storage mirror surface
+- compare preset routes across runs beyond the explicit pair route, even though `history-compare` already exists in the CLI/storage mirror surface
 - standalone resources for `event_groups`, `scored_events`, or `intervention_candidates`
 - auth, users, sessions, or multi-tenant concepts
 
-These either do not exist in the current product surface or would force architecture choices before TianJi has a stable long-running runtime.
+These either do not exist in the current product surface or would force architecture choices beyond the shipped read-only loopback runtime.
 
 ## Mapping to Current TianJi Code
 
@@ -181,19 +227,20 @@ These either do not exist in the current product surface or would force architec
    - If API payloads diverge from CLI artifact/history payloads too early, TianJi will maintain two domain models for the same concept.
 
 2. **Premature live-runtime assumptions**
-   - Current TianJi is still one-shot and CLI-first. Avoid “status” or “job” semantics until a daemon actually exists.
+   - Current TianJi is still CLI-first. Avoid exposing daemon job semantics through the HTTP API just because the loopback daemon boundary now exists.
 
 3. **Overcommitting writes**
-   - A future `POST /runs` may exist, but the first contract draft should not require it to ship before the local service boundary is ready.
+   - A future `POST /runs` may exist, but the first shipped contract does not require it before the broader local service boundary is ready.
 
-## Recommended Implementation Order (Later)
+## Shipped Implementation Order
 
-When TianJi is ready to actually implement the local API:
+The first shipped local API slice follows this order:
 
 1. `GET /api/v1/meta`
 2. `GET /api/v1/runs`
 3. `GET /api/v1/runs/{run_id}`
-4. optional `GET /api/v1/runs/latest`
-5. only then consider write endpoints
+4. `GET /api/v1/compare?left_run_id=<id>&right_run_id=<id>`
+5. optional `GET /api/v1/runs/latest`
+6. only then consider write endpoints
 
-This keeps the first API slice aligned with the current stable product reality: read-first, local-first, deterministic, and optional.
+This keeps the first API slice aligned with the current stable product reality: read-first, local-first, deterministic, loopback-only, and optional for operators who only need the CLI or TUI.
