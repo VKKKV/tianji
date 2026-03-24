@@ -33,3 +33,8 @@ from tianji.pipeline import run_pipeline
 from tianji.scoring import score_event, summarize_scenario
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "sample_feed.xml"
+CONTRACT_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "contracts"
+
+
+def load_contract_fixture(name: str) -> object:
+    return json.loads((CONTRACT_FIXTURE_DIR / name).read_text(encoding="utf-8"))
