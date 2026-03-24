@@ -6,9 +6,3 @@ __pycache__/
 .pytest_cache/
 .venv/
 runs/
-
-# Local reference repositories kept outside initial TianJi history
-/worldmonitor/
-/DivergenceMeter/
-/MiroFish/
-/oh-my-openagent/
