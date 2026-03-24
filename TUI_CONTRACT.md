@@ -1,11 +1,10 @@
-# TianJi TUI Contract (Draft)
+# TianJi TUI Contract
 
 ## Purpose
 
-This document defines the contract for TianJi's terminal UI.
+This document defines the shipped contract for TianJi's terminal UI.
 
-It is still a **contract draft** because the broader Phase 5 surface is incomplete.
-At the same time, TianJi already ships a first read-only Rich-based slice today.
+TianJi already ships a first read-only Rich-based slice today.
 The goal here is to preserve alignment between:
 
 - the current CLI-first operator workflow
@@ -46,11 +45,11 @@ Representative verification already exists in `tests/test_tui.py`.
 
 ### Planned later
 
-This contract still reserves future room for a fuller Vim-style operator experience, but that later work should extend the shipped read-only browser instead of replacing it with a different domain model.
+This contract still reserves room for a fuller Vim-style operator experience, but that later work should extend the shipped read-only browser instead of replacing it with a different domain model.
 
 ## Non-Goals
 
-This draft does **not** define:
+This contract does **not** define:
 
 - live run execution screens
 - progress/status polling
@@ -76,7 +75,7 @@ The shipped implementation uses `rich` (`Console`, `Live`, `Layout`) plus a smal
 
 3. **Read-only first**
    - The first TUI contract should browse persisted data only.
-   - Running pipelines remains a CLI concern until a broader local runtime exists.
+   - Running pipelines remains a CLI and daemon concern. The TUI does not become a write surface.
 
 4. **Vim-style navigation without new business logic**
    - The TUI may add keyboard-first movement and selection.
@@ -197,15 +196,18 @@ These presets remain mutually exclusive.
 
 ## Lens and Projection Semantics
 
-The shipped TUI still exposes the persisted list, detail, and compare browser
-without full in-TUI projection controls.
+The shipped TUI already exposes shared in-TUI projection controls for the
+read-only detail and compare panes while keeping the history list on persisted
+truth.
 
-The next explicit Phase 5 slice should reuse current CLI and storage projection
-rules for read-only detail and compare panes only.
+The remaining Phase 5 work should treat those shared projection rules as shipped
+behavior, then focus on persisted-navigation parity, input/render separation,
+and stronger verification rather than re-inventing a separate TUI-only
+projection model.
 
 ### Scored-event lens
 
-Next planned shared lens controls:
+Shipped shared lens controls:
 
 - `dominant_field`
 - `limit_scored_events`
@@ -218,14 +220,14 @@ Explicitly deferred from this slice:
 
 ### Event-group lens
 
-Next planned shared lens controls:
+Shipped shared lens controls:
 
 - `group_dominant_field`
 - `limit_event_groups`
 
 ### Intervention alignment lens
 
-Next planned shared lens control:
+Shipped shared lens control:
 
 - `only_matching_interventions=false`
   - keep full persisted intervention list
@@ -234,9 +236,9 @@ Next planned shared lens control:
   - keep only interventions whose `event_id` remains in the final visible
     scored-event set
 
-This Phase 5 slice should keep those controls shared across detail and compare
-panes. It should not add list-pane filtering, text entry, or any new storage
-semantics.
+This Phase 5 work should keep those shipped controls shared across detail and
+compare panes, preserve the list as persisted truth, and avoid adding list-pane
+filtering, text entry, or any new storage semantics.
 
 ### Persisted truth vs projected view
 
@@ -252,13 +254,15 @@ semantics.
   - stored run-summary fields like `headline`, `dominant_field`, and
     `risk_level` still describe the persisted run itself
 
-For the next planned TUI slice, those projected lenses should stay confined to
-detail and compare rendering. The persisted history list should continue to show
-storage-backed truth rather than a separately filtered list pane.
+Those projected lenses stay confined to detail and compare rendering. The
+persisted history list should continue to show storage-backed truth rather than
+a separately filtered list pane.
 
 ## Navigation and State Model
 
-The first shipped slice already has concrete navigation behavior, but this contract only locks the high-level navigation nouns, not every final keybinding detail.
+The first shipped slice already has concrete navigation behavior, but this
+contract only locks the high-level navigation nouns, not every final keybinding
+detail.
 
 Minimum state:
 
@@ -271,6 +275,11 @@ Minimum state:
 
 The current implementation already carries these ideas in state, including a visible staged left compare run before compare activation.
 
+The remaining Phase 5 work is to make previous/next run movement and compare
+target stepping fully honor persisted-run semantics beyond the currently loaded
+list window, keep input handling separate from render formatting, and harden
+verification around the shipped shared lenses instead of adding those lenses.
+
 Minimum Vim-style navigation intent:
 
 - move selection within a list/table
@@ -280,6 +289,17 @@ Minimum Vim-style navigation intent:
 - stage a left/right compare pair from list selection with visible staged-pair feedback
 - switch focus between compare left/right/diff panes
 - apply or clear filter lenses without mutating stored data
+
+Shipped navigation parity requirement:
+
+- previous / next stepping from a persisted run from detail view should resolve
+  against SQLite-backed previous/next run semantics, even when that adjacent run
+  falls outside the currently loaded list window
+- compare-target stepping should follow the same persisted previous/next run
+  semantics, skipping the staged left run when needed rather than falling back
+  to local row-only stepping
+- first/last persisted boundaries should surface explicit navigation errors
+  instead of silently stopping at the current list window edge
 
 ## Empty and Error States
 

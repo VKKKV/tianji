@@ -1,6 +1,9 @@
 from support import *
+from rich.layout import Layout
+from rich.panel import Panel
 from rich.text import Text
 from tianji.tui import (
+    KEY_ACTION_ALIASES,
     LENS_DOMINANT_FIELD_VALUES,
     LENS_LIMIT_VALUES,
     LENS_KEY_BINDINGS,
@@ -12,11 +15,62 @@ from tianji.tui import (
     format_lens_change_message,
     format_top_group_evidence_diff_lines,
     get_compare_similarity_summary,
+    handle_history_browser_key,
+    resolve_history_browser_action,
+    run_history_browser_session,
     run_history_list_browser,
 )
 
 
 class TuiTests(unittest.TestCase):
+    def _run_browser_session(
+        self,
+        state: HistoryListState,
+        keys: list[str],
+        *,
+        width: int = 100,
+        height: int = 12,
+    ) -> list[dict[str, str]]:
+        class RecordingLive:
+            def __init__(self) -> None:
+                self.frames: list[dict[str, str]] = []
+
+            def update(self, layout: object, refresh: bool = False) -> None:
+                rendered_layout = cast(Layout, layout)
+                frame = {
+                    "header": cast(Text, rendered_layout["header"].renderable).plain,
+                    "message": cast(Text, rendered_layout["message"].renderable).plain,
+                    "footer": cast(Text, rendered_layout["footer"].renderable).plain,
+                }
+                if state.cached_detail_lines is not None:
+                    frame["detail_cache"] = "\n".join(state.cached_detail_lines)
+                if state.cached_compare_lines is not None:
+                    frame["compare_cache"] = "\n".join(state.cached_compare_lines)
+                body = rendered_layout["body"]
+                if body.children:
+                    left_panel = cast(Panel, body["left"].renderable)
+                    right_panel = cast(Panel, body["right"].renderable)
+                    frame["list"] = cast(Text, left_panel.renderable).plain
+                    frame["right"] = cast(Text, right_panel.renderable).plain
+                else:
+                    body_panel = cast(Panel, body.renderable)
+                    frame["body"] = cast(Text, body_panel.renderable).plain
+                self.frames.append(frame)
+
+        fake_console = mock.Mock()
+        fake_console.size.height = height
+        fake_console.size.width = width
+        live = RecordingLive()
+        key_sequence = iter(keys)
+
+        run_history_browser_session(
+            state,
+            console=fake_console,
+            live=live,
+            read_key=lambda: next(key_sequence),
+        )
+        return live.frames
+
     def test_history_list_state_lens_defaults_share_all_lenses_key(self) -> None:
         state = HistoryListState(rows=[{"run_id": 10}], sqlite_path="dummy.sqlite3")
 
@@ -174,6 +228,213 @@ class TuiTests(unittest.TestCase):
         state.show_help = True
         self.assertTrue(state.show_help)
 
+    def test_resolve_history_browser_action_maps_supported_keys(self) -> None:
+        self.assertEqual(resolve_history_browser_action("q"), "quit")
+        self.assertEqual(resolve_history_browser_action("Q"), "quit")
+        self.assertEqual(resolve_history_browser_action("?"), "toggle_help")
+        self.assertEqual(resolve_history_browser_action("a"), "cycle_event_field_lens")
+        self.assertEqual(
+            resolve_history_browser_action("s"), "cycle_scored_event_limit_lens"
+        )
+        self.assertEqual(resolve_history_browser_action("d"), "cycle_group_field_lens")
+        self.assertEqual(resolve_history_browser_action("f"), "cycle_group_limit_lens")
+        self.assertEqual(
+            resolve_history_browser_action("v"),
+            "toggle_matching_interventions_lens",
+        )
+        self.assertEqual(resolve_history_browser_action("["), "step_previous")
+        self.assertEqual(resolve_history_browser_action("]"), "step_next")
+        self.assertEqual(resolve_history_browser_action("j"), "move_down")
+        self.assertEqual(resolve_history_browser_action("k"), "move_up")
+        self.assertEqual(resolve_history_browser_action("g"), "jump_top")
+        self.assertEqual(resolve_history_browser_action("G"), "jump_bottom")
+        self.assertEqual(resolve_history_browser_action("c"), "stage_compare")
+        self.assertEqual(resolve_history_browser_action("C"), "clear_compare")
+        self.assertEqual(resolve_history_browser_action("\t"), "toggle_focus")
+        self.assertEqual(resolve_history_browser_action("z"), "toggle_zoom")
+        self.assertEqual(resolve_history_browser_action("\r"), "toggle_zoom")
+        self.assertEqual(resolve_history_browser_action("\n"), "toggle_zoom")
+        self.assertEqual(resolve_history_browser_action("\x1b[A"), "move_up")
+        self.assertEqual(resolve_history_browser_action("\x1b[B"), "move_down")
+        self.assertEqual(resolve_history_browser_action("\x1b[C"), "focus_active_view")
+        self.assertEqual(resolve_history_browser_action("\x1b[D"), "focus_list")
+        self.assertEqual(resolve_history_browser_action("\x1b[5~"), "page_up")
+        self.assertEqual(resolve_history_browser_action("\x1b[6~"), "page_down")
+        self.assertIsNone(resolve_history_browser_action("x"))
+        self.assertEqual(KEY_ACTION_ALIASES["a"], "cycle_event_field_lens")
+
+    def test_handle_history_browser_key_supports_help_quit_focus_zoom_and_noop(
+        self,
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}], sqlite_path="dummy.sqlite3"
+        )
+
+        decision = handle_history_browser_key(state, key="?", page_size=3)
+        self.assertEqual(decision.action, "toggle_help")
+        self.assertFalse(decision.should_exit)
+        self.assertTrue(state.show_help)
+        self.assertEqual(state.message, "help opened")
+
+        decision = handle_history_browser_key(state, key="q", page_size=3)
+        self.assertEqual(decision.action, "close_help")
+        self.assertFalse(decision.should_exit)
+        self.assertFalse(state.show_help)
+        self.assertEqual(state.message, "help closed")
+
+        decision = handle_history_browser_key(state, key="l", page_size=3)
+        self.assertEqual(decision.action, "focus_active_view")
+        self.assertEqual(state.focused_pane, "detail")
+        self.assertEqual(state.message, "focus=detail")
+
+        decision = handle_history_browser_key(state, key="\t", page_size=3)
+        self.assertEqual(decision.action, "toggle_focus")
+        self.assertEqual(state.focused_pane, "list")
+        self.assertEqual(state.message, "focus=list")
+
+        decision = handle_history_browser_key(state, key="z", page_size=3)
+        self.assertEqual(decision.action, "toggle_zoom")
+        self.assertTrue(state.zoomed)
+        self.assertEqual(state.message, "zoom on")
+
+        decision = handle_history_browser_key(state, key="q", page_size=3)
+        self.assertEqual(decision.action, "disable_zoom")
+        self.assertFalse(decision.should_exit)
+        self.assertFalse(state.zoomed)
+        self.assertEqual(state.message, "zoom off")
+
+        decision = handle_history_browser_key(state, key="x", page_size=3)
+        self.assertEqual(decision.action, "noop")
+        self.assertFalse(decision.should_exit)
+        self.assertIsNone(state.message)
+
+        decision = handle_history_browser_key(state, key="q", page_size=3)
+        self.assertEqual(decision.action, "quit")
+        self.assertTrue(decision.should_exit)
+
+    def test_handle_history_browser_key_cycles_lenses_and_compare_controls(
+        self,
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}, {"run_id": 30}],
+            sqlite_path="dummy.sqlite3",
+        )
+
+        decision = handle_history_browser_key(state, key="a", page_size=2)
+        self.assertEqual(decision.action, "cycle_event_field_lens")
+        self.assertEqual(state.dominant_field, "conflict")
+        self.assertEqual(state.message, "lens event field lens: conflict")
+
+        decision = handle_history_browser_key(state, key="s", page_size=2)
+        self.assertEqual(decision.action, "cycle_scored_event_limit_lens")
+        self.assertEqual(state.limit_scored_events, 1)
+        self.assertEqual(state.message, "lens scored-event limit: 1")
+
+        decision = handle_history_browser_key(state, key="d", page_size=2)
+        self.assertEqual(decision.action, "cycle_group_field_lens")
+        self.assertEqual(state.group_dominant_field, "conflict")
+        self.assertEqual(state.message, "lens group field lens: conflict")
+
+        decision = handle_history_browser_key(state, key="f", page_size=2)
+        self.assertEqual(decision.action, "cycle_group_limit_lens")
+        self.assertEqual(state.limit_event_groups, 1)
+        self.assertEqual(state.message, "lens group limit: 1")
+
+        decision = handle_history_browser_key(state, key="v", page_size=2)
+        self.assertEqual(decision.action, "toggle_matching_interventions_lens")
+        self.assertTrue(state.only_matching_interventions)
+        self.assertEqual(state.message, "lens matching interventions: on")
+
+        decision = handle_history_browser_key(state, key="c", page_size=2)
+        self.assertEqual(decision.action, "stage_compare")
+        self.assertEqual(state.staged_compare_left_run_id, 10)
+        self.assertEqual(state.message, "left run staged: 10")
+
+        decision = handle_history_browser_key(state, key="c", page_size=2)
+        self.assertEqual(decision.action, "stage_compare")
+        self.assertEqual(state.active_view, "compare")
+        self.assertEqual(state.selected_index, 1)
+        self.assertEqual(state.message, "compare view active")
+
+        state.focused_pane = "compare"
+        decision = handle_history_browser_key(state, key="C", page_size=2)
+        self.assertEqual(decision.action, "clear_compare")
+        self.assertIsNone(state.staged_compare_left_run_id)
+        self.assertEqual(state.active_view, "detail")
+        self.assertEqual(state.focused_pane, "detail")
+        self.assertEqual(state.message, "compare cleared")
+
+    def test_handle_history_browser_key_routes_navigation_by_focus_and_view(
+        self,
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}, {"run_id": 30}],
+            sqlite_path="dummy.sqlite3",
+        )
+
+        decision = handle_history_browser_key(state, key="j", page_size=2)
+        self.assertEqual(decision.action, "move_down")
+        self.assertEqual(state.selected_index, 1)
+
+        decision = handle_history_browser_key(state, key="k", page_size=2)
+        self.assertEqual(decision.action, "move_up")
+        self.assertEqual(state.selected_index, 0)
+
+        decision = handle_history_browser_key(state, key="]", page_size=2)
+        self.assertEqual(decision.action, "step_next")
+        self.assertEqual(state.selected_index, 1)
+
+        decision = handle_history_browser_key(state, key="[", page_size=2)
+        self.assertEqual(decision.action, "step_previous")
+        self.assertEqual(state.selected_index, 0)
+
+        decision = handle_history_browser_key(state, key="G", page_size=2)
+        self.assertEqual(decision.action, "jump_bottom")
+        self.assertEqual(state.selected_index, 2)
+        self.assertEqual(state.message, "last run")
+
+        decision = handle_history_browser_key(state, key="g", page_size=2)
+        self.assertEqual(decision.action, "jump_top")
+        self.assertEqual(state.selected_index, 0)
+        self.assertEqual(state.message, "first run")
+
+        state.focused_pane = "detail"
+        state.cached_detail_lines = ["l1", "l2", "l3", "l4"]
+        decision = handle_history_browser_key(state, key="\x1b[6~", page_size=2)
+        self.assertEqual(decision.action, "page_down")
+        self.assertEqual(state.detail_scroll_offset, 2)
+
+        decision = handle_history_browser_key(state, key="\x1b[5~", page_size=2)
+        self.assertEqual(decision.action, "page_up")
+        self.assertEqual(state.detail_scroll_offset, 0)
+
+        decision = handle_history_browser_key(state, key="G", page_size=2)
+        self.assertEqual(decision.action, "jump_bottom")
+        self.assertEqual(state.detail_scroll_offset, 2)
+        self.assertEqual(state.message, "bottom of detail")
+
+        decision = handle_history_browser_key(state, key="g", page_size=2)
+        self.assertEqual(decision.action, "jump_top")
+        self.assertEqual(state.detail_scroll_offset, 0)
+        self.assertEqual(state.message, "top of detail")
+
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}, {"run_id": 30}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+            staged_compare_left_run_id=10,
+            active_view="compare",
+            focused_pane="compare",
+        )
+        decision = handle_history_browser_key(state, key="]", page_size=2)
+        self.assertEqual(decision.action, "step_next")
+        self.assertEqual(state.selected_index, 1)
+
+        decision = handle_history_browser_key(state, key="[", page_size=2)
+        self.assertEqual(decision.action, "step_previous")
+        self.assertEqual(state.selected_index, 1)
+        self.assertEqual(state.message, "first compare target")
+
     def test_history_list_state_scrolls_detail_pane(self) -> None:
         state = HistoryListState(
             rows=[{"run_id": index} for index in range(8)], sqlite_path="dummy.sqlite3"
@@ -224,6 +485,90 @@ class TuiTests(unittest.TestCase):
         state.step_run(10, page_size=2)
         self.assertEqual(state.selected_index, 2)
 
+    @mock.patch("tianji.tui.get_previous_run_id", return_value=3)
+    @mock.patch("tianji.tui.get_run_summary")
+    def test_history_list_state_step_run_uses_persisted_previous_beyond_loaded_window(
+        self, mock_get_run_summary, mock_get_previous_run_id
+    ) -> None:
+        mock_get_run_summary.return_value = {
+            "run_id": 3,
+            "schema_version": "tianji.run.v1",
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Persisted run outside the loaded limit.",
+                "event_groups": [],
+            },
+            "scored_events": [
+                {
+                    "event_id": "evt-3",
+                    "divergence_score": 19.5,
+                }
+            ],
+            "intervention_candidates": [],
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 5}, {"run_id": 4}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            focused_pane="detail",
+            cached_detail_run_id=4,
+            cached_detail_lines=["detail"],
+        )
+
+        state.step_run(-1, page_size=2)
+
+        self.assertEqual([row["run_id"] for row in state.rows], [4, 3])
+        self.assertEqual(state.selected_index, 1)
+        self.assertIsNone(state.cached_detail_run_id)
+        self.assertIsNone(state.cached_detail_lines)
+        mock_get_previous_run_id.assert_called_once_with(
+            sqlite_path="dummy.sqlite3", run_id=4
+        )
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3", run_id=3
+        )
+
+    @mock.patch("tianji.tui.get_next_run_id", return_value=6)
+    @mock.patch("tianji.tui.get_run_summary")
+    def test_history_list_state_step_run_uses_persisted_next_beyond_loaded_window(
+        self, mock_get_run_summary, mock_get_next_run_id
+    ) -> None:
+        mock_get_run_summary.return_value = {
+            "run_id": 6,
+            "schema_version": "tianji.run.v1",
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
+            "scenario_summary": {
+                "dominant_field": "diplomacy",
+                "risk_level": "medium",
+                "headline": "Persisted newer run outside the loaded limit.",
+                "event_groups": [],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 5}, {"run_id": 4}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+        )
+
+        state.step_run(1, page_size=2)
+
+        self.assertEqual([row["run_id"] for row in state.rows], [6, 5])
+        self.assertEqual(state.selected_index, 0)
+        mock_get_next_run_id.assert_called_once_with(
+            sqlite_path="dummy.sqlite3", run_id=5
+        )
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3", run_id=6
+        )
+
     def test_history_list_state_step_compare_target_skips_left_run(self) -> None:
         state = HistoryListState(
             rows=[{"run_id": 10}, {"run_id": 20}, {"run_id": 30}],
@@ -260,6 +605,92 @@ class TuiTests(unittest.TestCase):
         state.step_compare_target(1, page_size=2)
         self.assertEqual(state.selected_index, 2)
         self.assertEqual(state.message, "last compare target")
+
+    @mock.patch("tianji.tui.get_next_run_id", side_effect=[20, 30])
+    @mock.patch("tianji.tui.get_run_summary")
+    def test_history_list_state_step_compare_target_uses_persisted_semantics_beyond_loaded_window(
+        self, mock_get_run_summary, mock_get_next_run_id
+    ) -> None:
+        mock_get_run_summary.return_value = {
+            "run_id": 30,
+            "schema_version": "tianji.run.v1",
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
+            "scenario_summary": {
+                "dominant_field": "conflict",
+                "risk_level": "high",
+                "headline": "Persisted compare target outside the loaded limit.",
+                "event_groups": [],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        }
+        state = HistoryListState(
+            rows=[{"run_id": 20}, {"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+            staged_compare_left_run_id=20,
+            active_view="compare",
+            focused_pane="compare",
+            cached_compare_right_run_id=10,
+            cached_compare_lines=["compare"],
+        )
+
+        state.step_compare_target(1, page_size=2)
+
+        self.assertEqual([row["run_id"] for row in state.rows], [30, 20])
+        self.assertEqual(state.selected_index, 0)
+        self.assertIsNone(state.cached_compare_right_run_id)
+        self.assertIsNone(state.cached_compare_lines)
+        self.assertEqual(
+            mock_get_next_run_id.call_args_list[0].kwargs,
+            {"sqlite_path": "dummy.sqlite3", "run_id": 20},
+        )
+        self.assertEqual(
+            mock_get_next_run_id.call_args_list[1].kwargs,
+            {"sqlite_path": "dummy.sqlite3", "run_id": 20},
+        )
+        mock_get_run_summary.assert_called_once_with(
+            sqlite_path="dummy.sqlite3", run_id=30
+        )
+
+    @mock.patch("tianji.tui.get_previous_run_id", return_value=None)
+    def test_history_list_state_step_run_reports_first_persisted_boundary(
+        self, mock_get_previous_run_id
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 5}, {"run_id": 4}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+        )
+
+        state.step_run(-1, page_size=2)
+
+        self.assertEqual(state.selected_index, 1)
+        self.assertEqual(state.message, "first run")
+        mock_get_previous_run_id.assert_called_once_with(
+            sqlite_path="dummy.sqlite3", run_id=4
+        )
+
+    @mock.patch("tianji.tui.get_next_run_id", side_effect=[20, None])
+    def test_history_list_state_step_compare_target_reports_last_persisted_boundary(
+        self, mock_get_next_run_id
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 20}, {"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+            staged_compare_left_run_id=20,
+            active_view="compare",
+            focused_pane="compare",
+        )
+
+        state.step_compare_target(1, page_size=2)
+
+        self.assertEqual(state.selected_index, 0)
+        self.assertEqual(state.message, "last compare target")
+        self.assertEqual(len(mock_get_next_run_id.call_args_list), 2)
 
     def test_history_list_state_sets_transient_messages_on_bounds(self) -> None:
         state = HistoryListState(
@@ -1926,6 +2357,474 @@ class TuiTests(unittest.TestCase):
         self.assertIsNone(state.message)
         self.assertGreaterEqual(mock_get_run_summary.call_count, 1)
         self.assertGreaterEqual(mock_compare_runs.call_count, 1)
+
+    @mock.patch(
+        "tianji.tui.get_run_summary",
+        side_effect=[
+            {
+                "run_id": 10,
+                "generated_at": "2026-03-22T10:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+                "scenario_summary": {
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "headline": "Run ten detail headline.",
+                    "event_groups": [
+                        {
+                            "dominant_field": "technology",
+                            "member_count": 2,
+                            "headline_title": "Technology group remains visible.",
+                        }
+                    ],
+                },
+                "scored_events": [
+                    {
+                        "title": "Technology event remains visible.",
+                        "dominant_field": "technology",
+                        "impact_score": 14.0,
+                        "field_attraction": 7.0,
+                        "divergence_score": 19.0,
+                    }
+                ],
+                "intervention_candidates": [
+                    {
+                        "target": "tech-sector",
+                        "intervention_type": "monitor",
+                        "expected_effect": "Remain visible.",
+                    }
+                ],
+            },
+            {
+                "run_id": 20,
+                "generated_at": "2026-03-22T11:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 4, "normalized_event_count": 4},
+                "scenario_summary": {
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "headline": "Projected empty detail still shows persisted truth.",
+                    "event_groups": [],
+                },
+                "scored_events": [],
+                "intervention_candidates": [],
+            },
+        ],
+    )
+    @mock.patch("tianji.tui.compare_runs")
+    @mock.patch("tianji.tui.get_next_run_id", side_effect=[20, 30])
+    @mock.patch(
+        "tianji.tui.get_previous_run_id",
+        side_effect=sqlite3.OperationalError("fallback to loaded rows"),
+    )
+    def test_run_history_browser_session_covers_detail_compare_and_lens_empty_flows(
+        self,
+        mock_get_previous_run_id,
+        mock_get_next_run_id,
+        mock_compare_runs,
+        mock_get_run_summary,
+    ) -> None:
+        compare_run_20 = {
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left persisted truth.",
+                "top_event_group": {"dominant_field": "technology", "member_count": 2},
+                "top_scored_event": {
+                    "dominant_field": "technology",
+                    "divergence_score": 19.0,
+                    "impact_score": 14.0,
+                },
+                "top_intervention": {
+                    "target": "tech-sector",
+                    "intervention_type": "monitor",
+                },
+                "event_group_count": 1,
+                "intervention_event_ids": ["evt-10"],
+            },
+            "right": {
+                "run_id": 20,
+                "mode": "fixture",
+                "dominant_field": "diplomacy",
+                "risk_level": "medium",
+                "headline": "Right projected-empty compare target.",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+                "event_group_count": 0,
+                "intervention_event_ids": [],
+            },
+            "diff": {
+                "dominant_field_changed": True,
+                "risk_level_changed": True,
+                "raw_item_count_delta": 1,
+                "normalized_event_count_delta": 1,
+                "event_group_count_delta": -1,
+                "top_event_group_changed": True,
+                "top_event_group_evidence_diff": {
+                    "comparable": False,
+                    "member_count_delta": -2,
+                    "evidence_chain_link_count_delta": 0,
+                    "right_only_member_event_ids": [],
+                    "left_only_member_event_ids": ["evt-10"],
+                    "shared_keywords_added": [],
+                    "shared_keywords_removed": [],
+                    "chain_summary_changed": False,
+                },
+                "top_scored_event_changed": True,
+                "top_scored_event_comparable": False,
+                "top_divergence_score_delta": None,
+                "top_impact_score_delta": None,
+                "top_field_attraction_delta": None,
+                "top_intervention_changed": True,
+            },
+        }
+        compare_run_30 = {
+            "left": compare_run_20["left"],
+            "right": {
+                "run_id": 30,
+                "mode": "fixture",
+                "dominant_field": "economy",
+                "risk_level": "low",
+                "headline": "Right compare target after persisted skip.",
+                "top_event_group": {"dominant_field": "economy", "member_count": 1},
+                "top_scored_event": {
+                    "dominant_field": "economy",
+                    "divergence_score": 11.0,
+                    "impact_score": 9.0,
+                },
+                "top_intervention": {
+                    "target": "market",
+                    "intervention_type": "observe",
+                },
+                "event_group_count": 1,
+                "intervention_event_ids": ["evt-30"],
+            },
+            "diff": {
+                "dominant_field_changed": True,
+                "risk_level_changed": True,
+                "raw_item_count_delta": -1,
+                "normalized_event_count_delta": -1,
+                "event_group_count_delta": 0,
+                "top_event_group_changed": True,
+                "top_event_group_evidence_diff": {
+                    "comparable": False,
+                    "member_count_delta": -1,
+                    "evidence_chain_link_count_delta": 0,
+                    "right_only_member_event_ids": ["evt-30"],
+                    "left_only_member_event_ids": ["evt-10"],
+                    "shared_keywords_added": [],
+                    "shared_keywords_removed": [],
+                    "chain_summary_changed": False,
+                },
+                "top_scored_event_changed": True,
+                "top_scored_event_comparable": False,
+                "top_divergence_score_delta": None,
+                "top_impact_score_delta": None,
+                "top_field_attraction_delta": None,
+                "top_intervention_changed": True,
+            },
+        }
+
+        def compare_side_effect(*args: object, **kwargs: object) -> dict[str, object]:
+            right_run_id = kwargs.get("right_run_id")
+            if right_run_id == 20:
+                return cast(dict[str, object], compare_run_20)
+            if right_run_id == 30:
+                return cast(dict[str, object], compare_run_30)
+            raise AssertionError(f"unexpected compare target: {right_run_id}")
+
+        mock_compare_runs.side_effect = compare_side_effect
+
+        state = HistoryListState(
+            rows=[
+                {
+                    "run_id": 10,
+                    "generated_at": "2026-03-22T10:00",
+                    "mode": "fixture",
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "top_divergence_score": 19.0,
+                    "headline": "Run ten headline.",
+                },
+                {
+                    "run_id": 20,
+                    "generated_at": "2026-03-22T11:00",
+                    "mode": "fixture",
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "top_divergence_score": 13.0,
+                    "headline": "Run twenty headline.",
+                },
+                {
+                    "run_id": 30,
+                    "generated_at": "2026-03-22T12:00",
+                    "mode": "fixture",
+                    "dominant_field": "economy",
+                    "risk_level": "low",
+                    "top_divergence_score": 11.0,
+                    "headline": "Run thirty headline.",
+                },
+            ],
+            sqlite_path="dummy.sqlite3",
+        )
+
+        frames = self._run_browser_session(
+            state,
+            ["l", "c", "j", "c", "l", "a", "]", "[", "h", "j", "l", "q"],
+            height=40,
+        )
+
+        self.assertEqual(state.selected_index, 2)
+        self.assertEqual(state.focused_pane, "compare")
+        self.assertEqual(state.active_view, "compare")
+        self.assertEqual(state.staged_compare_left_run_id, 10)
+        self.assertEqual(state.dominant_field, "conflict")
+        self.assertIsNone(state.message)
+        self.assertEqual(mock_get_run_summary.call_count, 1)
+        self.assertEqual(
+            mock_get_run_summary.call_args.kwargs,
+            {
+                "sqlite_path": "dummy.sqlite3",
+                "run_id": 10,
+                "dominant_field": None,
+                "limit_scored_events": None,
+                "group_dominant_field": None,
+                "limit_event_groups": None,
+                "only_matching_interventions": False,
+            },
+        )
+        self.assertGreaterEqual(mock_compare_runs.call_count, 2)
+        self.assertEqual(len(mock_get_next_run_id.call_args_list), 1)
+        self.assertEqual(mock_get_previous_run_id.call_count, 1)
+
+        detail_frame = next(
+            frame
+            for frame in frames
+            if "right" in frame and "Run ten detail headline." in frame["right"]
+        )
+        self.assertIn("Technology event remains visible.", detail_frame["right"])
+        self.assertIn("lens:all-runs", detail_frame["header"])
+
+        compare_messages = [frame["message"] for frame in frames if "message" in frame]
+        self.assertIn(" compare view active ", compare_messages)
+
+        compare_cache_text = "\n".join(state.cached_compare_lines or [])
+        self.assertIn("Compare: Run #10 (Left) vs Run #30", compare_cache_text)
+        self.assertIn("Right compare target after persisted", compare_cache_text)
+
+        compare_skip_frame = next(
+            frame
+            for frame in reversed(frames)
+            if frame.get("footer") and "COMPARE L:10 R:30" in frame["footer"]
+        )
+        self.assertIn("lens:ev=conflict", compare_skip_frame["header"])
+        self.assertIn("* 10", compare_skip_frame["list"])
+
+        self.assertEqual(
+            mock_get_next_run_id.call_args_list[0].kwargs,
+            {"sqlite_path": "dummy.sqlite3", "run_id": 20},
+        )
+
+    @mock.patch(
+        "tianji.tui.get_run_summary",
+        return_value={
+            "run_id": 20,
+            "generated_at": "2026-03-22T11:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 4, "normalized_event_count": 4},
+            "scenario_summary": {
+                "dominant_field": "diplomacy",
+                "risk_level": "medium",
+                "headline": "Projected empty detail still shows persisted truth.",
+                "event_groups": [],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        },
+    )
+    def test_run_history_browser_session_shows_projected_empty_detail_copy(
+        self, mock_get_run_summary
+    ) -> None:
+        state = HistoryListState(
+            rows=[
+                {
+                    "run_id": 10,
+                    "generated_at": "2026-03-22T10:00",
+                    "mode": "fixture",
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "top_divergence_score": 19.0,
+                    "headline": "Run ten headline.",
+                },
+                {
+                    "run_id": 20,
+                    "generated_at": "2026-03-22T11:00",
+                    "mode": "fixture",
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "top_divergence_score": 13.0,
+                    "headline": "Run twenty headline.",
+                },
+            ],
+            sqlite_path="dummy.sqlite3",
+        )
+
+        frames = self._run_browser_session(
+            state,
+            ["j", "l", "a", "q"],
+            height=60,
+        )
+
+        self.assertEqual(state.selected_index, 1)
+        self.assertEqual(state.focused_pane, "detail")
+        self.assertEqual(state.active_view, "detail")
+        self.assertEqual(state.dominant_field, "conflict")
+        self.assertEqual(mock_get_run_summary.call_count, 3)
+        self.assertEqual(
+            mock_get_run_summary.call_args_list[-1].kwargs,
+            {
+                "sqlite_path": "dummy.sqlite3",
+                "run_id": 20,
+                "dominant_field": "conflict",
+                "limit_scored_events": None,
+                "group_dominant_field": None,
+                "limit_event_groups": None,
+                "only_matching_interventions": False,
+            },
+        )
+
+        detail_cache_text = "\n".join(state.cached_detail_lines or [])
+        self.assertIn(
+            "No scored-event rows match the active",
+            detail_cache_text,
+        )
+        self.assertIn("Interventions: 0", detail_cache_text)
+        self.assertIn(
+            "Projected empty detail still shows",
+            detail_cache_text,
+        )
+        self.assertIn("lens:ev=conflict", frames[-1]["header"])
+
+    @mock.patch(
+        "tianji.tui.get_run_summary",
+        return_value={
+            "run_id": 10,
+            "generated_at": "2026-03-22T10:00:00+00:00",
+            "mode": "fixture",
+            "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+            "scenario_summary": {
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left detail before compare.",
+                "event_groups": [],
+            },
+            "scored_events": [],
+            "intervention_candidates": [],
+        },
+    )
+    @mock.patch("tianji.tui.compare_runs")
+    def test_run_history_browser_session_shows_projected_empty_compare_copy(
+        self, mock_compare_runs, mock_get_run_summary
+    ) -> None:
+        mock_compare_runs.return_value = {
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left persisted truth.",
+                "top_event_group": {"dominant_field": "technology", "member_count": 2},
+                "top_scored_event": {
+                    "dominant_field": "technology",
+                    "divergence_score": 19.0,
+                    "impact_score": 14.0,
+                },
+                "top_intervention": {
+                    "target": "tech-sector",
+                    "intervention_type": "monitor",
+                },
+                "event_group_count": 1,
+                "intervention_event_ids": ["evt-10"],
+            },
+            "right": {
+                "run_id": 20,
+                "mode": "fixture",
+                "dominant_field": "diplomacy",
+                "risk_level": "medium",
+                "headline": "Right projected-empty compare target.",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+                "event_group_count": 0,
+                "intervention_event_ids": [],
+            },
+            "diff": {
+                "dominant_field_changed": True,
+                "risk_level_changed": True,
+                "raw_item_count_delta": 1,
+                "normalized_event_count_delta": 1,
+                "event_group_count_delta": -1,
+                "top_event_group_changed": True,
+                "top_event_group_evidence_diff": {
+                    "comparable": False,
+                    "member_count_delta": -2,
+                    "evidence_chain_link_count_delta": 0,
+                    "right_only_member_event_ids": [],
+                    "left_only_member_event_ids": ["evt-10"],
+                    "shared_keywords_added": [],
+                    "shared_keywords_removed": [],
+                    "chain_summary_changed": False,
+                },
+                "top_scored_event_changed": True,
+                "top_scored_event_comparable": False,
+                "top_divergence_score_delta": None,
+                "top_impact_score_delta": None,
+                "top_field_attraction_delta": None,
+                "top_intervention_changed": True,
+            },
+        }
+        state = HistoryListState(
+            rows=[
+                {
+                    "run_id": 10,
+                    "generated_at": "2026-03-22T10:00",
+                    "mode": "fixture",
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "top_divergence_score": 19.0,
+                    "headline": "Run ten headline.",
+                },
+                {
+                    "run_id": 20,
+                    "generated_at": "2026-03-22T11:00",
+                    "mode": "fixture",
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "top_divergence_score": 13.0,
+                    "headline": "Run twenty headline.",
+                },
+            ],
+            sqlite_path="dummy.sqlite3",
+        )
+
+        frames = self._run_browser_session(
+            state,
+            ["c", "j", "c", "l", "a", "q"],
+            height=60,
+        )
+
+        compare_cache_text = "\n".join(state.cached_compare_lines or [])
+        self.assertIn(
+            "Compare: Run #10 (Left) vs Run #20",
+            compare_cache_text,
+        )
+        self.assertIn("No scored-event rows match the active", compare_cache_text)
+        self.assertIn("Persisted run data is unchanged.", compare_cache_text)
+        self.assertIn("lens:ev=conflict", frames[-1]["header"])
+        self.assertGreaterEqual(mock_get_run_summary.call_count, 1)
 
     def test_launch_history_tui_prints_empty_state_without_browser(self) -> None:
         stdout = io.StringIO()
