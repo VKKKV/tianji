@@ -15,6 +15,7 @@ from .models import (
     RunArtifact,
     ScoredEvent,
 )
+from .fetch import derive_canonical_content_hash, derive_canonical_entry_identity_hash
 
 
 RunRow: TypeAlias = tuple[int, str, str, str, str, str]
@@ -49,8 +50,14 @@ def persist_run(
         connection.execute("PRAGMA foreign_keys = ON")
         initialize_schema(connection)
         run_id = insert_run(connection, artifact)
-        insert_raw_items(connection, run_id, raw_items)
-        insert_normalized_events(connection, run_id, normalized_events)
+        canonical_source_item_ids = ensure_canonical_source_items(connection, raw_items)
+        insert_raw_items(connection, run_id, raw_items, canonical_source_item_ids)
+        insert_normalized_events(
+            connection,
+            run_id,
+            normalized_events,
+            canonical_source_item_ids,
+        )
         insert_scored_events(connection, run_id, scored_events)
         insert_intervention_candidates(connection, run_id, intervention_candidates)
         connection.commit()
@@ -334,20 +341,35 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             scenario_summary_json TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS raw_items (
+        CREATE TABLE IF NOT EXISTS source_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id INTEGER NOT NULL,
+            entry_identity_hash TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
             source TEXT NOT NULL,
             title TEXT NOT NULL,
             summary TEXT NOT NULL,
             link TEXT NOT NULL,
             published_at TEXT,
-            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+            UNIQUE(entry_identity_hash, content_hash)
+        );
+
+        CREATE TABLE IF NOT EXISTS raw_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            canonical_source_item_id INTEGER,
+            source TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            link TEXT NOT NULL,
+            published_at TEXT,
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (canonical_source_item_id) REFERENCES source_items(id)
         );
 
         CREATE TABLE IF NOT EXISTS normalized_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id INTEGER NOT NULL,
+            canonical_source_item_id INTEGER,
             event_id TEXT NOT NULL,
             source TEXT NOT NULL,
             title TEXT NOT NULL,
@@ -358,7 +380,8 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             actors_json TEXT NOT NULL,
             regions_json TEXT NOT NULL,
             field_scores_json TEXT NOT NULL,
-            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (canonical_source_item_id) REFERENCES source_items(id)
         );
 
         CREATE TABLE IF NOT EXISTS scored_events (
@@ -393,6 +416,34 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
         );
         """
     )
+    ensure_column(
+        connection,
+        table_name="raw_items",
+        column_name="canonical_source_item_id",
+        column_definition="INTEGER REFERENCES source_items(id)",
+    )
+    ensure_column(
+        connection,
+        table_name="normalized_events",
+        column_name="canonical_source_item_id",
+        column_definition="INTEGER REFERENCES source_items(id)",
+    )
+
+
+def ensure_column(
+    connection: sqlite3.Connection,
+    *,
+    table_name: str,
+    column_name: str,
+    column_definition: str,
+) -> None:
+    rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    existing_column_names = {str(row[1]) for row in rows}
+    if column_name in existing_column_names:
+        return
+    connection.execute(
+        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+    )
 
 
 def insert_run(connection: sqlite3.Connection, artifact: RunArtifact) -> int:
@@ -420,17 +471,89 @@ def insert_run(connection: sqlite3.Connection, artifact: RunArtifact) -> int:
     return lastrowid
 
 
+def ensure_canonical_source_items(
+    connection: sqlite3.Connection,
+    raw_items: list[RawItem],
+) -> dict[tuple[str, str], int]:
+    canonical_ids: dict[tuple[str, str], int] = {}
+    for item in raw_items:
+        identity_hash = (
+            item.entry_identity_hash or derive_canonical_entry_identity_hash(item)
+        )
+        content_hash = item.content_hash or derive_canonical_content_hash(item)
+        item.entry_identity_hash = identity_hash
+        item.content_hash = content_hash
+        key = (identity_hash, content_hash)
+        if key in canonical_ids:
+            continue
+        row = connection.execute(
+            """
+            SELECT id
+            FROM source_items
+            WHERE entry_identity_hash = ? AND content_hash = ?
+            """,
+            key,
+        ).fetchone()
+        if row is None:
+            cursor = connection.execute(
+                """
+                INSERT INTO source_items (
+                    entry_identity_hash,
+                    content_hash,
+                    source,
+                    title,
+                    summary,
+                    link,
+                    published_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    identity_hash,
+                    content_hash,
+                    item.source,
+                    item.title,
+                    item.summary,
+                    item.link,
+                    item.published_at,
+                ),
+            )
+            lastrowid = cursor.lastrowid
+            if not isinstance(lastrowid, int):
+                raise RuntimeError("Failed to persist canonical source item row")
+            canonical_ids[key] = lastrowid
+            continue
+        canonical_id = row[0]
+        if not isinstance(canonical_id, int | str):
+            raise RuntimeError("Unexpected canonical source item id type")
+        canonical_ids[key] = int(canonical_id)
+    return canonical_ids
+
+
 def insert_raw_items(
-    connection: sqlite3.Connection, run_id: int, raw_items: list[RawItem]
+    connection: sqlite3.Connection,
+    run_id: int,
+    raw_items: list[RawItem],
+    canonical_source_item_ids: dict[tuple[str, str], int],
 ) -> None:
     connection.executemany(
         """
-        INSERT INTO raw_items (run_id, source, title, summary, link, published_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO raw_items (
+            run_id,
+            canonical_source_item_id,
+            source,
+            title,
+            summary,
+            link,
+            published_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
                 run_id,
+                canonical_source_item_ids[
+                    (item.entry_identity_hash, item.content_hash)
+                ],
                 item.source,
                 item.title,
                 item.summary,
@@ -446,11 +569,13 @@ def insert_normalized_events(
     connection: sqlite3.Connection,
     run_id: int,
     normalized_events: list[NormalizedEvent],
+    canonical_source_item_ids: dict[tuple[str, str], int],
 ) -> None:
     connection.executemany(
         """
         INSERT INTO normalized_events (
             run_id,
+            canonical_source_item_id,
             event_id,
             source,
             title,
@@ -461,11 +586,14 @@ def insert_normalized_events(
             actors_json,
             regions_json,
             field_scores_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
                 run_id,
+                canonical_source_item_ids[
+                    (event.entry_identity_hash, event.content_hash)
+                ],
                 event.event_id,
                 event.source,
                 event.title,

@@ -2,6 +2,128 @@ from support import *
 
 
 class HistoryShowTests(unittest.TestCase):
+    def test_history_detail_contract_fixture_freezes_v1_vocabulary(self) -> None:
+        detail_fixture = cast(
+            dict[str, object], load_contract_fixture("history_detail_v1.json")
+        )
+        api_fixture = cast(
+            dict[str, object], load_contract_fixture("local_api_meta_v1.json")
+        )
+
+        grouped_feed = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0">
+      <channel>
+        <title>Grouped TianJi Feed</title>
+        <item>
+          <title>China and USA expand chip controls across East Asia export lanes</title>
+          <link>https://example.com/group-a</link>
+          <pubDate>Sun, 22 Mar 2026 08:00:00 GMT</pubDate>
+          <description>Officials in China and the USA expand chip export controls across East Asia supply lanes.</description>
+        </item>
+        <item>
+          <title>USA and China widen chip export controls after East Asia dispute</title>
+          <link>https://example.com/group-b</link>
+          <pubDate>Sun, 22 Mar 2026 09:00:00 GMT</pubDate>
+          <description>USA and China widen chip export controls after an East Asia technology dispute.</description>
+        </item>
+        <item>
+          <title>Iran diplomacy channel reopens for regional talks</title>
+          <link>https://example.com/group-c</link>
+          <pubDate>Sun, 22 Mar 2026 10:00:00 GMT</pubDate>
+          <description>Iran reopens a diplomacy channel for new regional talks.</description>
+        </item>
+      </channel>
+    </rss>
+    """
+
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            fixture_path = Path(tmpdir) / "grouped.xml"
+            fixture_path.write_text(grouped_feed, encoding="utf-8")
+            run_pipeline(
+                fixture_paths=[str(fixture_path)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "history-show",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--run-id",
+                        "1",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+
+        scenario_summary = cast(dict[str, object], payload["scenario_summary"])
+        fixture_scenario_summary = cast(
+            dict[str, object], detail_fixture["scenario_summary"]
+        )
+        payload_event_groups = cast(
+            list[dict[str, object]], scenario_summary["event_groups"]
+        )
+        fixture_event_groups = cast(
+            list[dict[str, object]], fixture_scenario_summary["event_groups"]
+        )
+        payload_scored_events = cast(list[dict[str, object]], payload["scored_events"])
+        fixture_scored_events = cast(
+            list[dict[str, object]], detail_fixture["scored_events"]
+        )
+        payload_interventions = cast(
+            list[dict[str, object]], payload["intervention_candidates"]
+        )
+        fixture_interventions = cast(
+            list[dict[str, object]], detail_fixture["intervention_candidates"]
+        )
+        payload_evidence_chain = cast(
+            list[dict[str, object]], payload_event_groups[0]["evidence_chain"]
+        )
+        fixture_evidence_chain = cast(
+            list[dict[str, object]], fixture_event_groups[0]["evidence_chain"]
+        )
+
+        self.assertEqual(set(payload), set(detail_fixture))
+        self.assertEqual(
+            set(cast(dict[str, object], payload["input_summary"])),
+            set(cast(dict[str, object], detail_fixture["input_summary"])),
+        )
+        self.assertEqual(
+            set(scenario_summary),
+            set(fixture_scenario_summary),
+        )
+        self.assertEqual(set(payload_event_groups[0]), set(fixture_event_groups[0]))
+        self.assertEqual(set(payload_evidence_chain[0]), set(fixture_evidence_chain[0]))
+        self.assertEqual(set(payload_scored_events[0]), set(fixture_scored_events[0]))
+        self.assertEqual(set(payload_interventions[0]), set(fixture_interventions[0]))
+        self.assertEqual(set(api_fixture), {"api_version", "data", "error"})
+        self.assertEqual(
+            set(cast(dict[str, object], api_fixture["data"])),
+            {
+                "resources",
+                "compare_resources",
+                "cli_source_of_truth",
+                "artifact_schema_version",
+                "persistence",
+            },
+        )
+        self.assertEqual(
+            cast(dict[str, object], api_fixture["data"])["resources"],
+            [
+                "/api/v1/meta",
+                "/api/v1/runs",
+                "/api/v1/runs/{run_id}",
+                "/api/v1/compare?left_run_id=<id>&right_run_id=<id>",
+            ],
+        )
+
     def test_filter_scored_event_details_applies_thresholds_and_limit(self) -> None:
         scored_events = [
             {
