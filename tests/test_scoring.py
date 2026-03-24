@@ -126,9 +126,17 @@ class ScoringTests(unittest.TestCase):
         moderately_ambiguous_scored = score_event(moderately_ambiguous_event)
         near_tie_scored = score_event(near_tie_event)
 
+        self.assertEqual(moderately_ambiguous_scored.field_attraction, 6.88)
+        self.assertEqual(near_tie_scored.field_attraction, 6.58)
         self.assertGreater(
             moderately_ambiguous_scored.field_attraction,
             near_tie_scored.field_attraction,
+        )
+        self.assertAlmostEqual(
+            moderately_ambiguous_scored.field_attraction
+            - near_tie_scored.field_attraction,
+            0.3,
+            places=2,
         )
         self.assertEqual(
             moderately_ambiguous_scored.impact_score,
@@ -524,9 +532,12 @@ class ScoringTests(unittest.TestCase):
         diffuse_scored = score_event(diffuse_three_field_event)
 
         self.assertEqual(clearer_scored.impact_score, diffuse_scored.impact_score)
-        self.assertGreaterEqual(
+        self.assertEqual(clearer_scored.field_attraction, 7.13)
+        self.assertEqual(diffuse_scored.field_attraction, 6.84)
+        self.assertAlmostEqual(
             clearer_scored.field_attraction - diffuse_scored.field_attraction,
-            0.25,
+            0.29,
+            places=2,
         )
         self.assertGreater(
             clearer_scored.divergence_score, diffuse_scored.divergence_score
@@ -576,8 +587,15 @@ class ScoringTests(unittest.TestCase):
         self.assertEqual(
             threshold_scored.impact_score, above_threshold_scored.impact_score
         )
+        self.assertEqual(threshold_scored.field_attraction, 7.0)
+        self.assertEqual(above_threshold_scored.field_attraction, 6.99)
         self.assertGreater(
             threshold_scored.field_attraction, above_threshold_scored.field_attraction
+        )
+        self.assertAlmostEqual(
+            threshold_scored.field_attraction - above_threshold_scored.field_attraction,
+            0.01,
+            places=2,
         )
         self.assertGreater(
             threshold_scored.divergence_score, above_threshold_scored.divergence_score
