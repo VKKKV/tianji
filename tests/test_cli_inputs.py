@@ -8,6 +8,10 @@ from tianji.daemon import create_server
 
 
 class CliInputTests(unittest.TestCase):
+    def test_support_imports_expose_cli_main_and_storage_module_facades(self) -> None:
+        self.assertIs(main, __import__("tianji.cli", fromlist=["main"]).main)
+        self.assertIs(storage, __import__("tianji", fromlist=["storage"]).storage)
+
     def test_top_level_help_separates_sync_run_and_daemon_controls(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -20,6 +24,30 @@ class CliInputTests(unittest.TestCase):
         self.assertIn(
             "Synchronous one-shot runs plus thin local daemon controls.", help_text
         )
+        self.assertIn("Usage:", help_text)
+
+    def test_run_help_returns_zero_and_keeps_usage_surface(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["run", "--help"])
+
+        self.assertEqual(exit_code, 0)
+        help_text = stdout.getvalue()
+        self.assertIn("Usage:", help_text)
+        self.assertIn("--fixture", help_text)
+        self.assertIn("--fetch", help_text)
+        self.assertIn("--source-config", help_text)
+
+    def test_run_without_input_exits_with_usage_error_on_stderr(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as context:
+                main(["run"])
+
+        self.assertEqual(context.exception.code, 2)
+        error_text = stderr.getvalue()
+        self.assertIn("Usage:", error_text)
+        self.assertIn("Provide at least one --fixture", error_text)
 
     def test_daemon_help_separates_sync_run_from_daemon_controls(self) -> None:
         stdout = io.StringIO()
@@ -168,7 +196,7 @@ class CliInputTests(unittest.TestCase):
             self.addCleanup(lambda: socket_path.unlink(missing_ok=True))
 
             stdout = io.StringIO()
-            with mock.patch("tianji.cli.time.sleep") as sleep_mock:
+            with mock.patch("tianji.cli_daemon.time.sleep") as sleep_mock:
                 with contextlib.redirect_stdout(stdout):
                     exit_code = main(
                         [
