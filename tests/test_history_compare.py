@@ -229,6 +229,158 @@ class HistoryCompareTests(unittest.TestCase):
             )
             self.assertEqual(payload["diff"]["right_only_intervention_event_ids"], [])
 
+    def test_storage_compare_runs_persistence_baseline_keeps_compare_shape(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            empty_feed = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0"><channel><title>Empty TianJi Feed</title></channel></rss>
+    """
+            empty_fixture = Path(tmpdir) / "empty.xml"
+            empty_fixture.write_text(empty_feed, encoding="utf-8")
+            run_pipeline(
+                fixture_paths=[str(empty_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            payload = storage.compare_runs(
+                sqlite_path=str(sqlite_path),
+                left_run_id=1,
+                right_run_id=2,
+            )
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(
+            set(payload),
+            {"left_run_id", "right_run_id", "left", "right", "diff"},
+        )
+        self.assertEqual(
+            set(cast(dict[str, object], payload["left"])),
+            {
+                "run_id",
+                "schema_version",
+                "mode",
+                "raw_item_count",
+                "normalized_event_count",
+                "dominant_field",
+                "risk_level",
+                "headline",
+                "event_group_count",
+                "event_group_headline_event_ids",
+                "top_event_group",
+                "top_scored_event",
+                "top_intervention",
+                "intervention_event_ids",
+            },
+        )
+        self.assertTrue(
+            {
+                "raw_item_count_delta",
+                "normalized_event_count_delta",
+                "event_group_count_delta",
+                "dominant_field_changed",
+                "risk_level_changed",
+                "top_scored_event_changed",
+                "top_event_group_evidence_diff",
+            }.issubset(cast(dict[str, object], payload["diff"]))
+        )
+
+    def test_cli_history_compare_presets_keep_same_top_level_vocabulary(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            first_empty = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0"><channel><title>First Empty Feed</title></channel></rss>
+    """
+            second_empty = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0"><channel><title>Second Empty Feed</title></channel></rss>
+    """
+            first_fixture = Path(tmpdir) / "first-empty.xml"
+            second_fixture = Path(tmpdir) / "second-empty.xml"
+            first_fixture.write_text(first_empty, encoding="utf-8")
+            second_fixture.write_text(second_empty, encoding="utf-8")
+            run_pipeline(
+                fixture_paths=[str(first_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+            run_pipeline(
+                fixture_paths=[str(second_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            explicit_stdout = io.StringIO()
+            with contextlib.redirect_stdout(explicit_stdout):
+                exit_code = main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--left-run-id",
+                        "1",
+                        "--right-run-id",
+                        "2",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            explicit_payload = json.loads(explicit_stdout.getvalue())
+
+            latest_pair_stdout = io.StringIO()
+            with contextlib.redirect_stdout(latest_pair_stdout):
+                exit_code = main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--latest-pair",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            latest_pair_payload = json.loads(latest_pair_stdout.getvalue())
+
+            previous_stdout = io.StringIO()
+            with contextlib.redirect_stdout(previous_stdout):
+                exit_code = main(
+                    [
+                        "history-compare",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--run-id",
+                        "3",
+                        "--against-previous",
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            previous_payload = json.loads(previous_stdout.getvalue())
+
+        self.assertEqual(set(explicit_payload), set(latest_pair_payload))
+        self.assertEqual(set(explicit_payload), set(previous_payload))
+
     def test_cli_history_compare_rejects_non_positive_run_id(self) -> None:
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):

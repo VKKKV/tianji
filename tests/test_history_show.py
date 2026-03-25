@@ -257,6 +257,119 @@ class HistoryShowTests(unittest.TestCase):
                 "capability-control",
             )
 
+    def test_storage_get_run_summary_persistence_baseline_keeps_detail_shape(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            payload = storage.get_run_summary(sqlite_path=str(sqlite_path), run_id=1)
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(
+            set(payload),
+            {
+                "run_id",
+                "schema_version",
+                "mode",
+                "generated_at",
+                "input_summary",
+                "scenario_summary",
+                "scored_events",
+                "intervention_candidates",
+            },
+        )
+        self.assertEqual(
+            set(cast(dict[str, object], payload["input_summary"])),
+            {
+                "raw_item_count",
+                "normalized_event_count",
+                "sources",
+                "fetch_policy",
+                "source_fetch_details",
+            },
+        )
+        self.assertTrue(
+            {
+                "dominant_field",
+                "top_actors",
+                "top_regions",
+                "risk_level",
+                "headline",
+                "event_groups",
+            }.issubset(cast(dict[str, object], payload["scenario_summary"]))
+        )
+
+    def test_cli_history_show_previous_and_next_keep_same_detail_vocabulary(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            empty_feed = """<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0"><channel><title>Empty TianJi Feed</title></channel></rss>
+    """
+            empty_fixture = Path(tmpdir) / "empty.xml"
+            empty_fixture.write_text(empty_feed, encoding="utf-8")
+            run_pipeline(
+                fixture_paths=[str(empty_fixture)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            previous_stdout = io.StringIO()
+            with contextlib.redirect_stdout(previous_stdout):
+                exit_code = main(
+                    [
+                        "history-show",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--run-id",
+                        "2",
+                        "--previous",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            previous_payload = json.loads(previous_stdout.getvalue())
+
+            next_stdout = io.StringIO()
+            with contextlib.redirect_stdout(next_stdout):
+                exit_code = main(
+                    [
+                        "history-show",
+                        "--sqlite-path",
+                        str(sqlite_path),
+                        "--run-id",
+                        "1",
+                        "--next",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            next_payload = json.loads(next_stdout.getvalue())
+
+        self.assertEqual(previous_payload["run_id"], 1)
+        self.assertEqual(next_payload["run_id"], 2)
+        self.assertEqual(set(previous_payload), set(next_payload))
+
     def test_cli_history_show_filters_scored_events_by_scores_and_field(self) -> None:
         with TemporaryDirectory() as tmpdir:
             sqlite_path = Path(tmpdir) / "tianji.sqlite3"

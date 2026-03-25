@@ -127,6 +127,48 @@ class HistoryListTests(unittest.TestCase):
             self.assertGreater(cast(float, payload[0]["top_field_attraction"]), 0.0)
             self.assertGreater(cast(float, payload[0]["top_divergence_score"]), 0.0)
 
+    def test_storage_list_runs_persistence_baseline_keeps_public_summary_shape(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            run_pipeline(
+                fixture_paths=[str(FIXTURE_PATH)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            payload = storage.list_runs(sqlite_path=str(sqlite_path))
+
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(
+            set(payload[0]),
+            {
+                "run_id",
+                "schema_version",
+                "mode",
+                "generated_at",
+                "raw_item_count",
+                "normalized_event_count",
+                "dominant_field",
+                "risk_level",
+                "headline",
+                "event_group_count",
+                "top_event_group_headline_event_id",
+                "top_event_group_dominant_field",
+                "top_event_group_member_count",
+                "top_scored_event_id",
+                "top_scored_event_dominant_field",
+                "top_impact_score",
+                "top_field_attraction",
+                "top_divergence_score",
+            },
+        )
+        self.assertEqual(payload[0]["run_id"], 1)
+        self.assertEqual(payload[0]["schema_version"], "tianji.run-artifact.v1")
+
     def test_cli_history_lists_no_group_fields_for_runs_without_groups(self) -> None:
         with TemporaryDirectory() as tmpdir:
             sqlite_path = Path(tmpdir) / "tianji.sqlite3"
