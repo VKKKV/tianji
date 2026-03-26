@@ -1,8 +1,8 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-03-22
-**Commit:** c45b73b
-**Branch:** feat/one-shot-mvp
+**Generated:** 2026-03-26
+**Commit:** 155633a
+**Branch:** main
 
 ## OVERVIEW
 TianJi currently ships a terminal-first local stack: synchronous CLI writes for one-shot `fetch -> normalize -> score -> backtrack -> emit` runs, SQLite-backed history reads, a read-only Rich TUI, a thin local daemon for bounded queueing and status, a loopback read-first HTTP API, and an optional separate web UI. Upstream inspiration still matters historically, but the active workspace now centers on first-party TianJi source, tests, and docs only.

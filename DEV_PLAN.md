@@ -109,8 +109,6 @@ Deliverables:
 - idempotent dedupe and content-hash storage using explicit duplicate taxonomy terms: `entry_identity_hash`, `content_hash`, replayed fetch, and changed content under the same identity
 - one run row per successful invocation, even when canonical source content is reused underneath that run-centric read model
 
-Current branch note:
-
 - the Phase 3 closure state is now shipped: the operator-surface fetch policy contract is formalized in CLI/docs, persistence uses content-hash storage through `source_items`, and each successful invocation still writes one run row even when canonical content is reused
 - duplicate taxonomy wording now matches the implemented storage seam instead of describing future-only terminology
 
@@ -237,8 +235,6 @@ Deliverables:
 - local command API over UNIX domain sockets or an equivalent local transport
 - job execution for on-demand and scheduled runs
 - status inspection from CLI
-
-Current branch note:
 
 - Phase 6 now has a thin shipped CLI control surface over the Task 11 UNIX socket backend: `tianji daemon start`, `status`, `stop`, `run`, and `schedule`
 - synchronous `tianji run` remains the source-of-truth direct write path for one immediate pipeline invocation
