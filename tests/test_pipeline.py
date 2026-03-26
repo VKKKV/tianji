@@ -245,7 +245,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertTrue(sqlite_path.exists())
             self.assertEqual(artifact.input_summary["raw_item_count"], 3)
 
-            with sqlite3.connect(sqlite_path) as connection:
+            with contextlib.closing(sqlite3.connect(sqlite_path)) as connection:
                 run_count = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[
                     0
                 ]
@@ -298,7 +298,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 second_artifact.to_dict()["input_summary"],
             )
 
-            with sqlite3.connect(sqlite_path) as connection:
+            with contextlib.closing(sqlite3.connect(sqlite_path)) as connection:
                 run_count = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[
                     0
                 ]
@@ -354,7 +354,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                     sqlite_path=str(sqlite_path),
                 )
 
-                with sqlite3.connect(sqlite_path) as connection:
+                with contextlib.closing(sqlite3.connect(sqlite_path)) as connection:
                     run_count = connection.execute(
                         "SELECT COUNT(*) FROM runs"
                     ).fetchone()[0]
@@ -418,7 +418,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertEqual(fixture_artifact.input_summary["raw_item_count"], 3)
             self.assertEqual(fetch_artifact.input_summary["raw_item_count"], 3)
 
-            with sqlite3.connect(sqlite_path) as connection:
+            with contextlib.closing(sqlite3.connect(sqlite_path)) as connection:
                 run_count = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[
                     0
                 ]
@@ -482,7 +482,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 sqlite_path=str(sqlite_path),
             )
 
-            with sqlite3.connect(sqlite_path) as connection:
+            with contextlib.closing(sqlite3.connect(sqlite_path)) as connection:
                 run_count = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[
                     0
                 ]
@@ -569,7 +569,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 intervention_candidates=interventions,
             )
 
-            with sqlite3.connect(sqlite_path) as connection:
+            with contextlib.closing(sqlite3.connect(sqlite_path)) as connection:
                 canonical_count = connection.execute(
                     "SELECT COUNT(*) FROM source_items"
                 ).fetchone()[0]
@@ -633,7 +633,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 sqlite_path=str(sqlite_path),
             )
 
-            with sqlite3.connect(sqlite_path) as connection:
+            with contextlib.closing(sqlite3.connect(sqlite_path)) as connection:
                 run_count = connection.execute("SELECT COUNT(*) FROM runs").fetchone()[
                     0
                 ]
