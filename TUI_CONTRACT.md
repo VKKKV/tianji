@@ -37,7 +37,7 @@ Current shipped behavior, as implemented in `tianji/tui.py` and dispatched from 
 - browse a persisted run list
 - open a persisted detail panel
 - stage a left run for comparison, then browse a compare panel against a selected right run
-- move through runs with keyboard-first navigation
+- move through persisted runs with keyboard-first navigation backed by storage read semantics
 - keep compare staging visible in TUI state
 - treat storage-backed read payloads as the semantic source of truth
 
@@ -164,7 +164,7 @@ Stable root payload:
 
 Stable detail behaviors:
 
-- latest / previous / next navigation is part of the contract
+- latest / previous / next navigation is storage-backed persisted-run navigation, not merely movement inside the current loaded list window
 - `scenario_summary` remains persisted truth even when projected lists narrow
 - scored-event filtering and event-group filtering are independent
 - `only_matching_interventions` aligns interventions to the final visible
@@ -194,6 +194,12 @@ Stable compare selection modes:
 
 These presets remain mutually exclusive.
 
+Stable compare navigation behavior:
+
+- staged compare selection stays read-only and storage-backed
+- compare target stepping resolves against persisted previous/next run semantics, not merely the currently loaded list window
+- compare-target stepping skips the staged left run until it finds a valid persisted right-hand target or reaches a true persisted boundary
+
 ## Lens and Projection Semantics
 
 The shipped TUI already exposes shared in-TUI projection controls for the
@@ -214,9 +220,9 @@ Shipped shared lens controls:
 
 Explicitly deferred from this slice:
 
-- numeric threshold entry for `min_impact_score` / `max_impact_score`
-- numeric threshold entry for `min_field_attraction` / `max_field_attraction`
-- numeric threshold entry for `min_divergence_score` / `max_divergence_score`
+- direct numeric score-window entry for `min_impact_score` / `max_impact_score`
+- direct numeric score-window entry for `min_field_attraction` / `max_field_attraction`
+- direct numeric score-window entry for `min_divergence_score` / `max_divergence_score`
 
 ### Event-group lens
 
@@ -275,8 +281,8 @@ Minimum state:
 
 The current implementation already carries these ideas in state, including a visible staged left compare run before compare activation.
 
-The remaining Phase 5 work is to make previous/next run movement and compare
-target stepping fully honor persisted-run semantics beyond the currently loaded
+The remaining Phase 5 work is to keep previous/next run movement and compare
+target stepping aligned with persisted-run semantics beyond the currently loaded
 list window, keep input handling separate from render formatting, and harden
 verification around the shipped shared lenses instead of adding those lenses.
 
@@ -292,14 +298,9 @@ Minimum Vim-style navigation intent:
 
 Shipped navigation parity requirement:
 
-- previous / next stepping from a persisted run from detail view should resolve
-  against SQLite-backed previous/next run semantics, even when that adjacent run
-  falls outside the currently loaded list window
-- compare-target stepping should follow the same persisted previous/next run
-  semantics, skipping the staged left run when needed rather than falling back
-  to local row-only stepping
-- first/last persisted boundaries should surface explicit navigation errors
-  instead of silently stopping at the current list window edge
+- previous / next stepping from detail view resolves against SQLite-backed persisted previous/next run semantics, even when the adjacent run falls outside the currently loaded list window
+- compare-target stepping resolves against the same persisted previous/next run semantics, skipping the staged left run until a valid right-hand target exists or a true persisted boundary is reached
+- first/last persisted boundaries surface explicit navigation errors instead of silently stopping at the current list window edge
 
 ## Empty and Error States
 

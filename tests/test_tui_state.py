@@ -196,6 +196,147 @@ class TuiStateTests(unittest.TestCase):
         self.assertEqual(state.message, "last compare target")
         self.assertEqual(len(mock_get_next_run_id.call_args_list), 2)
 
+    @mock.patch(
+        "tianji.tui_state.get_previous_run_id",
+        side_effect=sqlite3.OperationalError("db unavailable"),
+    )
+    def test_step_run_uses_loaded_row_fallback_only_on_operational_error(
+        self, mock_get_previous_run_id
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 30}, {"run_id": 20}, {"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=1,
+            focused_pane="detail",
+            cached_detail_run_id=20,
+            cached_detail_lines=["detail"],
+        )
+
+        state.step_run(-1, page_size=3)
+
+        self.assertEqual(state.selected_index, 2)
+        self.assertEqual(state.current_run_id(), 10)
+        self.assertIsNone(state.cached_detail_run_id)
+        self.assertIsNone(state.cached_detail_lines)
+        self.assertIsNone(state.message)
+        mock_get_previous_run_id.assert_called_once_with(
+            sqlite_path="dummy.sqlite3", run_id=20
+        )
+
+    @mock.patch("tianji.tui_state.get_next_run_id", return_value=None)
+    def test_step_run_does_not_fallback_to_loaded_rows_on_true_persisted_boundary(
+        self, mock_get_next_run_id
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 20}, {"run_id": 10}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+            focused_pane="detail",
+            cached_detail_run_id=20,
+            cached_detail_lines=["detail"],
+        )
+
+        state.step_run(1, page_size=2)
+
+        self.assertEqual(state.selected_index, 0)
+        self.assertEqual(state.current_run_id(), 20)
+        self.assertEqual(state.message, "last run")
+        self.assertEqual(state.cached_detail_run_id, 20)
+        self.assertEqual(state.cached_detail_lines, ["detail"])
+        mock_get_next_run_id.assert_called_once_with(
+            sqlite_path="dummy.sqlite3", run_id=20
+        )
+
+    @mock.patch("tianji.tui_state.get_next_run_id", side_effect=[20, 30])
+    def test_step_compare_target_skips_staged_left_when_stepping_next(
+        self, mock_get_next_run_id
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}, {"run_id": 30}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+            staged_compare_left_run_id=20,
+            active_view="compare",
+            focused_pane="compare",
+            cached_compare_right_run_id=10,
+            cached_compare_lines=["compare"],
+        )
+
+        state.step_compare_target(1, page_size=3)
+
+        self.assertEqual(state.selected_index, 2)
+        self.assertEqual(state.current_run_id(), 30)
+        self.assertIsNone(state.cached_compare_right_run_id)
+        self.assertIsNone(state.cached_compare_lines)
+        self.assertIsNone(state.message)
+        self.assertEqual(
+            mock_get_next_run_id.call_args_list,
+            [
+                mock.call(sqlite_path="dummy.sqlite3", run_id=10),
+                mock.call(sqlite_path="dummy.sqlite3", run_id=20),
+            ],
+        )
+
+    @mock.patch("tianji.tui_state.get_previous_run_id", side_effect=[20, None])
+    def test_step_compare_target_reports_first_boundary_after_skipping_staged_left(
+        self, mock_get_previous_run_id
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 30}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+            staged_compare_left_run_id=20,
+            active_view="compare",
+            focused_pane="compare",
+            cached_compare_right_run_id=30,
+            cached_compare_lines=["compare"],
+        )
+
+        state.step_compare_target(-1, page_size=2)
+
+        self.assertEqual(state.selected_index, 0)
+        self.assertEqual(state.current_run_id(), 30)
+        self.assertEqual(state.message, "first compare target")
+        self.assertEqual(state.cached_compare_right_run_id, 30)
+        self.assertEqual(state.cached_compare_lines, ["compare"])
+        self.assertEqual(
+            mock_get_previous_run_id.call_args_list,
+            [
+                mock.call(sqlite_path="dummy.sqlite3", run_id=30),
+                mock.call(sqlite_path="dummy.sqlite3", run_id=20),
+            ],
+        )
+
+    @mock.patch("tianji.tui_state.get_next_run_id", side_effect=[20, None])
+    def test_step_compare_target_reports_last_boundary_after_skipping_staged_left(
+        self, mock_get_next_run_id
+    ) -> None:
+        state = HistoryListState(
+            rows=[{"run_id": 10}, {"run_id": 20}],
+            sqlite_path="dummy.sqlite3",
+            selected_index=0,
+            staged_compare_left_run_id=20,
+            active_view="compare",
+            focused_pane="compare",
+            cached_compare_right_run_id=10,
+            cached_compare_lines=["compare"],
+        )
+
+        state.step_compare_target(1, page_size=2)
+
+        self.assertEqual(state.selected_index, 0)
+        self.assertEqual(state.current_run_id(), 10)
+        self.assertEqual(state.message, "last compare target")
+        self.assertEqual(state.cached_compare_right_run_id, 10)
+        self.assertEqual(state.cached_compare_lines, ["compare"])
+        self.assertEqual(
+            mock_get_next_run_id.call_args_list,
+            [
+                mock.call(sqlite_path="dummy.sqlite3", run_id=10),
+                mock.call(sqlite_path="dummy.sqlite3", run_id=20),
+            ],
+        )
+
     @mock.patch("tianji.tui_state.get_previous_run_id", side_effect=[20, 10])
     def test_step_compare_target_skips_staged_left_when_stepping_previous(
         self, mock_get_previous_run_id

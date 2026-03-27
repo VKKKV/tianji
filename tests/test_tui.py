@@ -972,6 +972,354 @@ class TuiIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(len(mock_get_next_run_id.call_args_list), 2)
 
+    @mock.patch("tianji.tui_render.compare_runs")
+    @mock.patch(
+        "tianji.tui_render.get_run_summary",
+        side_effect=lambda *args, **kwargs: {
+            10: {
+                "run_id": 10,
+                "generated_at": "2026-03-22T10:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+                "scenario_summary": {
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "headline": "Loaded run before persisted navigation.",
+                    "event_groups": [],
+                },
+                "scored_events": [
+                    {
+                        "title": "Loaded run event.",
+                        "dominant_field": "technology",
+                        "impact_score": 14.0,
+                        "field_attraction": 7.0,
+                        "divergence_score": 19.0,
+                    }
+                ],
+                "intervention_candidates": [],
+            },
+            30: {
+                "run_id": 30,
+                "generated_at": "2026-03-22T12:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 3, "normalized_event_count": 2},
+                "scenario_summary": {
+                    "dominant_field": "economy",
+                    "risk_level": "low",
+                    "headline": "Loaded compare target before compare focus.",
+                    "event_groups": [],
+                },
+                "scored_events": [
+                    {
+                        "title": "Loaded compare target event.",
+                        "dominant_field": "economy",
+                        "impact_score": 9.0,
+                        "field_attraction": 5.0,
+                        "divergence_score": 11.0,
+                    }
+                ],
+                "intervention_candidates": [],
+            },
+            3: {
+                "run_id": 3,
+                "generated_at": "2026-03-22T09:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
+                "scenario_summary": {
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "headline": "Persisted previous run outside the loaded limit.",
+                    "event_groups": [],
+                },
+                "scored_events": [
+                    {
+                        "title": "Persisted previous event.",
+                        "dominant_field": "technology",
+                        "impact_score": 12.0,
+                        "field_attraction": 6.0,
+                        "divergence_score": 18.0,
+                    }
+                ],
+                "intervention_candidates": [],
+            },
+            20: {
+                "run_id": 20,
+                "generated_at": "2026-03-22T11:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 4, "normalized_event_count": 4},
+                "scenario_summary": {
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "headline": "Projected empty detail still shows persisted truth.",
+                    "event_groups": [],
+                },
+                "scored_events": [],
+                "intervention_candidates": [],
+            },
+        }[kwargs["run_id"]],
+    )
+    @mock.patch(
+        "tianji.tui_state.get_run_summary",
+        side_effect=lambda *args, **kwargs: {
+            10: {
+                "run_id": 10,
+                "generated_at": "2026-03-22T10:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 3, "normalized_event_count": 3},
+                "scenario_summary": {
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "headline": "Loaded run before persisted navigation.",
+                    "event_groups": [],
+                },
+                "scored_events": [
+                    {
+                        "title": "Loaded run event.",
+                        "dominant_field": "technology",
+                        "impact_score": 14.0,
+                        "field_attraction": 7.0,
+                        "divergence_score": 19.0,
+                    }
+                ],
+                "intervention_candidates": [],
+            },
+            30: {
+                "run_id": 30,
+                "generated_at": "2026-03-22T12:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 3, "normalized_event_count": 2},
+                "scenario_summary": {
+                    "dominant_field": "economy",
+                    "risk_level": "low",
+                    "headline": "Loaded compare target before compare focus.",
+                    "event_groups": [],
+                },
+                "scored_events": [
+                    {
+                        "title": "Loaded compare target event.",
+                        "dominant_field": "economy",
+                        "impact_score": 9.0,
+                        "field_attraction": 5.0,
+                        "divergence_score": 11.0,
+                    }
+                ],
+                "intervention_candidates": [],
+            },
+            3: {
+                "run_id": 3,
+                "generated_at": "2026-03-22T09:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
+                "scenario_summary": {
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "headline": "Persisted previous run outside the loaded limit.",
+                    "event_groups": [],
+                },
+                "scored_events": [
+                    {
+                        "title": "Persisted previous event.",
+                        "dominant_field": "technology",
+                        "impact_score": 12.0,
+                        "field_attraction": 6.0,
+                        "divergence_score": 18.0,
+                    }
+                ],
+                "intervention_candidates": [],
+            },
+            20: {
+                "run_id": 20,
+                "generated_at": "2026-03-22T11:00:00+00:00",
+                "mode": "fixture",
+                "input_summary": {"raw_item_count": 4, "normalized_event_count": 4},
+                "scenario_summary": {
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "headline": "Projected empty detail still shows persisted truth.",
+                    "event_groups": [],
+                },
+                "scored_events": [],
+                "intervention_candidates": [],
+            },
+        }[kwargs["run_id"]],
+    )
+    @mock.patch("tianji.tui_state.get_next_run_id", side_effect=[20, 30, None])
+    @mock.patch("tianji.tui_state.get_previous_run_id", side_effect=[3, None])
+    def test_run_history_browser_session_preserves_persisted_navigation_parity_across_detail_and_compare_flows(
+        self,
+        mock_get_previous_run_id,
+        mock_get_next_run_id,
+        mock_get_state_run_summary,
+        mock_get_render_run_summary,
+        mock_compare_runs,
+    ) -> None:
+        compare_run_20 = {
+            "left": {
+                "run_id": 10,
+                "mode": "fixture",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "Left persisted truth.",
+                "top_event_group": {"dominant_field": "technology", "member_count": 2},
+                "top_scored_event": {
+                    "dominant_field": "technology",
+                    "divergence_score": 19.0,
+                    "impact_score": 14.0,
+                },
+                "top_intervention": {
+                    "target": "tech-sector",
+                    "intervention_type": "monitor",
+                },
+                "event_group_count": 1,
+                "intervention_event_ids": ["evt-10"],
+            },
+            "right": {
+                "run_id": 20,
+                "mode": "fixture",
+                "dominant_field": "diplomacy",
+                "risk_level": "medium",
+                "headline": "Right projected-empty compare target.",
+                "top_event_group": None,
+                "top_scored_event": None,
+                "top_intervention": None,
+                "event_group_count": 0,
+                "intervention_event_ids": [],
+            },
+            "diff": {
+                "dominant_field_changed": True,
+                "risk_level_changed": True,
+                "raw_item_count_delta": 1,
+                "normalized_event_count_delta": 1,
+                "event_group_count_delta": -1,
+                "top_event_group_changed": True,
+                "top_event_group_evidence_diff": {
+                    "comparable": False,
+                    "member_count_delta": -2,
+                    "evidence_chain_link_count_delta": 0,
+                    "right_only_member_event_ids": [],
+                    "left_only_member_event_ids": ["evt-10"],
+                    "shared_keywords_added": [],
+                    "shared_keywords_removed": [],
+                    "chain_summary_changed": False,
+                },
+                "top_scored_event_changed": True,
+                "top_scored_event_comparable": False,
+                "top_divergence_score_delta": None,
+                "top_impact_score_delta": None,
+                "top_field_attraction_delta": None,
+                "top_intervention_changed": True,
+            },
+        }
+        compare_run_30 = {
+            "left": compare_run_20["left"],
+            "right": {
+                "run_id": 30,
+                "mode": "fixture",
+                "dominant_field": "economy",
+                "risk_level": "low",
+                "headline": "Right compare target after persisted skip.",
+                "top_event_group": {"dominant_field": "economy", "member_count": 1},
+                "top_scored_event": {
+                    "dominant_field": "economy",
+                    "divergence_score": 11.0,
+                    "impact_score": 9.0,
+                },
+                "top_intervention": {
+                    "target": "market",
+                    "intervention_type": "observe",
+                },
+                "event_group_count": 1,
+                "intervention_event_ids": ["evt-30"],
+            },
+            "diff": {
+                "dominant_field_changed": True,
+                "risk_level_changed": True,
+                "raw_item_count_delta": -1,
+                "normalized_event_count_delta": -1,
+                "event_group_count_delta": 0,
+                "top_event_group_changed": True,
+                "top_event_group_evidence_diff": {
+                    "comparable": False,
+                    "member_count_delta": -1,
+                    "evidence_chain_link_count_delta": 0,
+                    "right_only_member_event_ids": ["evt-30"],
+                    "left_only_member_event_ids": ["evt-10"],
+                    "shared_keywords_added": [],
+                    "shared_keywords_removed": [],
+                    "chain_summary_changed": False,
+                },
+                "top_scored_event_changed": True,
+                "top_scored_event_comparable": False,
+                "top_divergence_score_delta": None,
+                "top_impact_score_delta": None,
+                "top_field_attraction_delta": None,
+                "top_intervention_changed": True,
+            },
+        }
+
+        def compare_side_effect(*args: object, **kwargs: object) -> dict[str, object]:
+            right_run_id = kwargs.get("right_run_id")
+            if right_run_id == 20:
+                return cast(dict[str, object], compare_run_20)
+            if right_run_id == 30:
+                return cast(dict[str, object], compare_run_30)
+            raise AssertionError(f"unexpected compare target: {right_run_id}")
+
+        mock_compare_runs.side_effect = compare_side_effect
+
+        state = HistoryListState(
+            rows=[
+                {
+                    "run_id": 10,
+                    "generated_at": "2026-03-22T10:00",
+                    "mode": "fixture",
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "top_divergence_score": 19.0,
+                    "headline": "Run ten headline.",
+                },
+                {
+                    "run_id": 20,
+                    "generated_at": "2026-03-22T11:00",
+                    "mode": "fixture",
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "top_divergence_score": 13.0,
+                    "headline": "Run twenty headline.",
+                },
+                {
+                    "run_id": 30,
+                    "generated_at": "2026-03-22T12:00",
+                    "mode": "fixture",
+                    "dominant_field": "economy",
+                    "risk_level": "low",
+                    "top_divergence_score": 11.0,
+                    "headline": "Run thirty headline.",
+                },
+            ],
+            sqlite_path="dummy.sqlite3",
+        )
+
+        frames = self._run_browser_session(
+            state,
+            ["l", "[", "[", "j", "l", "a", "h", "j", "c", "]", "]", "q"],
+            height=50,
+        )
+
+        self.assertEqual(
+            sorted([cast(int, row["run_id"]) for row in state.rows]), [3, 20, 30]
+        )
+        self.assertEqual(cast(int, state.rows[state.selected_index]["run_id"]), 30)
+        self.assertEqual(state.dominant_field, "conflict")
+        self.assertEqual(mock_get_previous_run_id.call_count, 2)
+        self.assertGreaterEqual(mock_get_next_run_id.call_count, 2)
+        self.assertGreaterEqual(mock_get_render_run_summary.call_count, 2)
+
+        messages = {frame["message"].strip() for frame in frames}
+        self.assertIn("first run", messages)
+        self.assertNotIn("first compare target", messages)
+        self.assertIn("lens:ev=conflict", frames[-1]["header"])
+
     @mock.patch(
         "tianji.tui_render.get_run_summary",
         return_value={

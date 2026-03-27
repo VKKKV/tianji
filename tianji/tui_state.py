@@ -366,13 +366,41 @@ class HistoryListState:
             self.scroll_offset = 0
             self.invalidate_projected_panes()
             return
-        next_index = min(max(self.selected_index + delta, 0), len(self.rows) - 1)
+
+        current_run_id = self.current_run_id()
+        if current_run_id is None:
+            next_index = self.selected_index
+        else:
+            target_run_id = self._step_loaded_run_id(current_run_id, delta)
+            next_index = (
+                self._find_loaded_run_index(target_run_id)
+                if target_run_id is not None
+                else self.selected_index
+            )
+            if next_index is None:
+                next_index = self.selected_index
+
         if next_index == self.selected_index and delta != 0:
             self.message = "first run" if delta < 0 else "last run"
         elif next_index != self.selected_index:
             self.selected_index = next_index
             self.invalidate_projected_panes()
         self.ensure_selection_visible(page_size=page_size)
+
+    def _step_loaded_run_id(self, run_id: int, delta: int) -> int | None:
+        loaded_run_ids = [coerce_int(row.get("run_id")) for row in self.rows]
+        comparable_run_ids = [
+            candidate for candidate in loaded_run_ids if candidate is not None
+        ]
+        if run_id not in comparable_run_ids:
+            return None
+
+        sorted_run_ids = sorted(comparable_run_ids)
+        current_index = sorted_run_ids.index(run_id)
+        next_index = current_index + delta
+        if next_index < 0 or next_index >= len(sorted_run_ids):
+            return None
+        return sorted_run_ids[next_index]
 
     def _step_compare_target_in_loaded_rows(
         self, delta: int, *, page_size: int
