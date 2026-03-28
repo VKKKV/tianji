@@ -67,6 +67,7 @@ def run_history_browser_session(
         width = console.size.width
         page_size = max(height - 5, 1)
 
+        state.prepare_active_view_cache(width=width)
         layout = build_layout(state, height, width, page_size)
         live.update(layout, refresh=True)
 

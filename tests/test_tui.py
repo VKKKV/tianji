@@ -7,6 +7,7 @@ from tianji.tui import (
     run_history_browser_session,
     run_history_list_browser,
 )
+from tianji.tui_render import build_detail_panel
 from tianji.tui_state import HistoryListState
 
 
@@ -95,7 +96,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertIn("--limit must be zero or greater.", stderr.getvalue())
 
     @mock.patch(
-        "tianji.tui_render.get_run_summary",
+        "tianji.tui_state.get_run_summary",
         return_value={
             "run_id": 10,
             "generated_at": "2026-03-22T10:00:00+00:00",
@@ -112,7 +113,7 @@ class TuiIntegrationTests(unittest.TestCase):
         },
     )
     @mock.patch(
-        "tianji.tui_render.compare_runs",
+        "tianji.tui_state.compare_runs",
         return_value={
             "left": {
                 "run_id": 10,
@@ -207,7 +208,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(mock_compare_runs.call_count, 1)
 
     @mock.patch(
-        "tianji.tui_render.get_run_summary",
+        "tianji.tui_state.get_run_summary",
         side_effect=[
             {
                 "run_id": 10,
@@ -259,7 +260,7 @@ class TuiIntegrationTests(unittest.TestCase):
             },
         ],
     )
-    @mock.patch("tianji.tui_render.compare_runs")
+    @mock.patch("tianji.tui_state.compare_runs")
     @mock.patch("tianji.tui_state.get_next_run_id", side_effect=[20, 30])
     @mock.patch(
         "tianji.tui_state.get_previous_run_id",
@@ -441,55 +442,6 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertIn("lens:ev=conflict", frames[-1]["header"])
 
     @mock.patch(
-        "tianji.tui_render.get_run_summary",
-        side_effect=[
-            {
-                "run_id": 3,
-                "generated_at": "2026-03-22T09:00:00+00:00",
-                "mode": "fixture",
-                "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
-                "scenario_summary": {
-                    "dominant_field": "technology",
-                    "risk_level": "high",
-                    "headline": "Persisted previous run outside the loaded limit.",
-                    "event_groups": [],
-                },
-                "scored_events": [
-                    {
-                        "title": "Persisted previous event.",
-                        "dominant_field": "technology",
-                        "impact_score": 12.0,
-                        "field_attraction": 6.0,
-                        "divergence_score": 18.0,
-                    }
-                ],
-                "intervention_candidates": [],
-            },
-            {
-                "run_id": 3,
-                "generated_at": "2026-03-22T09:00:00+00:00",
-                "mode": "fixture",
-                "input_summary": {"raw_item_count": 2, "normalized_event_count": 1},
-                "scenario_summary": {
-                    "dominant_field": "technology",
-                    "risk_level": "high",
-                    "headline": "Persisted previous run outside the loaded limit.",
-                    "event_groups": [],
-                },
-                "scored_events": [
-                    {
-                        "title": "Persisted previous event.",
-                        "dominant_field": "technology",
-                        "impact_score": 12.0,
-                        "field_attraction": 6.0,
-                        "divergence_score": 18.0,
-                    }
-                ],
-                "intervention_candidates": [],
-            },
-        ],
-    )
-    @mock.patch(
         "tianji.tui_state.get_run_summary",
         return_value={
             "run_id": 3,
@@ -519,7 +471,6 @@ class TuiIntegrationTests(unittest.TestCase):
         self,
         mock_get_previous_run_id,
         mock_get_state_run_summary,
-        mock_get_render_run_summary,
     ) -> None:
         state = HistoryListState(
             rows=[
@@ -553,8 +504,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertEqual(state.selected_index, 1)
         self.assertIsNone(state.message)
         self.assertEqual(len(mock_get_previous_run_id.call_args_list), 2)
-        self.assertEqual(mock_get_state_run_summary.call_count, 1)
-        self.assertEqual(mock_get_render_run_summary.call_count, 2)
+        self.assertEqual(mock_get_state_run_summary.call_count, 3)
         detail_text = "\n".join(state.cached_detail_lines or [])
         self.assertIn("Run #3", detail_text)
         self.assertIn(
@@ -563,55 +513,6 @@ class TuiIntegrationTests(unittest.TestCase):
         )
         self.assertIn("first run", {frame["message"].strip() for frame in frames})
 
-    @mock.patch(
-        "tianji.tui_render.get_run_summary",
-        side_effect=[
-            {
-                "run_id": 100,
-                "generated_at": "2026-03-22T12:00:00+00:00",
-                "mode": "fixture",
-                "input_summary": {"raw_item_count": 3, "normalized_event_count": 2},
-                "scenario_summary": {
-                    "dominant_field": "technology",
-                    "risk_level": "high",
-                    "headline": "Persisted next run outside the loaded limit.",
-                    "event_groups": [],
-                },
-                "scored_events": [
-                    {
-                        "title": "Persisted next event.",
-                        "dominant_field": "technology",
-                        "impact_score": 13.0,
-                        "field_attraction": 7.0,
-                        "divergence_score": 19.0,
-                    }
-                ],
-                "intervention_candidates": [],
-            },
-            {
-                "run_id": 100,
-                "generated_at": "2026-03-22T12:00:00+00:00",
-                "mode": "fixture",
-                "input_summary": {"raw_item_count": 3, "normalized_event_count": 2},
-                "scenario_summary": {
-                    "dominant_field": "technology",
-                    "risk_level": "high",
-                    "headline": "Persisted next run outside the loaded limit.",
-                    "event_groups": [],
-                },
-                "scored_events": [
-                    {
-                        "title": "Persisted next event.",
-                        "dominant_field": "technology",
-                        "impact_score": 13.0,
-                        "field_attraction": 7.0,
-                        "divergence_score": 19.0,
-                    }
-                ],
-                "intervention_candidates": [],
-            },
-        ],
-    )
     @mock.patch(
         "tianji.tui_state.get_run_summary",
         return_value={
@@ -642,7 +543,6 @@ class TuiIntegrationTests(unittest.TestCase):
         self,
         mock_get_next_run_id,
         mock_get_state_run_summary,
-        mock_get_render_run_summary,
     ) -> None:
         state = HistoryListState(
             rows=[
@@ -676,8 +576,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertEqual(state.selected_index, 0)
         self.assertIsNone(state.message)
         self.assertEqual(len(mock_get_next_run_id.call_args_list), 2)
-        self.assertEqual(mock_get_state_run_summary.call_count, 1)
-        self.assertEqual(mock_get_render_run_summary.call_count, 2)
+        self.assertEqual(mock_get_state_run_summary.call_count, 3)
         detail_text = "\n".join(state.cached_detail_lines or [])
         self.assertIn("Run #100", detail_text)
         self.assertIn(
@@ -687,7 +586,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertIn("last run", {frame["message"].strip() for frame in frames})
 
     @mock.patch(
-        "tianji.tui_render.get_run_summary",
+        "tianji.tui_state.get_run_summary",
         return_value={
             "run_id": 20,
             "generated_at": "2026-03-22T11:00:00+00:00",
@@ -741,7 +640,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertIn("lens:ev=conflict", frames[-1]["header"])
 
     @mock.patch(
-        "tianji.tui_render.get_run_summary",
+        "tianji.tui_state.get_run_summary",
         return_value={
             "run_id": 10,
             "generated_at": "2026-03-22T10:00:00+00:00",
@@ -757,7 +656,7 @@ class TuiIntegrationTests(unittest.TestCase):
             "intervention_candidates": [],
         },
     )
-    @mock.patch("tianji.tui_render.compare_runs")
+    @mock.patch("tianji.tui_state.compare_runs")
     def test_run_history_browser_session_shows_projected_empty_compare_copy(
         self, mock_compare_runs, mock_get_run_summary
     ) -> None:
@@ -853,7 +752,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertIn("lens:ev=conflict", frames[-1]["header"])
         self.assertGreaterEqual(mock_get_run_summary.call_count, 1)
 
-    @mock.patch("tianji.tui_render.compare_runs")
+    @mock.patch("tianji.tui_state.compare_runs")
     @mock.patch("tianji.tui_state.get_next_run_id", side_effect=[20, None])
     def test_run_history_browser_session_reports_compare_boundary_without_selecting_staged_left(
         self, mock_get_next_run_id, mock_compare_runs
@@ -972,9 +871,9 @@ class TuiIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(len(mock_get_next_run_id.call_args_list), 2)
 
-    @mock.patch("tianji.tui_render.compare_runs")
+    @mock.patch("tianji.tui_state.compare_runs")
     @mock.patch(
-        "tianji.tui_render.get_run_summary",
+        "tianji.tui_state.get_run_summary",
         side_effect=lambda *args, **kwargs: {
             10: {
                 "run_id": 10,
@@ -1321,7 +1220,7 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertIn("lens:ev=conflict", frames[-1]["header"])
 
     @mock.patch(
-        "tianji.tui_render.get_run_summary",
+        "tianji.tui_state.get_run_summary",
         return_value={
             "run_id": 10,
             "generated_at": "2026-03-22T10:00:00+00:00",
@@ -1337,7 +1236,7 @@ class TuiIntegrationTests(unittest.TestCase):
             "intervention_candidates": [],
         },
     )
-    @mock.patch("tianji.tui_render.compare_runs")
+    @mock.patch("tianji.tui_state.compare_runs")
     def test_run_history_browser_session_recomputes_compare_after_clear_and_restage(
         self, mock_compare_runs, _mock_get_run_summary
     ) -> None:
@@ -1535,3 +1434,179 @@ class TuiIntegrationTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         browser_mock.assert_called_once()
         self.assertEqual(browser_mock.call_args.args[0].rows, rows)
+
+    def test_build_detail_panel_uses_prepared_cache_without_storage_or_cache_mutation(
+        self,
+    ) -> None:
+        state = HistoryListState(
+            rows=[
+                {
+                    "run_id": 10,
+                    "generated_at": "2026-03-22T10:00",
+                    "mode": "fixture",
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "top_divergence_score": 19.0,
+                    "headline": "Run ten headline.",
+                }
+            ],
+            sqlite_path="dummy.sqlite3",
+            focused_pane="detail",
+            cached_detail_run_id=10,
+            cached_detail_lens_key=(None, None, None, None, False),
+            cached_detail_lines=[
+                "Run #10",
+                "Prepared detail cache should render without storage access.",
+            ],
+            detail_scroll_offset=0,
+        )
+        original_cache_lines = list(cast(list[str], state.cached_detail_lines))
+
+        with mock.patch(
+            "tianji.tui_state.get_run_summary",
+            side_effect=AssertionError(
+                "render helper reached storage instead of using prepared detail cache"
+            ),
+        ):
+            panel = build_detail_panel(state, width=60, page_size=10)
+
+        self.assertEqual(
+            cast(Text, panel.renderable).plain,
+            "Run #10\nPrepared detail cache should render without storage access.",
+        )
+        self.assertEqual(state.cached_detail_lines, original_cache_lines)
+        self.assertEqual(state.cached_detail_run_id, 10)
+        self.assertEqual(
+            state.cached_detail_lens_key,
+            (None, None, None, None, False),
+        )
+        self.assertEqual(state.detail_scroll_offset, 0)
+
+    def test_build_detail_panel_does_not_refresh_stale_cache_inside_render_helper(
+        self,
+    ) -> None:
+        state = HistoryListState(
+            rows=[
+                {
+                    "run_id": 10,
+                    "generated_at": "2026-03-22T10:00",
+                    "mode": "fixture",
+                    "dominant_field": "technology",
+                    "risk_level": "high",
+                    "top_divergence_score": 19.0,
+                    "headline": "Run ten headline.",
+                }
+            ],
+            sqlite_path="dummy.sqlite3",
+            focused_pane="detail",
+            cached_detail_run_id=None,
+            cached_detail_lens_key=None,
+            cached_detail_lines=[
+                "Run #10",
+                "Previously prepared detail cache stays the visible truth.",
+            ],
+            detail_scroll_offset=0,
+        )
+
+        with mock.patch(
+            "tianji.tui_state.get_run_summary",
+            side_effect=AssertionError(
+                "render helper reached storage instead of delegating detail refresh"
+            ),
+        ):
+            panel = build_detail_panel(state, width=60, page_size=10)
+
+        self.assertEqual(
+            cast(Text, panel.renderable).plain,
+            "Run #10\nPreviously prepared detail cache stays the visible truth.",
+        )
+
+    def test_build_compare_panel_uses_prepared_cache_without_storage_or_cache_mutation(
+        self,
+    ) -> None:
+        state = HistoryListState(
+            rows=[
+                {
+                    "run_id": 20,
+                    "generated_at": "2026-03-22T11:00",
+                    "mode": "fixture",
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "top_divergence_score": 13.0,
+                    "headline": "Run twenty headline.",
+                }
+            ],
+            sqlite_path="dummy.sqlite3",
+            focused_pane="compare",
+            active_view="compare",
+            staged_compare_left_run_id=10,
+            cached_compare_right_run_id=20,
+            cached_compare_lens_key=(None, None, None, None, False),
+            cached_compare_lines=[
+                "Compare: Run #10 (Left) vs Run #20",
+                "Prepared compare cache should render without storage access.",
+            ],
+            detail_scroll_offset=0,
+        )
+        original_cache_lines = list(cast(list[str], state.cached_compare_lines))
+
+        with mock.patch(
+            "tianji.tui_state.compare_runs",
+            side_effect=AssertionError(
+                "render helper reached storage instead of using prepared compare cache"
+            ),
+        ):
+            panel = build_compare_panel(state, width=60, page_size=10)
+
+        self.assertEqual(
+            cast(Text, panel.renderable).plain,
+            "Compare: Run #10 (Left) vs Run #20\nPrepared compare cache should render without storage access.",
+        )
+        self.assertEqual(state.cached_compare_lines, original_cache_lines)
+        self.assertEqual(state.cached_compare_right_run_id, 20)
+        self.assertEqual(
+            state.cached_compare_lens_key,
+            (None, None, None, None, False),
+        )
+        self.assertEqual(state.detail_scroll_offset, 0)
+
+    def test_build_compare_panel_does_not_refresh_stale_cache_inside_render_helper(
+        self,
+    ) -> None:
+        state = HistoryListState(
+            rows=[
+                {
+                    "run_id": 20,
+                    "generated_at": "2026-03-22T11:00",
+                    "mode": "fixture",
+                    "dominant_field": "diplomacy",
+                    "risk_level": "medium",
+                    "top_divergence_score": 13.0,
+                    "headline": "Run twenty headline.",
+                }
+            ],
+            sqlite_path="dummy.sqlite3",
+            focused_pane="compare",
+            active_view="compare",
+            staged_compare_left_run_id=10,
+            cached_compare_right_run_id=None,
+            cached_compare_lens_key=None,
+            cached_compare_lines=[
+                "Compare: Run #10 (Left) vs Run #20",
+                "Previously prepared compare cache stays the visible truth.",
+            ],
+            detail_scroll_offset=0,
+        )
+
+        with mock.patch(
+            "tianji.tui_state.compare_runs",
+            side_effect=AssertionError(
+                "render helper reached storage instead of delegating compare refresh"
+            ),
+        ):
+            panel = build_compare_panel(state, width=60, page_size=10)
+
+        self.assertEqual(
+            cast(Text, panel.renderable).plain,
+            "Compare: Run #10 (Left) vs Run #20\nPreviously prepared compare cache stays the visible truth.",
+        )

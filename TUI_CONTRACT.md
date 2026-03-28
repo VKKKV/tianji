@@ -260,9 +260,11 @@ filtering, text entry, or any new storage semantics.
   - stored run-summary fields like `headline`, `dominant_field`, and
     `risk_level` still describe the persisted run itself
 
-Those projected lenses stay confined to detail and compare rendering. The
-persisted history list should continue to show storage-backed truth rather than
-a separately filtered list pane.
+Those projected lenses remain a read-time operator view over storage-backed
+truth. Storage and CLI semantics stay authoritative, projection and cache
+preparation shape detail and compare payloads before render formatting, and the
+history list continues to show persisted truth rather than a separately
+filtered list pane.
 
 ## Navigation and State Model
 
@@ -283,8 +285,9 @@ The current implementation already carries these ideas in state, including a vis
 
 The remaining Phase 5 work is to keep previous/next run movement and compare
 target stepping aligned with persisted-run semantics beyond the currently loaded
-list window, keep input handling separate from render formatting, and harden
-verification around the shipped shared lenses instead of adding those lenses.
+list window, keep input handling separate from projection/cache preparation and
+from render formatting, and harden verification around the shipped shared
+lenses instead of adding those lenses.
 
 Minimum Vim-style navigation intent:
 
@@ -304,7 +307,8 @@ Shipped navigation parity requirement:
 
 ## Empty and Error States
 
-The TUI should treat current CLI/storage semantics as authoritative.
+The TUI is a read-only surface and treats current CLI/storage semantics as
+authoritative.
 
 Valid empty states:
 

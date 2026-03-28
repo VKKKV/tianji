@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 from .storage import (
+    compare_runs,
     get_next_run_id,
     get_previous_run_id,
     get_run_summary,
     list_runs,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 LENS_DOMINANT_FIELD_VALUES = (
@@ -87,6 +92,107 @@ class HistoryListState:
     group_dominant_field: str | None = None
     limit_event_groups: int | None = None
     only_matching_interventions: bool = False
+
+    def prepare_active_view_cache(self, *, width: int) -> None:
+        if self.active_view == "compare":
+            self.prepare_compare_cache(width=width)
+            return
+        self.prepare_detail_cache(width=width)
+
+    def prepare_detail_cache(self, *, width: int) -> None:
+        if not self.rows:
+            return
+
+        selected_row = self.rows[self.selected_index]
+        run_id = coerce_int(selected_row.get("run_id"))
+        detail_lens_key = self.active_lens_key()
+        if (
+            self.cached_detail_run_id == run_id
+            and self.cached_detail_lens_key == detail_lens_key
+        ):
+            return
+
+        self.cached_detail_run_id = run_id
+        self.cached_detail_lens_key = detail_lens_key
+
+        from .tui_render import build_detail_projected_empty_messages, format_run_detail
+
+        get_run_summary_fn = cast(
+            "Callable[..., dict[str, object] | None]", get_run_summary
+        )
+
+        summary = get_run_summary_fn(
+            sqlite_path=self.sqlite_path,
+            run_id=run_id,
+            dominant_field=self.dominant_field,
+            limit_scored_events=self.limit_scored_events,
+            group_dominant_field=self.group_dominant_field,
+            limit_event_groups=self.limit_event_groups,
+            only_matching_interventions=self.only_matching_interventions,
+        )
+        inner_width = max(width - 2, 1)
+        if summary:
+            self.cached_detail_lines = format_run_detail(
+                summary,
+                width=inner_width,
+                projected_empty_messages=build_detail_projected_empty_messages(
+                    summary,
+                    state=self,
+                ),
+            )
+        else:
+            self.cached_detail_lines = ["No persisted detail view is available."]
+        self.detail_scroll_offset = 0
+
+    def prepare_compare_cache(self, *, width: int) -> None:
+        if not self.rows or self.staged_compare_left_run_id is None:
+            return
+
+        selected_row = self.rows[self.selected_index]
+        right_run_id = coerce_int(selected_row.get("run_id"))
+        if right_run_id == self.staged_compare_left_run_id:
+            return
+
+        compare_lens_key = self.active_lens_key()
+        if (
+            self.cached_compare_right_run_id == right_run_id
+            and self.cached_compare_lens_key == compare_lens_key
+        ):
+            return
+
+        self.cached_compare_right_run_id = right_run_id
+        self.cached_compare_lens_key = compare_lens_key
+
+        from .tui_render import (
+            build_compare_projected_empty_messages,
+            format_compare_detail,
+        )
+
+        compare_runs_fn = cast("Callable[..., dict[str, object] | None]", compare_runs)
+
+        compare_result = compare_runs_fn(
+            sqlite_path=self.sqlite_path,
+            left_run_id=self.staged_compare_left_run_id,
+            right_run_id=right_run_id,
+            dominant_field=self.dominant_field,
+            limit_scored_events=self.limit_scored_events,
+            group_dominant_field=self.group_dominant_field,
+            limit_event_groups=self.limit_event_groups,
+            only_matching_interventions=self.only_matching_interventions,
+        )
+        inner_width = max(width - 2, 1)
+        if compare_result:
+            self.cached_compare_lines = format_compare_detail(
+                compare_result,
+                width=inner_width,
+                projected_empty_messages=build_compare_projected_empty_messages(
+                    compare_result,
+                    state=self,
+                ),
+            )
+        else:
+            self.cached_compare_lines = ["No persisted compare view is available."]
+        self.detail_scroll_offset = 0
 
     def invalidate_projected_panes(self) -> None:
         self.cached_detail_run_id = None

@@ -4,7 +4,6 @@ from rich.layout import Layout
 from rich.panel import Panel
 from rich.text import Text
 
-from .storage import compare_runs, get_run_summary
 from .tui_state import (
     HistoryListState,
     coerce_int,
@@ -19,7 +18,6 @@ def build_right_panel(state: HistoryListState, width: int, page_size: int) -> Pa
 
 
 def build_compare_panel(state: HistoryListState, width: int, page_size: int) -> Panel:
-    inner_width = max(width - 2, 1)
     title_text = " Compare "
     if not state.rows or state.staged_compare_left_run_id is None:
         content = Text("Select a second run to compare.")
@@ -31,38 +29,6 @@ def build_compare_panel(state: HistoryListState, width: int, page_size: int) -> 
         if right_run_id == state.staged_compare_left_run_id:
             content = Text("Cannot compare a run with itself.\nSelect a different run.")
         else:
-            compare_lens_key = state.active_lens_key()
-            if (
-                state.cached_compare_right_run_id != right_run_id
-                or state.cached_compare_lens_key != compare_lens_key
-            ):
-                compare_result = compare_runs(
-                    sqlite_path=state.sqlite_path,
-                    left_run_id=state.staged_compare_left_run_id,
-                    right_run_id=right_run_id,
-                    dominant_field=state.dominant_field,
-                    limit_scored_events=state.limit_scored_events,
-                    group_dominant_field=state.group_dominant_field,
-                    limit_event_groups=state.limit_event_groups,
-                    only_matching_interventions=state.only_matching_interventions,
-                )
-                if compare_result:
-                    state.cached_compare_lines = format_compare_detail(
-                        compare_result,
-                        width=inner_width,
-                        projected_empty_messages=build_compare_projected_empty_messages(
-                            compare_result,
-                            state=state,
-                        ),
-                    )
-                else:
-                    state.cached_compare_lines = [
-                        "No persisted compare view is available."
-                    ]
-                state.cached_compare_right_run_id = right_run_id
-                state.cached_compare_lens_key = compare_lens_key
-                state.detail_scroll_offset = 0
-
             if state.cached_compare_lines:
                 total_lines = len(state.cached_compare_lines)
                 if total_lines > page_size:
@@ -163,41 +129,9 @@ def build_list_panel(state: HistoryListState, width: int, page_size: int) -> Pan
 
 
 def build_detail_panel(state: HistoryListState, width: int, page_size: int) -> Panel:
-    inner_width = max(width - 2, 1)
     if not state.rows:
         content = Text("")
     else:
-        selected_row = state.rows[state.selected_index]
-        run_id = coerce_int(selected_row.get("run_id"))
-        detail_lens_key = state.active_lens_key()
-        if (
-            state.cached_detail_run_id != run_id
-            or state.cached_detail_lens_key != detail_lens_key
-        ):
-            summary = get_run_summary(
-                sqlite_path=state.sqlite_path,
-                run_id=run_id,
-                dominant_field=state.dominant_field,
-                limit_scored_events=state.limit_scored_events,
-                group_dominant_field=state.group_dominant_field,
-                limit_event_groups=state.limit_event_groups,
-                only_matching_interventions=state.only_matching_interventions,
-            )
-            if summary:
-                state.cached_detail_lines = format_run_detail(
-                    summary,
-                    width=inner_width,
-                    projected_empty_messages=build_detail_projected_empty_messages(
-                        summary,
-                        state=state,
-                    ),
-                )
-            else:
-                state.cached_detail_lines = ["No persisted detail view is available."]
-            state.cached_detail_run_id = run_id
-            state.cached_detail_lens_key = detail_lens_key
-            state.detail_scroll_offset = 0
-
         if state.cached_detail_lines:
             visible_lines = state.cached_detail_lines[
                 state.detail_scroll_offset : state.detail_scroll_offset + page_size

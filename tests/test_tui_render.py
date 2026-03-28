@@ -185,8 +185,8 @@ class TuiRenderTests(unittest.TestCase):
         self.assertTrue(any("Top group evidence (Contrast)" in line for line in lines))
         self.assertTrue(any("Chain summary changed" in line for line in lines))
 
-    @mock.patch("tianji.tui_render.get_run_summary")
-    def test_build_detail_panel_passes_active_lens_kwargs(
+    @mock.patch("tianji.tui_state.get_run_summary")
+    def test_prepare_detail_cache_passes_active_lens_kwargs(
         self, mock_get_run_summary
     ) -> None:
         mock_get_run_summary.return_value = {
@@ -210,6 +210,7 @@ class TuiRenderTests(unittest.TestCase):
             only_matching_interventions=True,
         )
 
+        state.prepare_detail_cache(width=70)
         panel = build_detail_panel(state, width=70, page_size=20)
 
         self.assertIsInstance(panel.renderable, Text)
@@ -222,9 +223,13 @@ class TuiRenderTests(unittest.TestCase):
             limit_event_groups=None,
             only_matching_interventions=True,
         )
+        self.assertIn(
+            "Persisted truth remains visible.",
+            cast(Text, panel.renderable).plain,
+        )
 
-    @mock.patch("tianji.tui_render.compare_runs")
-    def test_build_compare_panel_passes_active_lens_kwargs(
+    @mock.patch("tianji.tui_state.compare_runs")
+    def test_prepare_compare_cache_passes_active_lens_kwargs(
         self, mock_compare_runs
     ) -> None:
         mock_compare_runs.return_value = {
@@ -289,6 +294,7 @@ class TuiRenderTests(unittest.TestCase):
             only_matching_interventions=True,
         )
 
+        state.prepare_compare_cache(width=70)
         panel = build_compare_panel(state, width=70, page_size=40)
 
         self.assertIsInstance(panel.renderable, Text)
@@ -302,23 +308,46 @@ class TuiRenderTests(unittest.TestCase):
             limit_event_groups=None,
             only_matching_interventions=True,
         )
+        self.assertIn("Left persisted truth.", cast(Text, panel.renderable).plain)
 
-    @mock.patch("tianji.tui_render.compare_runs", return_value=None)
-    def test_build_layout_renders_header_and_uses_compare_panel(
-        self, _mock_compare_runs
+    @mock.patch("tianji.tui_state.compare_runs", return_value=None)
+    def test_build_layout_renders_header_and_uses_prepared_compare_panel(
+        self, mock_compare_runs
     ) -> None:
         state = HistoryListState(
             rows=[{"run_id": 10}, {"run_id": 20}],
             sqlite_path="dummy.sqlite3",
+            selected_index=1,
             staged_compare_left_run_id=10,
             active_view="compare",
             focused_pane="compare",
             dominant_field="technology",
         )
 
+        state.prepare_active_view_cache(width=100)
         layout = build_layout(state, height=20, width=100, page_size=10)
         header = cast(Text, layout["header"].renderable).plain
+        right_panel = cast(Panel, layout["right"].renderable)
         self.assertIn("lens:ev=technology", header)
+        self.assertEqual(mock_compare_runs.call_count, 1)
+        self.assertIn(
+            "No persisted compare view is available.",
+            cast(Text, right_panel.renderable).plain,
+        )
+
+        with mock.patch(
+            "tianji.tui_state.compare_runs",
+            side_effect=AssertionError(
+                "build_layout should consume prepared compare cache without storage reads"
+            ),
+        ):
+            second_layout = build_layout(state, height=20, width=100, page_size=10)
+
+        second_right_panel = cast(Panel, second_layout["right"].renderable)
+        self.assertIn(
+            "No persisted compare view is available.",
+            cast(Text, second_right_panel.renderable).plain,
+        )
 
     def test_build_layout_uses_list_only_body_when_narrow(self) -> None:
         state = HistoryListState(
