@@ -13,7 +13,7 @@ tianji/
 ├── tianji/                # Owned Python source; current product surface
 ├── tests/                 # Owned verification surface; fixture-first unittest suite
 ├── README.md              # Product-facing status and roadmap
-└── DEV_PLAN.md            # TianJi build and extraction roadmap
+└── .trellis/spec/backend/development-plan.md  # TianJi build and extraction roadmap
 ```
 
 ## WHERE TO LOOK
@@ -28,8 +28,8 @@ tianji/
 | Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` lists/filters runs; `history-show` supports run id, latest, previous, or next; `history-compare` supports explicit ids and latest/relative presets |
 | Change heuristics | `tianji/normalize.py`, `tianji/scoring.py`, `tianji/backtrack.py` | Deterministic first |
 | Verify changes | `tests/test_pipeline.py`, `tests/fixtures/sample_feed.xml` | Local fixture + local HTTP server |
-| Plan future divergence ideas | `DEV_PLAN.md` | Keep concept notes first-party and cite upstream work only as history |
-| Plan future orchestration/UI ideas | `README.md`, `DEV_PLAN.md` | Keep planning first-party and cite upstream work only as history |
+| Plan future divergence ideas | `.trellis/spec/backend/development-plan.md` | Keep concept notes first-party and cite upstream work only as history |
+| Plan future orchestration/UI ideas | `README.md`, `.trellis/spec/backend/development-plan.md` | Keep planning first-party and cite upstream work only as history |
 
 ## CODE MAP
 | Symbol | Type | Location | Role |
@@ -99,5 +99,5 @@ uv venv .venv
 
 ## NOTES
 - Workspace scale is now centered on first-party TianJi code, tests, and docs.
-- The shipped local API contract is documented in `LOCAL_API_CONTRACT.md`; the daemon hosts the loopback HTTP server at `127.0.0.1:8765` by default, and the optional web UI is served separately at `127.0.0.1:8766`.
+- The shipped local API contract is documented in `.trellis/spec/backend/contracts/local-api-contract.md`; the daemon hosts the loopback HTTP server at `127.0.0.1:8765` by default, and the optional web UI is served separately at `127.0.0.1:8766`.
 - Historical upstream repos may still matter for attribution, but this AGENTS file covers the active TianJi workspace itself.
