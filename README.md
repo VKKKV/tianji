@@ -4,7 +4,7 @@ TianJi is a local-first intelligence prototype aimed at one core loop: fetch sig
 
 The repository now ships a mature local stack with clear boundaries: the CLI remains the write authority, the TUI is read-only and storage-backed, the daemon and HTTP API stay local-only and loopback-bound, and the web UI is optional and off by default. The long-term "God Engine" vision is still broader than what ships here, but the current local operator stack is real, tested, and runnable now.
 
-![TianJi concept diagram](img/Gemini_Generated_Image_h1wiykh1wiykh1wi.png)
+![TianJi concept diagram](img/tianji-concept.png)
 
 _Concept illustration for TianJi's long-term direction. The currently shipped product surface is the terminal-first local stack described below._
 
