@@ -11,6 +11,7 @@ from tianji.tui_render import (
     build_help_text,
     format_active_lens_summary,
     format_compare_detail,
+    format_history_row,
     format_lens_change_message,
     format_status_footer,
     format_top_group_evidence_diff_lines,
@@ -19,6 +20,65 @@ from tianji.tui_state import HistoryListState
 
 
 class TuiRenderTests(unittest.TestCase):
+    def test_format_history_row_orders_triage_tokens_by_priority(self) -> None:
+        row = {
+            "run_id": 7,
+            "generated_at": "2026-03-22T10:15:00+00:00",
+            "mode": "fixture",
+            "dominant_field": "technology",
+            "risk_level": "high",
+            "event_group_count": 3,
+            "top_event_group_dominant_field": "conflict",
+            "top_event_group_member_count": 4,
+            "top_scored_event_dominant_field": "technology",
+            "top_impact_score": 11.5,
+            "top_divergence_score": 19.25,
+            "headline": "Signals remain visible in wide history list panes.",
+        }
+
+        rendered = format_history_row(row, width=120)
+
+        g_index = rendered.index("G:3")
+        dv_index = rendered.index("Dv:19.25")
+        im_index = rendered.index("Im:11.50")
+        top_index = rendered.index("Top:technolo")
+        grp_index = rendered.index("Grp:conflict/4")
+
+        self.assertLess(g_index, dv_index)
+        self.assertLess(dv_index, im_index)
+        self.assertLess(im_index, top_index)
+        self.assertLess(top_index, grp_index)
+        self.assertIn("Signals remain visible", rendered)
+        self.assertTrue(rendered.rstrip().endswith("…"))
+
+    def test_format_history_row_preserves_staged_marker_and_drops_lower_priority_tokens_first(
+        self,
+    ) -> None:
+        row = {
+            "run_id": 7,
+            "generated_at": "2026-03-22T10:15:00+00:00",
+            "mode": "fixture",
+            "dominant_field": "technology",
+            "risk_level": "high",
+            "event_group_count": 3,
+            "top_event_group_dominant_field": "conflict",
+            "top_event_group_member_count": 4,
+            "top_scored_event_dominant_field": "technology",
+            "top_impact_score": 11.5,
+            "top_divergence_score": 19.25,
+            "headline": "Signals remain visible in narrow history list panes.",
+        }
+
+        rendered = format_history_row(row, width=75, is_staged_left=True)
+
+        self.assertEqual(rendered[0], "*")
+        self.assertIn("G:3", rendered)
+        self.assertIn("Dv:19.25", rendered)
+        self.assertNotIn("Im:11.50", rendered)
+        self.assertNotIn("Top:technolo", rendered)
+        self.assertNotIn("Grp:conflict/4", rendered)
+        self.assertIn("Signals remain", rendered)
+
     def test_footer_and_lens_summary_show_state(self) -> None:
         state = HistoryListState(
             rows=[{"run_id": 10}, {"run_id": 20}],

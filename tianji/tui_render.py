@@ -245,14 +245,48 @@ def format_history_row(
     mode = str(row.get("mode", ""))
     dominant_field = str(row.get("dominant_field", "uncategorized"))
     risk_level = str(row.get("risk_level", "low"))
+    event_group_count = coerce_int(row.get("event_group_count"))
+    top_event_group_dominant_field = str(
+        row.get("top_event_group_dominant_field") or ""
+    )
+    top_event_group_member_count = row.get("top_event_group_member_count")
+    top_scored_event_dominant_field = str(
+        row.get("top_scored_event_dominant_field") or ""
+    )
+    top_impact_score = format_optional_score(row.get("top_impact_score"))
     top_divergence_score = format_optional_score(row.get("top_divergence_score"))
     headline = str(row.get("headline", ""))
 
     marker = "*" if is_staged_left else " "
     prefix = (
         f"{marker}{run_id:>3} {generated_at:<16} {mode:<8.8} {dominant_field:<10.10} "
-        f"{risk_level:<4.4} {top_divergence_score:>5} "
+        f"{risk_level:<4.4}"
     )
+
+    triage_segments = [
+        f"G:{event_group_count}",
+        f"Dv:{top_divergence_score}",
+        f"Im:{top_impact_score}",
+    ]
+    if top_scored_event_dominant_field:
+        triage_segments.append(f"Top:{top_scored_event_dominant_field[:8]}")
+    if event_group_count > 0 and top_event_group_dominant_field:
+        member_count = (
+            coerce_int(top_event_group_member_count)
+            if isinstance(top_event_group_member_count, int | float | str)
+            else 0
+        )
+        triage_segments.append(
+            f"Grp:{top_event_group_dominant_field[:8]}/{member_count}"
+        )
+
+    min_headline_width = 12
+    for segment in triage_segments:
+        candidate = f"{prefix} {segment}"
+        if len(candidate) + min_headline_width <= width:
+            prefix = candidate
+
+    prefix = f"{prefix} "
     if len(prefix) >= width:
         return shorten_text(prefix.rstrip(), width).ljust(width)
     available_headline_width = max(width - len(prefix), 0)
