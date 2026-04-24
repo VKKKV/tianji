@@ -3,7 +3,7 @@
   "data": {
     "payload_fixture": "tests/fixtures/contracts/history_compare_v1.json",
     "resource": "/api/v1/compare?left_run_id=<id>&right_run_id=<id>",
-    "status": "planned-read-route-only",
+    "status": "shipped-read-route",
     "v1_routes": [
       "GET /api/v1/compare?left_run_id=<id>&right_run_id=<id>"
     ]

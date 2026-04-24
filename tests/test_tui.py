@@ -1435,6 +1435,77 @@ class TuiIntegrationTests(unittest.TestCase):
         browser_mock.assert_called_once()
         self.assertEqual(browser_mock.call_args.args[0].rows, rows)
 
+    def test_run_history_browser_session_reads_real_sqlite_storage_for_list_detail_and_compare(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            sqlite_path = Path(tmpdir) / "tianji.sqlite3"
+            base_feed = FIXTURE_PATH.read_text(encoding="utf-8")
+            updated_feed = base_feed.replace(
+                "China expands chip controls after new AI export dispute with the United States",
+                "China expands chip controls after new AI export dispute with the United States and allied partners",
+                1,
+            ).replace(
+                "Chinese officials announced expanded chip export controls after a new AI dispute with Washington.",
+                "Chinese officials announced expanded chip export controls after a new AI dispute with Washington while allied partners joined the response.",
+                1,
+            )
+
+            first_fixture_path = Path(tmpdir) / "first.xml"
+            second_fixture_path = Path(tmpdir) / "second.xml"
+            first_fixture_path.write_text(base_feed, encoding="utf-8")
+            second_fixture_path.write_text(updated_feed, encoding="utf-8")
+
+            run_pipeline(
+                fixture_paths=[str(first_fixture_path)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+            run_pipeline(
+                fixture_paths=[str(second_fixture_path)],
+                fetch=False,
+                source_urls=[],
+                output_path=None,
+                sqlite_path=str(sqlite_path),
+            )
+
+            state = HistoryListState(
+                rows=storage.list_runs(sqlite_path=str(sqlite_path), limit=10),
+                sqlite_path=str(sqlite_path),
+            )
+
+            frames = self._run_browser_session(
+                state,
+                ["z", "z", "c", "j", "c", "l", "q"],
+                width=300,
+                height=50,
+            )
+
+        self.assertEqual([cast(int, row["run_id"]) for row in state.rows], [2, 1])
+        self.assertEqual(state.staged_compare_left_run_id, 2)
+        self.assertEqual(state.active_view, "compare")
+        self.assertEqual(state.focused_pane, "compare")
+
+        zoomed_list = frames[1]["body"]
+        self.assertIn("G:0", zoomed_list)
+        self.assertIn("Dv:20.73", zoomed_list)
+        self.assertIn("Im:15.79", zoomed_list)
+        self.assertIn("Top:technolo", zoomed_list)
+
+        initial_detail = frames[0]["detail_cache"]
+        self.assertIn("Run #2", initial_detail)
+        self.assertIn("allied partners", initial_detail)
+        self.assertIn("Scored Events: 3", initial_detail)
+        self.assertIn("Interventions: 3", initial_detail)
+
+        compare_cache_text = "\n".join(state.cached_compare_lines or [])
+        self.assertIn("Compare: Run #2 (Left) vs Run #1 (Right)", compare_cache_text)
+        self.assertIn("allied partners", compare_cache_text)
+        self.assertIn("Top scored event changed", compare_cache_text)
+        self.assertIn("Top intervention changed", compare_cache_text)
+
     def test_build_detail_panel_uses_prepared_cache_without_storage_or_cache_mutation(
         self,
     ) -> None:
