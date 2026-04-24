@@ -3,6 +3,13 @@ import unittest
 
 
 class MatureStackDocsTests(unittest.TestCase):
+    PROJECT_KNOWLEDGE_PATH = ".trellis/AGENTS.md"
+    DEVELOPMENT_PLAN_PATH = ".trellis/spec/backend/development-plan.md"
+    LOCAL_API_CONTRACT_PATH = ".trellis/spec/backend/contracts/local-api-contract.md"
+    TUI_CONTRACT_PATH = ".trellis/spec/backend/contracts/tui-contract.md"
+    DAEMON_CONTRACT_PATH = ".trellis/spec/backend/contracts/daemon-contract.md"
+    WEB_UI_CONTRACT_PATH = ".trellis/spec/backend/contracts/web-ui-contract.md"
+
     def read_text(self, relative_path: str) -> str:
         return Path(relative_path).read_text(encoding="utf-8")
 
@@ -13,11 +20,11 @@ class MatureStackDocsTests(unittest.TestCase):
     def test_required_docs_exist(self) -> None:
         for relative_path in [
             "README.md",
-            "DEV_PLAN.md",
-            "LOCAL_API_CONTRACT.md",
-            "TUI_CONTRACT.md",
-            "DAEMON_CONTRACT.md",
-            "WEB_UI_CONTRACT.md",
+            self.DEVELOPMENT_PLAN_PATH,
+            self.LOCAL_API_CONTRACT_PATH,
+            self.TUI_CONTRACT_PATH,
+            self.DAEMON_CONTRACT_PATH,
+            self.WEB_UI_CONTRACT_PATH,
         ]:
             self.assertTrue(Path(relative_path).exists(), relative_path)
 
@@ -39,10 +46,10 @@ class MatureStackDocsTests(unittest.TestCase):
 
     def test_boundary_statements_remain_explicit(self) -> None:
         readme = self.read_text("README.md")
-        local_api = self.read_text("LOCAL_API_CONTRACT.md")
-        tui = self.read_text("TUI_CONTRACT.md")
-        daemon = self.read_text("DAEMON_CONTRACT.md")
-        web_ui = self.read_text("WEB_UI_CONTRACT.md")
+        local_api = self.read_text(self.LOCAL_API_CONTRACT_PATH)
+        tui = self.read_text(self.TUI_CONTRACT_PATH)
+        daemon = self.read_text(self.DAEMON_CONTRACT_PATH)
+        web_ui = self.read_text(self.WEB_UI_CONTRACT_PATH)
 
         self.assertIn("source-of-truth write path", readme)
         self.assertIn("read-first and loopback-only", readme)
@@ -52,8 +59,8 @@ class MatureStackDocsTests(unittest.TestCase):
         self.assertIn("read-first", local_api)
 
     def test_stale_contradictions_are_absent(self) -> None:
-        dev_plan = self.read_text("DEV_PLAN.md")
-        agents = self.read_text("AGENTS.md")
+        dev_plan = self.read_text(self.DEVELOPMENT_PLAN_PATH)
+        agents = self.read_text(self.PROJECT_KNOWLEDGE_PATH)
         readme = self.read_text("README.md")
 
         self.assertNotIn("the local API remains future work", dev_plan)

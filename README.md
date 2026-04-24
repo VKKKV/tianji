@@ -259,10 +259,10 @@ Scoring-contract coverage now also includes isolated `Im` checks for actor weigh
 │   ├── test_cli_inputs.py
 │   └── support.py
 ├── pyproject.toml
-├── DAEMON_CONTRACT.md
-├── LOCAL_API_CONTRACT.md
-├── TUI_CONTRACT.md
-├── WEB_UI_CONTRACT.md
+├── daemon-contract.md
+├── local-api-contract.md
+├── tui-contract.md
+├── web-ui-contract.md
 └── README.md
 ```
 
@@ -307,7 +307,7 @@ Those projects are now citation-level context only. TianJi's shipped code, tests
 - optional separate web UI at `127.0.0.1:8766`, off by default, reusing the same local API payloads
 - schema-versioned artifacts and hardened operator-facing validation
 
-`LOCAL_API_CONTRACT.md`, `DAEMON_CONTRACT.md`, `TUI_CONTRACT.md`, and `WEB_UI_CONTRACT.md` document the shipped mature local stack. The boundary remains strict: CLI writes are authoritative, the TUI is storage-backed and read-only, the daemon and API stay loopback-only, and the web UI remains optional.
+`local-api-contract.md`, `daemon-contract.md`, `tui-contract.md`, and `web-ui-contract.md` document the shipped mature local stack. The boundary remains strict: CLI writes are authoritative, the TUI is storage-backed and read-only, the daemon and API stay loopback-only, and the web UI remains optional.
 
 ### Next
 
