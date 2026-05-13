@@ -22,7 +22,7 @@ parity gate has passed. After parity is verified, Python code is retired per
 |-------|-------|--------|
 | 1 | Worldline core + pipeline (Cangjie/Fuxi) | Milestone 1A+1B complete |
 | 2 | Storage + History | Milestone 2 complete |
-| 2 | Hongmeng orchestration layer | Deferred |
+| 3 | Local Runtime (daemon + API + webui) | Milestone 3 complete |
 | 3 | Nuwa simulation sandbox | Deferred |
 | 4 | TUI (ratatui + Kanagawa Dark) | Deferred |
 | 5 | Daemon + Web UI | Deferred |
@@ -68,11 +68,15 @@ fixture pipeline.
 
 ### Milestone 3 — Local Runtime Parity
 
-After storage parity. Port the thin local runtime.
+**Complete.** Port the thin local runtime with behavior parity.
 
-- Bounded daemon controls equivalent to the shipped Python surface
-- Read-first loopback API over the same persisted vocabulary
-- No write HTTP routes unless a new contract is approved
+- Daemon core: in-memory job queue (4 states: queued/running/succeeded/failed), worker loop, subprocess model ✅
+- UNIX socket control plane: JSON-lines protocol, `queue_run` / `job_status` actions ✅
+- HTTP read API: 5 axum routes (meta, runs, runs/:id, runs/latest, compare), envelope matching frozen fixtures ✅
+- Web UI: compile-time embedded static files, reverse proxy, /queue-run with 2s retry ✅
+- CLI: `daemon start/stop/status/run/serve`, `webui`, PID file management ✅
+- Loopback enforcement, schedule deferred (D5) ✅
+- 52 tests pass, `cargo fmt --check` clean, `cargo clippy -- -D warnings` clean ✅
 
 ### Milestone 4 — TUI (ratatui + Kanagawa Dark)
 

@@ -23,6 +23,7 @@ pub enum TianJiError {
 - `main()` maps errors to stderr + exit code 1
 - No `unwrap()` in library code — propagate errors through `Result`
 - `Storage` variant wraps `rusqlite::Error`; "not found" cases are matched via `rusqlite::Error::QueryReturnedNoRows` and converted to `Option<T>::None` at the call site
+- Daemon worker catches broad `Exception` at the boundary (like Python oracle), stores formatted error string in `JobRecord.error`
 
 ---
 

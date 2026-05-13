@@ -32,6 +32,11 @@ serde_json = "1.0"
 sha2 = "0.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+libc = "0.2"
 ```
 
 ### Rust Dependencies (Planned, per `plan.md` §11)
@@ -39,6 +44,7 @@ clap = { version = "4", features = ["derive"] }
 Add only when the milestone requires them:
 
 - Milestone 2: `rusqlite` (SQLite persistence), `clap` (CLI subcommands) — **shipped**
+- Milestone 3: `tokio` (async runtime), `axum` (HTTP API), `reqwest` (reverse proxy), `uuid` (job IDs), `libc` (setsid) — **shipped**
 - Milestone 4: `ratatui`, `crossterm` (TUI)
 - Milestone 5: `tokio`, `axum`, `reqwest` (daemon, HTTP)
 - Phase 2+: `blake3`, `petgraph`, `chrono` (worldline, field DAG)
