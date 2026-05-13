@@ -1,10 +1,13 @@
+pub mod api;
 pub mod backtrack;
+pub mod daemon;
 pub mod fetch;
 pub mod grouping;
 pub mod models;
 pub mod normalize;
 pub mod scoring;
 pub mod storage;
+pub mod webui;
 
 use std::fs;
 use std::path::Path;
@@ -745,5 +748,407 @@ mod tests {
         let _ = run_fixture_path(SAMPLE_FIXTURE, None).expect("run");
         // No sqlite file should be created at the default temp path
         assert!(!std::path::Path::new("/tmp/tianji_no_sqlite_test.sqlite3").exists());
+    }
+
+    // -----------------------------------------------------------------------
+    // Milestone 3 — Daemon / API / WebUI integration tests
+    // -----------------------------------------------------------------------
+
+    // --- Daemon state tests ---
+
+    #[test]
+    fn daemon_state_enqueue_job_returns_queued_state() {
+        let state = daemon::DaemonState::new();
+        let request = daemon::RunJobRequest {
+            fixture_paths: vec!["tests/fixtures/sample_feed.xml".to_string()],
+            fetch: false,
+            source_urls: vec![],
+            fetch_policy: "always".to_string(),
+            source_fetch_details: vec![],
+            output_path: None,
+            sqlite_path: None,
+        };
+        let record = state.enqueue_job(request);
+        assert!(record.job_id.starts_with("job-"));
+        assert_eq!(record.state, "queued");
+        assert!(record.run_id.is_none());
+        assert!(record.error.is_none());
+    }
+
+    #[test]
+    fn daemon_state_job_id_format_matches_contract() {
+        let state = daemon::DaemonState::new();
+        let request = daemon::RunJobRequest {
+            fixture_paths: vec![],
+            fetch: false,
+            source_urls: vec![],
+            fetch_policy: "always".to_string(),
+            source_fetch_details: vec![],
+            output_path: None,
+            sqlite_path: None,
+        };
+        let record = state.enqueue_job(request);
+        // job-{uuid4_hex[:12]}: "job-" prefix + 12 hex chars
+        assert_eq!(record.job_id.len(), 16); // "job-" (4) + 12 hex chars
+        let hex_part = &record.job_id[4..];
+        assert!(hex_part.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn daemon_state_transitions_queued_to_running_to_succeeded() {
+        let state = daemon::DaemonState::new();
+        let request = daemon::RunJobRequest {
+            fixture_paths: vec![],
+            fetch: false,
+            source_urls: vec![],
+            fetch_policy: "always".to_string(),
+            source_fetch_details: vec![],
+            output_path: None,
+            sqlite_path: None,
+        };
+        let record = state.enqueue_job(request);
+
+        state.set_job_running(&record.job_id);
+        let job = state.get_job(&record.job_id).expect("job found");
+        assert_eq!(job.state, "running");
+
+        state.set_job_succeeded(&record.job_id, Some(42));
+        let job = state.get_job(&record.job_id).expect("job found");
+        assert_eq!(job.state, "succeeded");
+        assert_eq!(job.run_id, Some(42));
+    }
+
+    #[test]
+    fn daemon_state_transitions_to_failed_with_error() {
+        let state = daemon::DaemonState::new();
+        let request = daemon::RunJobRequest {
+            fixture_paths: vec![],
+            fetch: false,
+            source_urls: vec![],
+            fetch_policy: "always".to_string(),
+            source_fetch_details: vec![],
+            output_path: None,
+            sqlite_path: None,
+        };
+        let record = state.enqueue_job(request);
+
+        state.set_job_running(&record.job_id);
+        state.set_job_failed(
+            &record.job_id,
+            "TianJiError: something went wrong".to_string(),
+        );
+        let job = state.get_job(&record.job_id).expect("job found");
+        assert_eq!(job.state, "failed");
+        assert_eq!(
+            job.error,
+            Some("TianJiError: something went wrong".to_string())
+        );
+    }
+
+    #[test]
+    fn daemon_state_get_job_returns_none_for_unknown_id() {
+        let state = daemon::DaemonState::new();
+        assert!(state.get_job("job-nonexistent").is_none());
+    }
+
+    #[test]
+    fn daemon_state_job_status_payload_matches_contract() {
+        let state = daemon::DaemonState::new();
+        let request = daemon::RunJobRequest {
+            fixture_paths: vec![],
+            fetch: false,
+            source_urls: vec![],
+            fetch_policy: "always".to_string(),
+            source_fetch_details: vec![],
+            output_path: None,
+            sqlite_path: None,
+        };
+        let record = state.enqueue_job(request);
+        state.set_job_succeeded(&record.job_id, Some(1));
+
+        let payload = state.get_job(&record.job_id).unwrap().to_status_payload();
+        assert!(payload.get("job_id").is_some());
+        assert!(payload.get("state").is_some());
+        assert!(payload.get("run_id").is_some());
+        assert!(payload.get("error").is_some());
+    }
+
+    // --- Socket protocol tests ---
+
+    #[test]
+    fn socket_handle_queue_run_returns_queued() {
+        let state = std::sync::Arc::new(daemon::DaemonState::new());
+        let request = serde_json::json!({
+            "action": "queue_run",
+            "payload": {
+                "fixture_paths": ["tests/fixtures/sample_feed.xml"],
+            }
+        });
+        let response = daemon::handle_socket_request(&state, &request);
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["data"]["state"], "queued");
+        assert!(response["data"]["job_id"].is_string());
+        assert!(response["error"].is_null());
+    }
+
+    #[test]
+    fn socket_handle_queue_run_always_says_queued_even_if_running() {
+        let state = std::sync::Arc::new(daemon::DaemonState::new());
+        let request = serde_json::json!({
+            "action": "queue_run",
+            "payload": {
+                "fixture_paths": ["tests/fixtures/sample_feed.xml"],
+            }
+        });
+        let response = daemon::handle_socket_request(&state, &request);
+        let job_id = response["data"]["job_id"].as_str().unwrap();
+
+        // Transition to running
+        state.set_job_running(job_id);
+
+        // queue_run response still says "queued" per contract
+        assert_eq!(response["data"]["state"], "queued");
+    }
+
+    #[test]
+    fn socket_handle_job_status_returns_current_state() {
+        let state = std::sync::Arc::new(daemon::DaemonState::new());
+        let queue_request = serde_json::json!({
+            "action": "queue_run",
+            "payload": {
+                "fixture_paths": ["tests/fixtures/sample_feed.xml"],
+            }
+        });
+        let queue_response = daemon::handle_socket_request(&state, &queue_request);
+        let job_id = queue_response["data"]["job_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let status_request = serde_json::json!({
+            "action": "job_status",
+            "job_id": job_id,
+        });
+        let status_response = daemon::handle_socket_request(&state, &status_request);
+        assert_eq!(status_response["ok"], true);
+        assert_eq!(status_response["data"]["job_id"], job_id);
+        assert_eq!(status_response["data"]["state"], "queued");
+    }
+
+    #[test]
+    fn socket_handle_unsupported_action_returns_error() {
+        let state = std::sync::Arc::new(daemon::DaemonState::new());
+        let request = serde_json::json!({
+            "action": "unknown_action",
+        });
+        let response = daemon::handle_socket_request(&state, &request);
+        assert_eq!(response["ok"], false);
+        assert!(response["error"]["message"].is_string());
+    }
+
+    #[test]
+    fn socket_handle_missing_action_returns_error() {
+        let state = std::sync::Arc::new(daemon::DaemonState::new());
+        let request = serde_json::json!({});
+        let response = daemon::handle_socket_request(&state, &request);
+        assert_eq!(response["ok"], false);
+    }
+
+    // --- Loopback validation tests ---
+
+    #[test]
+    fn loopback_validation_accepts_localhost_hosts() {
+        assert!(daemon::validate_loopback_host("127.0.0.1").is_ok());
+        assert!(daemon::validate_loopback_host("localhost").is_ok());
+        assert!(daemon::validate_loopback_host("::1").is_ok());
+    }
+
+    #[test]
+    fn loopback_validation_rejects_non_loopback_host() {
+        assert!(daemon::validate_loopback_host("0.0.0.0").is_err());
+        assert!(daemon::validate_loopback_host("192.168.1.1").is_err());
+        assert!(daemon::validate_loopback_host("example.com").is_err());
+    }
+
+    // --- RunJobRequest parsing tests ---
+
+    #[test]
+    fn run_job_request_from_payload_parses_fixture_paths() {
+        let payload = serde_json::json!({
+            "fixture_paths": ["tests/fixtures/sample_feed.xml"],
+        });
+        let request = daemon::RunJobRequest::from_payload(&payload).expect("parse");
+        assert_eq!(
+            request.fixture_paths,
+            vec!["tests/fixtures/sample_feed.xml"]
+        );
+        assert!(!request.fetch);
+    }
+
+    #[test]
+    fn run_job_request_from_payload_defaults_correctly() {
+        let payload = serde_json::json!({});
+        let request = daemon::RunJobRequest::from_payload(&payload).expect("parse");
+        assert!(request.fixture_paths.is_empty());
+        assert!(!request.fetch);
+        assert!(request.source_urls.is_empty());
+        assert_eq!(request.fetch_policy, "always");
+        assert!(request.output_path.is_none());
+        assert!(request.sqlite_path.is_none());
+    }
+
+    #[test]
+    fn run_job_request_from_payload_rejects_invalid_fetch() {
+        let payload = serde_json::json!({
+            "fetch": "not_a_bool",
+        });
+        // fetch defaults to false when not a bool, doesn't error
+        let request = daemon::RunJobRequest::from_payload(&payload).expect("parse");
+        assert!(!request.fetch);
+    }
+
+    // --- API route tests using reqwest against a live server ---
+
+    #[test]
+    fn api_meta_returns_contract_envelope() {
+        let db_path = temp_sqlite_path();
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run + persist");
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        rt.block_on(async {
+            let state = api::AppState {
+                sqlite_path: db_path.clone(),
+            };
+            let app = api::build_router().with_state(state);
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let addr = listener.local_addr().expect("addr");
+
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("serve");
+            });
+
+            // Give the server a moment to start
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .get(format!("http://{addr}/api/v1/meta"))
+                .send()
+                .await
+                .expect("request");
+
+            let body: serde_json::Value =
+                serde_json::from_str(&resp.text().await.expect("text")).expect("json");
+            assert_eq!(body["api_version"], "v1");
+            assert_eq!(body["error"], serde_json::Value::Null);
+            assert_eq!(
+                body["data"]["artifact_schema_version"],
+                "tianji.run-artifact.v1"
+            );
+            assert_eq!(body["data"]["cli_source_of_truth"], true);
+            assert_eq!(body["data"]["persistence"]["sqlite_optional"], true);
+
+            server.abort();
+        });
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn api_runs_returns_envelope_with_items() {
+        let db_path = temp_sqlite_path();
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run + persist");
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        rt.block_on(async {
+            let state = api::AppState {
+                sqlite_path: db_path.clone(),
+            };
+            let app = api::build_router().with_state(state);
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let addr = listener.local_addr().expect("addr");
+
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("serve");
+            });
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .get(format!("http://{addr}/api/v1/runs?limit=20"))
+                .send()
+                .await
+                .expect("request");
+
+            let body: serde_json::Value =
+                serde_json::from_str(&resp.text().await.expect("text")).expect("json");
+            assert_eq!(body["api_version"], "v1");
+            assert_eq!(body["data"]["resource"], "/api/v1/runs");
+            assert_eq!(
+                body["data"]["item_contract_fixture"],
+                "tests/fixtures/contracts/history_list_item_v1.json"
+            );
+            let items = body["data"]["items"].as_array().expect("items array");
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0]["run_id"], 1);
+            assert_eq!(items[0]["dominant_field"], "technology");
+
+            server.abort();
+        });
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn api_compare_returns_envelope_with_diff() {
+        let db_path = temp_sqlite_path();
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 2");
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        rt.block_on(async {
+            let state = api::AppState {
+                sqlite_path: db_path.clone(),
+            };
+            let app = api::build_router().with_state(state);
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let addr = listener.local_addr().expect("addr");
+
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("serve");
+            });
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .get(format!(
+                    "http://{addr}/api/v1/compare?left_run_id=1&right_run_id=2"
+                ))
+                .send()
+                .await
+                .expect("request");
+
+            let body: serde_json::Value =
+                serde_json::from_str(&resp.text().await.expect("text")).expect("json");
+            assert_eq!(body["api_version"], "v1");
+            assert_eq!(body["data"]["left_run_id"], 1);
+            assert_eq!(body["data"]["right_run_id"], 2);
+            assert!(body["data"]["diff"]["dominant_field_changed"].is_boolean());
+
+            server.abort();
+        });
+
+        cleanup_db(&db_path);
     }
 }

@@ -1,6 +1,7 @@
+use std::os::unix::process::CommandExt;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tianji::{
     artifact_json, compare_runs, get_latest_run_id, get_latest_run_pair, get_next_run_id,
     get_previous_run_id, get_run_summary, list_runs, run_fixture_path,
@@ -179,6 +180,91 @@ enum Cli {
         #[arg(long = "limit-event-groups")]
         limit_event_groups: Option<usize>,
     },
+    /// Daemon lifecycle and run queue
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommands,
+    },
+    /// Serve the optional local web UI
+    Webui {
+        /// Loopback host for the web UI
+        #[arg(long = "host", default_value = "127.0.0.1")]
+        host: String,
+        /// Loopback port for the web UI
+        #[arg(long = "port", default_value_t = 8766)]
+        port: u16,
+        /// API base URL the web UI consumes
+        #[arg(long = "api-base-url", default_value = "http://127.0.0.1:8765")]
+        api_base_url: String,
+        /// UNIX socket path for queue-run proxy
+        #[arg(long = "socket-path", default_value = "runs/tianji.sock")]
+        socket_path: String,
+        /// Optional SQLite path forwarded to queued runs
+        #[arg(long = "sqlite-path")]
+        sqlite_path: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DaemonCommands {
+    /// Start the TianJi daemon
+    Start {
+        /// UNIX socket path for daemon control
+        #[arg(long = "socket-path", default_value = "runs/tianji.sock")]
+        socket_path: String,
+        /// SQLite database path backing the read API
+        #[arg(long = "sqlite-path", default_value = "runs/tianji.sqlite3")]
+        sqlite_path: String,
+        /// Loopback host marker
+        #[arg(long = "host", default_value = "127.0.0.1")]
+        host: String,
+        /// Loopback HTTP API port
+        #[arg(long = "port", default_value_t = 8765)]
+        port: u16,
+    },
+    /// Stop the TianJi daemon
+    Stop {
+        /// UNIX socket path for daemon control
+        #[arg(long = "socket-path", default_value = "runs/tianji.sock")]
+        socket_path: String,
+    },
+    /// Check daemon status or a specific job
+    Status {
+        /// UNIX socket path for daemon control
+        #[arg(long = "socket-path", default_value = "runs/tianji.sock")]
+        socket_path: String,
+        /// Optional job identifier to inspect
+        #[arg(long = "job-id")]
+        job_id: Option<String>,
+    },
+    /// Queue a run via the daemon
+    Run {
+        /// UNIX socket path for daemon control
+        #[arg(long = "socket-path", default_value = "runs/tianji.sock")]
+        socket_path: String,
+        /// Path to a local RSS/Atom fixture file
+        #[arg(long = "fixture")]
+        fixture: String,
+        /// Optional SQLite database path for persisting run data
+        #[arg(long = "sqlite-path")]
+        sqlite_path: Option<String>,
+    },
+    /// Internal: run the daemon server (called by `daemon start`)
+    #[command(hide = true)]
+    Serve {
+        /// UNIX socket path for daemon control
+        #[arg(long = "socket-path")]
+        socket_path: String,
+        /// SQLite database path backing the read API
+        #[arg(long = "sqlite-path")]
+        sqlite_path: String,
+        /// Loopback host marker
+        #[arg(long = "host", default_value = "127.0.0.1")]
+        host: String,
+        /// Loopback HTTP API port
+        #[arg(long = "port", default_value_t = 8765)]
+        port: u16,
+    },
 }
 
 fn main() -> ExitCode {
@@ -222,6 +308,325 @@ fn validate_int_range(
         _ => Ok(()),
     }
 }
+
+// ---------------------------------------------------------------------------
+// PID file management (for daemon start/stop)
+// ---------------------------------------------------------------------------
+
+use std::path::PathBuf;
+
+fn pid_file_for_socket(socket_path: &str) -> PathBuf {
+    let socket_file = PathBuf::from(socket_path);
+    let file_name = socket_file
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "tianji.sock".to_string());
+    let dir = socket_file
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    dir.join(format!("{file_name}.pid"))
+}
+
+fn read_pid_file(socket_path: &str) -> Result<Option<u32>, TianJiError> {
+    let pid_file = pid_file_for_socket(socket_path);
+    if !pid_file.exists() {
+        return Ok(None);
+    }
+    let raw_value = std::fs::read_to_string(&pid_file)?;
+    let trimmed = raw_value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    trimmed
+        .parse::<u32>()
+        .map(Some)
+        .map_err(|_| TianJiError::Usage(format!("Daemon pid file is malformed: {pid_file:?}")))
+}
+
+fn write_pid_file(socket_path: &str, pid: u32) -> Result<(), TianJiError> {
+    let pid_file = pid_file_for_socket(socket_path);
+    if let Some(parent) = pid_file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&pid_file, format!("{pid}\n"))?;
+    Ok(())
+}
+
+fn remove_pid_file(socket_path: &str) {
+    let pid_file = pid_file_for_socket(socket_path);
+    let _ = std::fs::remove_file(pid_file);
+}
+
+fn is_pid_running(pid: u32) -> bool {
+    // Send signal 0 to check if process exists
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+fn wait_for_socket(socket_path: &str, timeout_secs: f64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout_secs);
+    while std::time::Instant::now() < deadline {
+        if std::path::Path::new(socket_path).exists() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    false
+}
+
+fn wait_for_api(host: &str, port: u16, timeout_secs: f64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout_secs);
+    let url = format!("http://{host}:{port}/api/v1/meta");
+    while std::time::Instant::now() < deadline {
+        if let Ok(resp) = reqwest::blocking::Client::new()
+            .get(&url)
+            .timeout(std::time::Duration::from_millis(500))
+            .send()
+        {
+            if resp.status().is_success() {
+                return true;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Daemon start / stop / status / run handlers
+// ---------------------------------------------------------------------------
+
+fn handle_daemon_start(
+    socket_path: &str,
+    sqlite_path: &str,
+    host: &str,
+    port: u16,
+) -> Result<String, TianJiError> {
+    tianji::daemon::validate_loopback_host(host)?;
+
+    let start_timeout_secs = 2.0;
+
+    // Check existing PID
+    if let Some(existing_pid) = read_pid_file(socket_path)? {
+        if is_pid_running(existing_pid) {
+            return Err(TianJiError::Usage(format!(
+                "Daemon already appears to be running for {socket_path} with pid {existing_pid}."
+            )));
+        }
+        remove_pid_file(socket_path);
+    }
+
+    // Ensure socket parent dir exists
+    if let Some(parent) = std::path::Path::new(socket_path).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Spawn the daemon serve subprocess
+    let current_exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(current_exe);
+    cmd.args(["daemon", "serve"])
+        .arg("--socket-path")
+        .arg(socket_path)
+        .arg("--sqlite-path")
+        .arg(sqlite_path)
+        .arg("--host")
+        .arg(host)
+        .arg("--port")
+        .arg(port.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    // Set process group (start_new_session equivalent)
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+
+    let child = cmd.spawn()?;
+    let pid = child.id();
+    write_pid_file(socket_path, pid)?;
+
+    // Wait for socket
+    if !wait_for_socket(socket_path, start_timeout_secs) {
+        remove_pid_file(socket_path);
+        // Try to kill the process
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+        return Err(TianJiError::Usage(format!(
+            "Daemon did not become ready within {start_timeout_secs:.1}s for socket {socket_path}."
+        )));
+    }
+
+    // Wait for API
+    if !wait_for_api(host, port, start_timeout_secs) {
+        remove_pid_file(socket_path);
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+        return Err(TianJiError::Usage(
+            format!("Daemon HTTP API did not become ready within {start_timeout_secs:.1}s at http://{host}:{port}/api/v1/meta.")
+        ));
+    }
+
+    let payload = serde_json::json!({
+        "socket_path": socket_path,
+        "sqlite_path": sqlite_path,
+        "pid": pid,
+        "host": host,
+        "port": port,
+        "api_base_url": format!("http://{host}:{port}"),
+        "running": true,
+    });
+    Ok(serde_json::to_string_pretty(&payload)?)
+}
+
+fn handle_daemon_stop(socket_path: &str) -> Result<String, TianJiError> {
+    let stop_timeout_secs = 2.0;
+    let poll_interval = std::time::Duration::from_millis(100);
+
+    let pid = read_pid_file(socket_path)?.ok_or_else(|| {
+        TianJiError::Usage(format!(
+            "No daemon pid file found for socket {socket_path}. Start the daemon first."
+        ))
+    })?;
+
+    if !is_pid_running(pid) {
+        remove_pid_file(socket_path);
+        return Err(TianJiError::Usage(format!(
+            "Daemon pid {pid} is not running."
+        )));
+    }
+
+    // SIGTERM
+    unsafe {
+        libc::kill(pid as i32, libc::SIGTERM);
+    }
+
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs_f64(stop_timeout_secs);
+    while std::time::Instant::now() < deadline {
+        if !is_pid_running(pid) {
+            remove_pid_file(socket_path);
+            let _ = std::fs::remove_file(socket_path);
+            let payload = serde_json::json!({
+                "socket_path": socket_path,
+                "pid": pid,
+                "running": false,
+            });
+            return Ok(serde_json::to_string_pretty(&payload)?);
+        }
+        std::thread::sleep(poll_interval);
+    }
+
+    // SIGKILL
+    unsafe {
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs_f64(stop_timeout_secs);
+    while std::time::Instant::now() < deadline {
+        if !is_pid_running(pid) {
+            remove_pid_file(socket_path);
+            let _ = std::fs::remove_file(socket_path);
+            let payload = serde_json::json!({
+                "socket_path": socket_path,
+                "pid": pid,
+                "running": false,
+            });
+            return Ok(serde_json::to_string_pretty(&payload)?);
+        }
+        std::thread::sleep(poll_interval);
+    }
+
+    Err(TianJiError::Usage(format!(
+        "Daemon pid {pid} did not stop within {stop_timeout_secs:.1}s."
+    )))
+}
+
+fn handle_daemon_status(socket_path: &str, job_id: Option<&str>) -> Result<String, TianJiError> {
+    let pid = read_pid_file(socket_path)?;
+    let running = pid
+        .map(|p| is_pid_running(p) && std::path::Path::new(socket_path).exists())
+        .unwrap_or(false);
+
+    if let Some(jid) = job_id {
+        let payload = serde_json::json!({
+            "action": "job_status",
+            "job_id": jid,
+        });
+        let response = tianji::daemon::send_daemon_request(socket_path, &payload)?;
+        let ok = response
+            .get("ok")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if ok {
+            let data = response
+                .get("data")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            return Ok(serde_json::to_string_pretty(&data)?);
+        }
+        let error_msg = response
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error");
+        return Err(TianJiError::Usage(error_msg.to_string()));
+    }
+
+    let job_states: Vec<&str> = tianji::daemon::ALLOWED_JOB_STATES.to_vec();
+    let payload = serde_json::json!({
+        "socket_path": socket_path,
+        "pid": pid,
+        "running": running,
+        "job_states": job_states,
+    });
+    Ok(serde_json::to_string_pretty(&payload)?)
+}
+
+fn handle_daemon_run(
+    socket_path: &str,
+    fixture: &str,
+    sqlite_path: Option<&str>,
+) -> Result<String, TianJiError> {
+    let mut run_payload = serde_json::json!({
+        "fixture_paths": [fixture],
+    });
+    if let Some(sp) = sqlite_path {
+        run_payload["sqlite_path"] = serde_json::Value::String(sp.to_string());
+    }
+
+    let payload = serde_json::json!({
+        "action": "queue_run",
+        "payload": run_payload,
+    });
+
+    let response = tianji::daemon::send_daemon_request(socket_path, &payload)?;
+    let ok = response
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if ok {
+        let data = response
+            .get("data")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        return Ok(serde_json::to_string_pretty(&data)?);
+    }
+    let error_msg = response
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())
+        .unwrap_or("Daemon returned an invalid error response.");
+    Err(TianJiError::Usage(error_msg.to_string()))
+}
+
+// ---------------------------------------------------------------------------
+// Main run dispatch
+// ---------------------------------------------------------------------------
 
 fn run(cli: Cli) -> Result<String, TianJiError> {
     match cli {
@@ -547,6 +952,55 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
                     "Run not found for comparison: {resolved_left} vs {resolved_right}"
                 ))),
             }
+        }
+        Cli::Daemon { command } => match command {
+            DaemonCommands::Start {
+                socket_path,
+                sqlite_path,
+                host,
+                port,
+            } => handle_daemon_start(&socket_path, &sqlite_path, &host, port),
+            DaemonCommands::Stop { socket_path } => handle_daemon_stop(&socket_path),
+            DaemonCommands::Status {
+                socket_path,
+                job_id,
+            } => handle_daemon_status(&socket_path, job_id.as_deref()),
+            DaemonCommands::Run {
+                socket_path,
+                fixture,
+                sqlite_path,
+            } => handle_daemon_run(&socket_path, &fixture, sqlite_path.as_deref()),
+            DaemonCommands::Serve {
+                socket_path,
+                sqlite_path,
+                host,
+                port,
+            } => {
+                tianji::daemon::serve(&socket_path, &sqlite_path, &host, port)?;
+                Ok(String::new())
+            }
+        },
+        Cli::Webui {
+            host,
+            port,
+            api_base_url,
+            socket_path,
+            sqlite_path,
+        } => {
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| TianJiError::Usage(format!("Failed to create tokio runtime: {e}")))?;
+            rt.block_on(async {
+                tianji::webui::serve_webui(
+                    &host,
+                    port,
+                    &api_base_url,
+                    &socket_path,
+                    sqlite_path.as_deref(),
+                )
+                .await
+                .map_err(TianJiError::Usage)
+            })?;
+            Ok(String::new())
         }
     }
 }
