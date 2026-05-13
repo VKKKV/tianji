@@ -1,14 +1,20 @@
+pub mod backtrack;
 pub mod fetch;
+pub mod grouping;
 pub mod models;
 pub mod normalize;
+pub mod scoring;
 
 use std::fs;
 use std::path::Path;
 
+use backtrack::backtrack_candidates;
 use fetch::{assign_canonical_hashes, fixture_source_name, parse_feed};
+use grouping::group_events;
 use models::{InputSummary, RunArtifact, ScenarioSummary};
 use normalize::normalize_items;
-use serde_json::json;
+use scoring::{score_events, summarize_scenario};
+use serde_json::Value as JsonValue;
 
 pub const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";
 
@@ -52,6 +58,26 @@ pub fn run_fixture_path(path: impl AsRef<Path>) -> Result<RunArtifact, TianJiErr
     let mut raw_items = parse_feed(&feed_text, &source)?;
     assign_canonical_hashes(&mut raw_items);
     let normalized_events = normalize_items(&raw_items);
+    let scored_events = score_events(&normalized_events);
+    let (headline, dominant_field, risk_level, top_regions, top_actors) =
+        summarize_scenario(&scored_events);
+    let event_groups = group_events(&scored_events);
+    let interventions = backtrack_candidates(&scored_events, 5, Some(&event_groups));
+
+    let scored_events_json: Vec<JsonValue> = scored_events
+        .iter()
+        .map(|e| serde_json::to_value(e).expect("scored event json"))
+        .collect();
+
+    let intervention_candidates_json: Vec<JsonValue> = interventions
+        .iter()
+        .map(|c| serde_json::to_value(c).expect("intervention candidate json"))
+        .collect();
+
+    let event_groups_json: Vec<JsonValue> = event_groups
+        .iter()
+        .map(|g| serde_json::to_value(g).expect("event group json"))
+        .collect();
 
     Ok(RunArtifact {
         schema_version: RUN_ARTIFACT_SCHEMA_VERSION.to_string(),
@@ -65,19 +91,15 @@ pub fn run_fixture_path(path: impl AsRef<Path>) -> Result<RunArtifact, TianJiErr
             sources: vec![source],
         },
         scenario_summary: ScenarioSummary {
-            dominant_field: "uncategorized".to_string(),
-            event_groups: Vec::new(),
-            headline: "Rust Milestone 1A scaffold: feed parsing and normalization are implemented; scoring, grouping, and backtracking parity are not implemented yet."
-                .to_string(),
-            risk_level: "unknown".to_string(),
-            top_actors: Vec::new(),
-            top_regions: Vec::new(),
+            dominant_field,
+            event_groups: event_groups_json,
+            headline,
+            risk_level,
+            top_actors,
+            top_regions,
         },
-        scored_events: normalized_events
-            .into_iter()
-            .map(|event| json!(event))
-            .collect(),
-        intervention_candidates: Vec::new(),
+        scored_events: scored_events_json,
+        intervention_candidates: intervention_candidates_json,
     })
 }
 
@@ -124,17 +146,104 @@ mod tests {
     }
 
     #[test]
-    fn fixture_artifact_makes_missing_scoring_parity_explicit() {
+    fn fixture_scoring_parity_with_python_oracle() {
         let artifact = run_fixture_path(SAMPLE_FIXTURE).expect("fixture artifact");
 
-        assert_eq!(artifact.input_summary.raw_item_count, 3);
-        assert_eq!(artifact.input_summary.normalized_event_count, 3);
         assert_eq!(artifact.scored_events.len(), 3);
-        assert_eq!(artifact.intervention_candidates.len(), 0);
-        assert!(artifact
-            .scenario_summary
-            .headline
-            .contains("not implemented yet"));
+
+        // First event (highest divergence): technology
+        let e0 = &artifact.scored_events[0];
+        assert_eq!(e0["event_id"], "1e007871b783bb48");
+        assert_eq!(e0["dominant_field"], "technology");
+        assert_eq!(e0["impact_score"], 15.79);
+        assert_eq!(e0["field_attraction"], 7.75);
+        assert_eq!(e0["divergence_score"], 20.73);
+
+        // Second event: diplomacy
+        let e1 = &artifact.scored_events[1];
+        assert_eq!(e1["event_id"], "82f82016429ecd76");
+        assert_eq!(e1["dominant_field"], "diplomacy");
+        assert_eq!(e1["impact_score"], 13.04);
+        assert_eq!(e1["field_attraction"], 6.17);
+        assert_eq!(e1["divergence_score"], 16.81);
+
+        // Third event: conflict
+        let e2 = &artifact.scored_events[2];
+        assert_eq!(e2["event_id"], "a617fdd9a05f9f2c");
+        assert_eq!(e2["dominant_field"], "conflict");
+        assert_eq!(e2["impact_score"], 17.1);
+        assert_eq!(e2["field_attraction"], 3.6);
+        assert_eq!(e2["divergence_score"], 15.98);
+    }
+
+    #[test]
+    fn fixture_rationale_matches_python_oracle() {
+        let artifact = run_fixture_path(SAMPLE_FIXTURE).expect("fixture artifact");
+
+        let e0 = &artifact.scored_events[0];
+        let rationale = e0["rationale"].as_array().expect("rationale array");
+        let rationale_strs: Vec<&str> = rationale.iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(
+            rationale_strs,
+            vec![
+                "Im=15.79",
+                "Fa=7.75",
+                "im_title_salience=0.8",
+                "im_field_impact_scaling=0.24",
+                "im_text_signal_intensity=0.72",
+                "actors=usa, china",
+                "regions=east-asia, united-states",
+                "dominant_field=technology:7.75",
+            ]
+        );
+    }
+
+    #[test]
+    fn fixture_scenario_summary_matches_python_oracle() {
+        let artifact = run_fixture_path(SAMPLE_FIXTURE).expect("fixture artifact");
+        let summary = &artifact.scenario_summary;
+
+        assert_eq!(summary.dominant_field, "technology");
+        assert_eq!(summary.risk_level, "high");
+        assert_eq!(summary.top_actors, vec!["usa", "china", "iran"]);
+        assert_eq!(
+            summary.top_regions,
+            vec!["east-asia", "united-states", "middle-east"]
+        );
+        assert!(!summary.headline.contains("not implemented yet"));
+        assert!(summary.headline.contains("technology"));
+    }
+
+    #[test]
+    fn fixture_intervention_candidates_match_python_oracle() {
+        let artifact = run_fixture_path(SAMPLE_FIXTURE).expect("fixture artifact");
+
+        assert_eq!(artifact.intervention_candidates.len(), 3);
+
+        let c0 = &artifact.intervention_candidates[0];
+        assert_eq!(c0["event_id"], "1e007871b783bb48");
+        assert_eq!(c0["target"], "usa");
+        assert_eq!(c0["intervention_type"], "capability-control");
+        assert_eq!(c0["priority"], 1);
+
+        let c1 = &artifact.intervention_candidates[1];
+        assert_eq!(c1["event_id"], "82f82016429ecd76");
+        assert_eq!(c1["target"], "iran");
+        assert_eq!(c1["intervention_type"], "negotiation");
+        assert_eq!(c1["priority"], 2);
+
+        let c2 = &artifact.intervention_candidates[2];
+        assert_eq!(c2["event_id"], "a617fdd9a05f9f2c");
+        assert_eq!(c2["target"], "nato");
+        assert_eq!(c2["intervention_type"], "de-escalation");
+        assert_eq!(c2["priority"], 3);
+    }
+
+    #[test]
+    fn fixture_event_groups_are_empty_for_sample_feed() {
+        let artifact = run_fixture_path(SAMPLE_FIXTURE).expect("fixture artifact");
+        let groups = &artifact.scenario_summary.event_groups;
+        assert!(groups.is_empty());
     }
 
     #[test]
@@ -172,30 +281,32 @@ mod tests {
 
     #[test]
     fn rss_fixture_normalization_matches_python_oracle() {
-        let artifact = run_fixture_path(SAMPLE_FIXTURE).expect("fixture artifact");
-        let events = artifact.scored_events;
+        let feed_text = fs::read_to_string(SAMPLE_FIXTURE).expect("sample fixture");
+        let mut items = parse_feed(&feed_text, "fixture:sample_feed.xml").expect("parsed feed");
+        assign_canonical_hashes(&mut items);
+        let events = normalize_items(&items);
 
-        assert_eq!(events[0]["event_id"], "82f82016429ecd76");
-        assert_eq!(events[0]["keywords"][0], "iran");
-        assert_eq!(events[0]["keywords"][11], "tehran");
-        assert_eq!(events[0]["actors"], json!(["iran"]));
-        assert_eq!(events[0]["regions"], json!(["middle-east"]));
-        assert_eq!(events[0]["field_scores"]["conflict"], 3.5);
-        assert_eq!(events[0]["field_scores"]["diplomacy"], 5.5);
-        assert_eq!(events[0]["field_scores"]["technology"], 0.0);
-        assert_eq!(events[0]["field_scores"]["economy"], 2.0);
+        assert_eq!(events[0].event_id, "82f82016429ecd76");
+        assert_eq!(events[0].keywords[0], "iran");
+        assert_eq!(events[0].keywords[11], "tehran");
+        assert_eq!(events[0].actors, vec!["iran"]);
+        assert_eq!(events[0].regions, vec!["middle-east"]);
+        assert_eq!(events[0].field_scores["conflict"], 3.5);
+        assert_eq!(events[0].field_scores["diplomacy"], 5.5);
+        assert_eq!(events[0].field_scores["technology"], 0.0);
+        assert_eq!(events[0].field_scores["economy"], 2.0);
 
-        assert_eq!(events[1]["event_id"], "1e007871b783bb48");
-        assert_eq!(events[1]["actors"], json!(["usa", "china"]));
-        assert_eq!(events[1]["regions"], json!(["east-asia", "united-states"]));
-        assert_eq!(events[1]["field_scores"]["technology"], 6.5);
-        assert_eq!(events[1]["field_scores"]["economy"], 2.0);
+        assert_eq!(events[1].event_id, "1e007871b783bb48");
+        assert_eq!(events[1].actors, vec!["usa", "china"]);
+        assert_eq!(events[1].regions, vec!["east-asia", "united-states"]);
+        assert_eq!(events[1].field_scores["technology"], 6.5);
+        assert_eq!(events[1].field_scores["economy"], 2.0);
 
-        assert_eq!(events[2]["event_id"], "a617fdd9a05f9f2c");
-        assert_eq!(events[2]["actors"], json!(["nato", "russia"]));
-        assert_eq!(events[2]["regions"], json!(["ukraine", "russia", "europe"]));
-        assert_eq!(events[2]["field_scores"]["conflict"], 3.0);
-        assert_eq!(events[2]["field_scores"]["technology"], 2.0);
+        assert_eq!(events[2].event_id, "a617fdd9a05f9f2c");
+        assert_eq!(events[2].actors, vec!["nato", "russia"]);
+        assert_eq!(events[2].regions, vec!["ukraine", "russia", "europe"]);
+        assert_eq!(events[2].field_scores["conflict"], 3.0);
+        assert_eq!(events[2].field_scores["technology"], 2.0);
     }
 
     #[test]

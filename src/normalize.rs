@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::fetch::{derive_canonical_content_hash, derive_canonical_entry_identity_hash};
 use crate::models::{NormalizedEvent, RawItem};
 
-const REGION_PATTERNS: &[(&str, &str)] = &[
+pub const REGION_PATTERNS: &[(&str, &str)] = &[
     ("ukraine", r"\bukraine\b"),
     ("russia", r"\brussia\b|\bmoscow\b"),
     (
@@ -21,7 +21,7 @@ const REGION_PATTERNS: &[(&str, &str)] = &[
     ("europe", r"\beurope\b|\beu\b|\bnato\b|\bbrussels\b"),
 ];
 
-const ACTOR_PATTERNS: &[(&str, &str)] = &[
+pub const ACTOR_PATTERNS: &[(&str, &str)] = &[
     ("nato", r"\bnato\b"),
     ("eu", r"\beu\b|\beuropean union\b"),
     ("un", r"\bunited nations\b|\bun\b"),
@@ -31,7 +31,7 @@ const ACTOR_PATTERNS: &[(&str, &str)] = &[
     ("iran", r"\biran\b|\btehran\b"),
 ];
 
-const FIELD_KEYWORDS: &[(&str, &[(&str, f64)])] = &[
+pub const FIELD_KEYWORDS: &[(&str, &[(&str, f64)])] = &[
     (
         "conflict",
         &[
@@ -143,12 +143,12 @@ pub fn match_patterns(text: &str, patterns: &[(&str, &str)]) -> Vec<String> {
     let lowered = text.to_lowercase();
     patterns
         .iter()
-        .filter_map(|(name, pattern)| {
+        .filter(|&(_, pattern)| {
             Regex::new(pattern)
                 .expect("valid oracle pattern")
                 .is_match(&lowered)
-                .then(|| (*name).to_string())
         })
+        .map(|(name, _)| (*name).to_string())
         .collect()
 }
 
