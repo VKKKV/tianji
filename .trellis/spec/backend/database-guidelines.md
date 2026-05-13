@@ -1,8 +1,9 @@
 # Database Guidelines
 
-> **Status: Oracle-only.** This document describes the Python oracle's SQLite
-> patterns. The Rust target uses `rusqlite` (Milestone 2). Until then, database
-> concerns are deferred.
+> **Status: Shipped (Milestone 2).** Rust uses `rusqlite` with patterns matching
+> the Python oracle. The sections below document both Python oracle patterns
+> (for parity verification) and Rust implementation conventions (for future
+> development).
 
 ---
 
@@ -211,6 +212,52 @@ ensure_column(connection, table_name="raw_items",
 - Forgetting to `commit()` after writes — always call `connection.commit()` explicitly (or use a context manager that auto-commits)
 - Not wrapping connection in `closing()` — leads to leaked connections
 - Using inconsistent placeholder styles — `storage_write.py` uses `:named` params; `storage_views.py` uses `?` positional params. Match the existing style in the file you're editing.
+
+---
+
+## Rust Database Conventions (Milestone 2+)
+
+The Rust implementation in `src/storage.rs` mirrors the Python oracle's SQLite patterns using `rusqlite`.
+
+### Connection Management
+
+- Every operation opens its own `rusqlite::Connection::open(path)`.
+- `PRAGMA foreign_keys = ON` executed on every connection immediately after opening.
+- No connection pooling, no shared mutable connections.
+- `persist_run()` wraps all inserts in `connection.transaction()` with explicit `tx.commit()`.
+
+### Error Handling
+
+- `rusqlite::Error::QueryReturnedNoRows` is matched specifically for "not found" cases (e.g., `get_run_summary`, `get_latest_run_id`). Other rusqlite errors are propagated via `TianJiError::Storage`.
+- Never use `.ok()` on `query_row()` — it swallows real errors like corrupt DB or missing table.
+
+### Schema
+
+- 6 tables with exact same DDL as Python (see Python Oracle section above).
+- `ensure_column()` migration helper replicated in Rust for additive schema drift.
+- No explicit indexes beyond PKs and `source_items UNIQUE(entry_identity_hash, content_hash)`.
+
+### Query Patterns
+
+- Batch inserts use `prepare()` + loop with `execute()` (rusqlite has no `executemany` with named params).
+- Reads use positional `?` placeholders with `query_row()` or `prepare()` + `query_map()`.
+- Scored events always sorted by `divergence_score DESC, id ASC`.
+- Intervention candidates always sorted by `priority ASC, id ASC`.
+
+### Event Groups (Design Decision)
+
+Event groups are **recomputed on read** from scored_events — never persisted. Rationale:
+- scored_events is the source of truth; event_groups is a derived value.
+- scored_events are immutable post-write, so recomputation is always current.
+- Per-run cost is O(1) on 3-10 scored_events.
+- Follows LiveStore event-sourcing principle: never include derived/computed values in event payloads.
+
+### Gotchas
+
+- `rusqlite::Connection::open()` creates the file if it doesn't exist — same as Python `sqlite3.connect()`.
+- `INSERT OR IGNORE` for source_items dedup requires the UNIQUE constraint to be present.
+- JSON columns are TEXT — serialize with `serde_json::to_string()`, deserialize with `serde_json::from_str()`.
+- `format_evidence_chain_link` must produce deterministic output with sorted components for compare diff parity.
 
 ---
 

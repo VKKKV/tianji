@@ -21,6 +21,7 @@ parity gate has passed. After parity is verified, Python code is retired per
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 | Worldline core + pipeline (Cangjie/Fuxi) | Milestone 1A+1B complete |
+| 2 | Storage + History | Milestone 2 complete |
 | 2 | Hongmeng orchestration layer | Deferred |
 | 3 | Nuwa simulation sandbox | Deferred |
 | 4 | TUI (ratatui + Kanagawa Dark) | Deferred |
@@ -54,11 +55,16 @@ fixture pipeline.
 
 ### Milestone 2 — Storage + History Parity
 
-After core artifact parity. Port the durable local read model.
+**Complete.** Port the durable local read model with field-for-field parity.
 
-- SQLite persistence compatible with the current run-centric model
-- `history`, `history-show`, `history-compare` read semantics
-- Projection vocabulary including scored-event and event-group filters
+- SQLite persistence: 6 tables (`runs`, `source_items`, `raw_items`, `normalized_events`, `scored_events`, `intervention_candidates`) ✅
+- `PRAGMA foreign_keys = ON`, atomic transactions, canonical source item deduplication ✅
+- Event groups recomputed on read (LiveStore principle: never persist derived values) ✅
+- `history`: list/filter runs with 18-key list-item vocabulary, filter-before-limit ✅
+- `history-show`: single-run detail with 8-key vocabulary, scored-event/intervention/event-group projection lenses ✅
+- `history-compare`: pair comparison with 5-key vocabulary, diff computation, presets (--latest-pair, --against-latest, --against-previous) ✅
+- CLI: clap subcommands (`run`, `history`, `history-show`, `history-compare`), `--sqlite-path` optional for `run` ✅
+- 33 tests pass, `cargo fmt --check` clean, `cargo clippy -- -D warnings` clean ✅
 
 ### Milestone 3 — Local Runtime Parity
 

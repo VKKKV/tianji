@@ -30,13 +30,15 @@ roxmltree = "0.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
+rusqlite = { version = "0.32", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
 ```
 
 ### Rust Dependencies (Planned, per `plan.md` §11)
 
 Add only when the milestone requires them:
 
-- Milestone 2: `rusqlite` (SQLite persistence)
+- Milestone 2: `rusqlite` (SQLite persistence), `clap` (CLI subcommands) — **shipped**
 - Milestone 4: `ratatui`, `crossterm` (TUI)
 - Milestone 5: `tokio`, `axum`, `reqwest` (daemon, HTTP)
 - Phase 2+: `blake3`, `petgraph`, `chrono` (worldline, field DAG)

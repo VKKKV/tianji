@@ -13,6 +13,7 @@ The Rust implementation uses `Result<T, TianJiError>` with a custom error enum:
 pub enum TianJiError {
     Usage(String),   // CLI usage errors
     Input(String),   // Feed/input parse errors
+    Storage(rusqlite::Error),  // SQLite errors (Milestone 2+)
     Io(std::io::Error),
     Json(serde_json::Error),
 }
@@ -21,6 +22,7 @@ pub enum TianJiError {
 - Library functions return `Result<T, TianJiError>`
 - `main()` maps errors to stderr + exit code 1
 - No `unwrap()` in library code — propagate errors through `Result`
+- `Storage` variant wraps `rusqlite::Error`; "not found" cases are matched via `rusqlite::Error::QueryReturnedNoRows` and converted to `Option<T>::None` at the call site
 
 ---
 
