@@ -353,3 +353,83 @@ When TianJi extends the terminal UI further, keep the next slices in this order:
 4. only then consider run-triggering or live-runtime concerns
 
 This keeps Phase 5 aligned with current product reality: local-first, deterministic, persisted-analysis-first, and read-only by default.
+
+## Rust TUI MVP Contract
+
+### 1. Scope / Trigger
+
+- Trigger: Milestone 4 introduces the first Rust terminal UI surface.
+- Scope: read-only persisted-run history browser only.
+- Out of scope: run detail, run compare, filters, search, simulation monitoring, profile browsing, live run execution, daemon control.
+
+### 2. Signatures
+
+Rust CLI command:
+
+```bash
+tianji tui --sqlite-path <path> [--limit <N>]
+```
+
+Rust module boundary:
+
+```rust
+pub fn run_history_browser(sqlite_path: &str, limit: usize) -> Result<String, TianJiError>
+```
+
+Storage dependency:
+
+```rust
+list_runs(sqlite_path, limit, &RunListFilters::default())
+```
+
+### 3. Contracts
+
+- `--sqlite-path` is required and points to the SQLite read model used by `history`.
+- `--limit` defaults to `20` and is passed through to existing storage list semantics.
+- The TUI must not mutate SQLite, queue runs, call daemon IPC, or fetch feeds.
+- The history list renders rows derived from persisted run-list payload fields, especially `run_id`, `generated_at`, `mode`, `dominant_field`, `risk_level`, `top_divergence_score`, and `headline`.
+- The terminal view uses ratatui + crossterm, Kanagawa Dark colors from `plan.md` §9, `Block::bordered()`, non-blocking `event::poll(Duration::from_millis(100))`, and a status bar that exposes navigation keys.
+- `run_history_browser` returns an empty string after an interactive session exits successfully so the CLI does not print an extra blank payload.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+|-----------|----------|
+| SQLite path does not exist | Return the empty-state message instead of creating or mutating a database |
+| SQLite exists but no `runs` table | Return the empty-state message |
+| SQLite exists and run list is empty | Return the empty-state message |
+| Storage query fails for other reasons | Propagate `TianJiError` |
+| Terminal setup fails after raw mode is enabled | Disable raw mode and leave alternate screen via cleanup guard |
+| User presses `q` | Exit cleanly without mutating storage |
+| User presses `j` or Down | Move selection down, clamped at the final row |
+| User presses `k` or Up | Move selection up, clamped at the first row |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `tianji tui --sqlite-path runs/tianji.sqlite3` opens a read-only history list when persisted runs exist.
+- Base: `tianji tui --sqlite-path empty.sqlite3` prints `No persisted runs are available for the TUI browser.` and exits successfully when no persisted runs are available.
+- Bad: adding detail/compare/filter/search behavior in the first Rust slice hides the MVP boundary and duplicates existing CLI projection logic too early.
+
+### 6. Tests Required
+
+- Unit-test storage payload to TUI row mapping without requiring an interactive terminal.
+- Unit-test row formatting includes run id, mode, dominant field, divergence, and headline.
+- Unit-test selection clamps at list boundaries.
+- Unit-test key handling for `j`, `k`, Up, Down, and `q`.
+- Run `cargo fmt --check`, `cargo test`, and `cargo clippy -- -D warnings` after TUI changes.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// A TUI handler that writes data or queues work violates the read-only MVP.
+daemon::send_daemon_request(socket_path, queue_run_payload)?;
+```
+
+#### Correct
+
+```rust
+// The MVP reads persisted run rows through the existing storage read model.
+let rows = list_runs(sqlite_path, limit, &RunListFilters::default())?;
+```
