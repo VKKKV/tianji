@@ -3,12 +3,13 @@ target/
 *.rs.bk
 *.pdb
 
-# Python (until fully ported to Rust)
+# Python (port to Rust ongoing)
 __pycache__/
 *.py[cod]
 *$py.class
 .venv/
 .pytest_cache/
+.ruff_cache/
 *.egg-info/
 
 # Node
@@ -18,6 +19,12 @@ node_modules/
 .agents/
 .codex/
 .gemini/
+
+# Trellis backups (recursive bloat)
+.trellis/.backup-*/
+
+# Backup files
+*.backup
 
 # Runtime artifacts
 runs/
@@ -32,3 +39,7 @@ dummy.sqlite3
 *.swp
 *.swo
 *~
+
+# OS
+.DS_Store
+Thumbs.db
