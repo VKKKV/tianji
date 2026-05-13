@@ -6,100 +6,163 @@
 
 ## Overview
 
-TianJi is a **Python 3.12+ stdlib-first** project. The codebase is intentionally lightweight — no heavy frameworks, no ORM, no type checker. Quality is enforced through convention, review, and a deterministic test suite.
+TianJi is a **Rust project** migrating from Python. The Rust implementation under
+`src/` is the product direction. The Python codebase under `tianji/` and `tests/`
+is the migration oracle — it defines the compatibility contract that Rust must
+match gate-by-gate before replacing any Python surface.
 
 ---
 
-## Technology Stack
+## Rust Technology Stack
 
 | Concern | Choice | Constraint |
 |---------|--------|------------|
-| **Language** | Python 3.12+ | No older Python versions |
-| **Package manager** | uv (`uv venv .venv`) | `pyproject.toml`-based |
-| **CLI framework** | Click | All CLI commands use Click decorators |
-| **Database** | Raw `sqlite3` | No ORM |
-| **TUI** | Rich | Terminal UI only |
-| **HTTP server** | `http.server` (stdlib) | No Flask/FastAPI/Starlette |
-| **XML parsing** | `xml.etree.ElementTree` (stdlib) | Feed parsing |
-| **Testing** | `unittest` | Canonical test framework |
-| **Type checking** | None | No mypy/pyright; types in docstrings and runtime asserts |
+| **Language** | Rust 2021 edition | `Cargo.toml`-based |
+| **CLI framework** | `clap` (derive) | Phase 5+ |
+| **XML parsing** | `roxmltree` | Feed parsing (Cangjie) |
+| **Regex** | `regex` crate | Normalization, scoring |
+| **Hashing** | `sha2` crate | Canonical hashes |
+| **Serialization** | `serde` + `serde_json` | Artifact JSON output |
+| **Testing** | `cargo test` | Built-in test framework |
+| **Formatting** | `cargo fmt` | Required: `cargo fmt --check` must pass |
+| **Linting** | `cargo clippy` | Required: `cargo clippy -- -D warnings` must pass |
+
+### Rust Dependencies (Current)
+
+Only dependencies needed for implemented milestones:
+
+```toml
+regex = "1.10"
+roxmltree = "0.20"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+```
+
+### Rust Dependencies (Planned, per `plan.md` §11)
+
+Add only when the milestone requires them:
+
+- Milestone 2: `rusqlite` (SQLite persistence)
+- Milestone 4: `ratatui`, `crossterm` (TUI)
+- Milestone 5: `tokio`, `axum`, `reqwest` (daemon, HTTP)
+- Phase 2+: `blake3`, `petgraph`, `chrono` (worldline, field DAG)
+- Phase 3+: `async-openai`, `ollama-rs` (LLM providers)
 
 ---
 
-## Testing Requirements
+## Rust Testing Requirements
 
 ### Framework
 
-**`unittest` is the canonical test framework.** The operational command is:
+**`cargo test` is the canonical test framework.** Verification commands:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+cargo test
+cargo fmt --check
+cargo clippy -- -D warnings
 ```
-
-`pyproject.toml:11-12` has a pytest stanza but it is **not** the operational test contract.
 
 ### Test Structure
 
 | Convention | Pattern |
 |------------|---------|
-| **File naming** | `test_{feature}.py` — one file per feature |
-| **Class naming** | `{Feature}Tests(unittest.TestCase)` |
-| **Method naming** | `test_{description}` — self-documenting |
-| **Imports** | All tests import from `tests/support.py` (shared import hub) |
-| **Fixtures** | `tests/fixtures/` directory; contract fixtures in `tests/fixtures/contracts/` |
-
-```python
-# tests/test_pipeline.py:1,4 — test template
-from support import *
-
-class PipelineIntegrationTests(unittest.TestCase):
-    def test_run_artifact_contract_fixture_freezes_v1_vocabulary(self) -> None:
-        ...
-```
-
-### Test Patterns
-
-**Integration tests with real pipeline calls** (`tests/test_pipeline.py:10-14`):
-```python
-artifact = run_pipeline(
-    fixture_paths=[str(FIXTURE_PATH)],
-    fetch=False, source_urls=[], output_path=None,
-)
-```
-No mocking of pipeline stages — integration tests exercise real orchestration.
-
-**Local HTTP servers for fetch testing** (`tests/test_pipeline.py:72-91`):
-```python
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-self.addCleanup(server.shutdown)
-self.addCleanup(server.server_close)
-```
-
-**`TemporaryDirectory` for isolation** (`tests/test_pipeline.py:50`):
-```python
-with TemporaryDirectory() as tmpdir:
-    sqlite_path = Path(tmpdir) / "tianji.sqlite3"
-```
-
-**Contract fixture freezing** (`tests/test_pipeline.py:5-47`):
-```python
-artifact_fixture = cast(dict[str, object], load_contract_fixture("run_artifact_v1.json"))
-self.assertEqual(set(payload), set(artifact_fixture))
-```
-
-**Resource cleanup with `self.addCleanup()`** (`tests/test_pipeline.py:89-90`):
-```python
-self.addCleanup(server.shutdown)
-self.addCleanup(server.server_close)
-```
+| **Unit tests** | `#[cfg(test)] mod tests` inside each module |
+| **Integration tests** | Tests in `src/lib.rs` exercising full pipeline |
+| **Fixture path** | `tests/fixtures/sample_feed.xml` |
+| **Contract fixture** | `tests/fixtures/contracts/run_artifact_v1.json` |
 
 ### Test Coverage Expectations
 
 - Pipeline integration: every stage exercised end-to-end
-- Scoring: deterministic numeric assertions on known inputs
-- History: all CLI presets (`--latest`, `--previous`, `--next`, `--latest-pair`, `--against-latest`, `--against-previous`)
-- Daemon: lifecycle (start → status → run → stop)
-- TUI: render output and state transitions
+- Scoring: deterministic numeric assertions on known inputs (exact-value + factor isolation)
+- Grouping: event group structure and causal ordering
+- Backtracking: intervention candidate generation
+- Contract: top-level and nested artifact keys match Python oracle
+- Hash parity: canonical hashes match Python SHA-256 expectations
+
+### Python Oracle Verification
+
+The Python test suite must still pass to confirm the oracle is intact:
+
+```bash
+uv venv .venv && uv pip install -e .
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+---
+
+## Rust Code Standards
+
+### Structs for Data
+
+All structured data uses typed Rust structs:
+
+```rust
+// src/models.rs — all model types
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct NormalizedEvent {
+    pub event_id: String,
+    pub source: String,
+    pub title: String,
+    ...
+}
+
+#[derive(Debug, Serialize)]
+pub struct RunArtifact {
+    pub schema_version: String,
+    pub mode: String,
+    ...
+}
+```
+
+### JSON Serialization
+
+Use `serde_json::to_string_pretty()` for artifact output:
+
+```rust
+pub fn artifact_json(artifact: &RunArtifact) -> Result<String, TianJiError> {
+    Ok(serde_json::to_string_pretty(artifact)?)
+}
+```
+
+### Error Handling
+
+Use the `TianJiError` enum with `Result<T, TianJiError>` returns:
+
+```rust
+#[derive(Debug)]
+pub enum TianJiError {
+    Usage(String),
+    Input(String),
+    Io(std::io::Error),
+    Json(serde_json::Error),
+}
+```
+
+See `error-handling.md` for full details.
+
+### Naming
+
+| Element | Convention | Example |
+|---------|------------|---------|
+| Modules | `snake_case.rs` | `scoring.rs`, `backtrack.rs` |
+| Structs | `PascalCase` | `RunArtifact`, `ScoredEvent` |
+| Functions | `snake_case` | `run_fixture_path`, `normalize_item` |
+| Constants | `UPPER_SNAKE` | `ATOM_NS`, `FIELD_KEYWORDS` |
+| Private helpers | `snake_case` (module-local) | `clean_text`, `sha256_hex` |
+
+### Spec Document Naming
+
+Specification documents under `.trellis/spec/` use **lowercase kebab-case** filenames.
+
+---
+
+## File Size Guidelines
+
+- If a Rust module exceeds ~500 lines, consider splitting into submodules
+- If a module exceeds ~800 lines, it should definitely be split
+- Test modules within `src/` can be larger due to many test cases
 
 ---
 
@@ -107,133 +170,72 @@ self.addCleanup(server.server_close)
 
 | Pattern | Why |
 |---------|-----|
-| **Adding an ORM** | SQLite is stdlib-only by design |
-| **Adding a web framework** | HTTP is served via stdlib `http.server` |
-| **Adding a type checker** | Types are documented in dataclasses and runtime asserts |
-| **Introducing a second test runner** | Stay with `unittest` |
-| **Tests depending on public network** | All fetch tests use local HTTP servers |
+| **Adding dependencies before the milestone that needs them** | Each milestone adds only what it uses |
+| **Async runtimes before Phase 2+** | No `tokio` until daemon/simulation needs it |
+| **Web frameworks before Milestone 5** | No `axum` until daemon/API milestone |
+| **TUI crates before Milestone 4** | No `ratatui` until TUI milestone |
+| **LLM crates before Phase 3+** | No `async-openai`/`ollama-rs` until simulation |
+| **Tests depending on public network** | All tests use local fixtures |
 | **Asserting against incidental formatting** | Assert on artifact semantics, not whitespace |
-| **Nesting test directories** | `tests/` stays flat |
-| **Bypassing CLI input rules** | No run without `--fixture` or `--fetch` plus at least one resolved source |
-| **Cloud-required dependencies** | Local-first; no cloud SDKs |
-| **Opaque model-driven behavior** | Deterministic heuristics first |
-
----
-
-## Code Standards
-
-### Dataclasses for Data
-
-All structured data uses `dataclasses.dataclass`:
-
-```python
-# tianji/models.py — all model types
-@dataclass
-class RawItem:
-    source: str
-    title: str
-    ...
-
-@dataclass
-class RunArtifact:
-    ...
-    def to_dict(self) -> dict[str, object]:
-        ...
-```
-
-### Dataclass Contract: `to_dict()`
-
-Serializable dataclasses implement `to_dict()` returning `dict[str, object]`:
-
-```python
-# tianji/models.py — RunArtifact.to_dict()
-def to_dict(self) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "generated_at": self.generated_at.isoformat(),
-        "input_summary": ...,
-        "scored_events": [e.to_dict() for e in self.scored_events],
-        ...
-    }
-```
-
-### JSON Serialization
-
-Consistent `json.dumps()` pattern:
-```python
-json.dumps(data, ensure_ascii=False, indent=2)
-```
-
-### Naming
-
-| Element | Convention | Example |
-|---------|------------|---------|
-| Files | `snake_case.py` | `storage_write.py` |
-| Classes | `PascalCase` | `PipelineIntegrationTests` |
-| Functions | `snake_case` | `run_pipeline`, `normalize_item` |
-| Constants | `UPPER_SNAKE` | `FIXTURE_PATH` |
-| Private helpers | `_leading_underscore` | `_error_envelope` |
-
-### Convention: Separate Code Naming from Spec Naming
-
-**What**: Python code and Trellis spec documents use different filename conventions.
-
-**Why**: Source files follow Python module rules, while spec files are documentation artifacts that read better and link more consistently in lowercase kebab-case.
-
-**Correct split**:
-
-```text
-# Python source
-tianji/storage_write.py
-tianji/cli_history.py
-
-# Trellis specs
-.trellis/spec/backend/scoring-spec.md
-.trellis/spec/backend/contracts/local-api-contract.md
-```
-
-**Wrong split**:
-
-```text
-# Don't mix styles
-.trellis/spec/backend/SCORING_SPEC.md
-.trellis/spec/backend/contracts/LOCAL_API_CONTRACT.md
-```
-
-Use this rule when moving older root docs into `.trellis/spec/`: rename them to lowercase kebab-case as part of the move, then update all references in indexes, AGENTS files, and product docs.
-
----
-
-## File Size Guidelines
-
-- If a file exceeds ~400 lines, consider splitting it (like `storage.py` → `storage_write.py` + `storage_views.py` + etc.)
-- If a file exceeds ~800 lines, it should definitely be split
-- Exceptions: test files for scoring (`test_scoring.py:1457`) can be large due to many test cases
+| **Bypassing CLI input rules** | No run without `--fixture` plus at least one resolved source |
+| **Deleting Python code before parity gates pass** | Python is the oracle |
+| **Extending Python code as product direction** | New features go in Rust |
 
 ---
 
 ## Anti-Patterns to Avoid
 
-- **Don't treat upstream inspiration as first-party implementation** — reimplement inside TianJi
+- **Don't treat Python as the product direction** — it is the oracle
 - **Don't design for daemon/IPC/web UI before one-shot flow is correct** — CLI first
 - **Don't replace deterministic logic with opaque model-driven behavior** — deterministic first
 - **Don't add cloud-required dependencies** — local-only MVP
-- **Don't bypass CLI input rules** — `--fixture` or `--fetch` + resolved source required
+- **Don't claim Rust parity without verifying against Python oracle output**
 
 ---
 
 ## Pre-Commit Checklist
 
-Before committing any change:
+Before committing any Rust change:
+
+- [ ] `cargo test` passes
+- [ ] `cargo fmt --check` passes
+- [ ] `cargo clippy -- -D warnings` passes
+- [ ] New code follows existing patterns (look at neighboring modules)
+- [ ] No new dependencies in `Cargo.toml` without milestone justification
+- [ ] Tests don't depend on public network
+- [ ] Python oracle tests still pass (if Python venv available)
+
+---
+
+## Python Oracle Reference (Migration Compatibility)
+
+The sections below describe the Python oracle codebase for parity verification.
+These are **not** coding standards for new code — they document the existing
+Python behavior that Rust must match.
+
+### Python Technology Stack
+
+| Concern | Choice | Constraint |
+|---------|--------|------------|
+| **Language** | Python 3.12+ | Oracle only |
+| **Package manager** | uv (`uv venv .venv`) | `pyproject.toml`-based |
+| **CLI framework** | Click | Oracle only |
+| **Database** | Raw `sqlite3` | No ORM |
+| **TUI** | Rich | Oracle only |
+| **Testing** | `unittest` | Oracle verification |
+
+### Python Data Model
+
+- All structured data uses `dataclasses.dataclass`
+- Serializable dataclasses implement `to_dict()` returning `dict[str, object]`
+- JSON output uses `json.dumps(data, ensure_ascii=False, indent=2)`
+
+### Python Pre-Commit Checklist
 
 - [ ] All existing `unittest` tests pass
-- [ ] New code follows existing patterns (look at neighboring files)
 - [ ] No new dependencies added to `pyproject.toml` without justification
-- [ ] No `print()` debug statements left in
-- [ ] No `logging` module imports
 - [ ] Database schema changes use `ensure_column()` for additive changes only
 - [ ] CLI output uses `click.echo()` with JSON format
-- [ ] Tests don't depend on public network
 
 ---
 

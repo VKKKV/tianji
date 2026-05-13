@@ -4,6 +4,33 @@
 
 ---
 
+## Rust Error Model (Current)
+
+The Rust implementation uses `Result<T, TianJiError>` with a custom error enum:
+
+```rust
+#[derive(Debug)]
+pub enum TianJiError {
+    Usage(String),   // CLI usage errors
+    Input(String),   // Feed/input parse errors
+    Io(std::io::Error),
+    Json(serde_json::Error),
+}
+```
+
+- Library functions return `Result<T, TianJiError>`
+- `main()` maps errors to stderr + exit code 1
+- No `unwrap()` in library code — propagate errors through `Result`
+
+---
+
+## Python Oracle Error Handling (Compatibility Reference)
+
+The sections below document the Python oracle's error patterns for parity
+verification. They are **not** coding standards for new Rust code.
+
+---
+
 ## Overview
 
 TianJi uses **exceptions as the primary error mechanism** — no `Optional`/`Result`-style return values. Each architectural layer has its own error boundaries and re-raising strategy.

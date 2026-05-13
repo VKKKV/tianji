@@ -11,7 +11,7 @@ architecture document is root `plan.md`, which defines four subsystems
 phased build order.
 
 **Current state:**
-- Rust: Milestone 0 scaffold landed (`cargo run -- run --fixture <path>`), Milestone 1A (feed + normalization parity) in progress on the `rust-cli` branch.
+- Rust: Milestone 1A+1B complete (feed + normalization + scoring + grouping + backtracking parity). Pipeline produces field-for-field compatible `RunArtifact` with Python oracle.
 - Python: shipped product surface under `tianji/` and `tests/` — preserved as the migration oracle until Rust parity gates pass.
 
 ## STRUCTURE

@@ -6,121 +6,159 @@
 
 ## Overview
 
-TianJi uses a **flat module organization** inside the single `tianji/` package. Files are named by their stage in the pipeline (`fetch.py`, `normalize.py`, `scoring.py`, `backtrack.py`). When a file grows too large, it splits on a prefix convention (`cli_*.py`, `storage_*.py`, `tui_*.py`). The test suite mirrors this flatness with `tests/support.py` as the shared import hub.
+TianJi is a **Rust project** with a Python oracle codebase preserved for
+compatibility verification. The authoritative project structure is defined
+in `plan.md` §10.
 
 ---
 
-## Directory Layout
+## Rust Directory Layout (Target)
+
+The target Rust project structure per `plan.md` §10:
 
 ```
 tianji/
-├── tianji/                  # Owned Python source; current product surface
-│   ├── __init__.py          # Empty (package marker)
-│   ├── __main__.py          # Entry: delegates to cli.main()
-│   ├── cli.py               # Click CLI entry: run/daemon/history/history-show/history-compare/tui commands
-│   ├── cli_history.py       # History subcommand handlers (list, show, compare)
-│   ├── cli_sources.py       # Source config registry loading and resolution
-│   ├── cli_validation.py    # Parameter validation (score ranges, run IDs, schedule specs)
-│   ├── cli_daemon.py        # Daemon subcommand handlers (start, stop, status, run, schedule)
-│   ├── models.py            # Dataclasses: RawItem, NormalizedEvent, ScoredEvent, InterventionCandidate, RunArtifact
-│   ├── fetch.py             # Feed parsing (RSS/Atom), URL fetching, fixture reading, canonical hashing
-│   ├── normalize.py         # Event extraction: keyword extraction, region/actor matching, field scoring
-│   ├── scoring.py           # Divergence scoring: Im (impact) and Fa (field attraction) with rationale
-│   ├── backtrack.py         # Intervention candidate generation from scored events and event groups
-│   ├── pipeline.py          # Orchestration spine + event grouping/clustering algorithms
-│   ├── storage.py           # Public re-export hub for storage_write, storage_views, storage_filters, storage_compare
-│   ├── storage_write.py     # Schema init, column migration, all INSERTs, persist_run()
-│   ├── storage_views.py     # Read queries: list_runs, get_run_summary, navigation helpers, row coercion
-│   ├── storage_filters.py   # In-memory filtering for events, candidates, groups, run lists
-│   ├── storage_compare.py   # Run comparison: compare_runs, diff building, evidence chain diffing
-│   ├── daemon.py            # UNIX-socket daemon: job queue, thread pool, HTTP API wrapper
-│   ├── api.py               # Loopback HTTP API (meta, runs, compare endpoints)
-│   ├── tui.py               # Rich TUI entry: terminal raw mode, browser session
-│   ├── tui_render.py        # TUI rendering: layout, panel formatting, row formatting
-│   ├── tui_state.py         # TUI state machine: HistoryListState, key handling, projection
-│   ├── webui_server.py      # Optional web UI server; proxies API calls to daemon
-│   └── webui/               # Static web frontend assets
-├── tests/                   # Owned verification surface; fixture-first unittest suite
-│   ├── support.py           # Shared imports hub + FIXTURE_PATH + load_contract_fixture()
-│   ├── test_pipeline.py     # Integration: pipeline, persistence, canonical hashing, RSS/Atom parsing
-│   ├── test_scoring.py      # Unit: Im/Fa scoring semantics, field attraction, rationale
-│   ├── test_cli_inputs.py   # CLI: source config resolution, failure paths
-│   ├── test_history_*.py    # History: list, show, compare operations
-│   ├── test_daemon.py       # Daemon: lifecycle, job queue
-│   ├── test_tui*.py         # TUI: render, state, integration
-│   ├── test_webui*.py       # Web UI: server and browser tests
-│   └── fixtures/            # Test data
-│       ├── sample_feed.xml  # Canonical deterministic RSS 2.0 feed
-│       └── contracts/       # Expected API payload schemas (run_artifact, history_list, etc.)
-├── pyproject.toml
-├── AGENTS.md
+├── Cargo.toml
+├── src/
+│   ├── main.rs
+│   ├── lib.rs
+│   ├── models.rs               # Worldline, Event, Profile, ActionProposal...
+│   ├── error.rs
+│   │
+│   ├── cangjie/
+│   │   ├── mod.rs
+│   │   ├── feed.rs             # RSS/Atom (quick-xml)
+│   │   ├── fetch.rs            # HTTP (reqwest)
+│   │   ├── normalize.rs        # regex keyword/actor/region extraction
+│   │   └── sources.rs          # source registry + fetch policy
+│   │
+│   ├── fuxi/
+│   │   ├── mod.rs
+│   │   ├── worldline.rs        # Worldline state machine + Blake3 snapshot
+│   │   ├── scoring.rs          # Im/Fa + divergence
+│   │   ├── grouping.rs         # event grouping + causal ordering
+│   │   ├── backtrack.rs        # intervention candidates
+│   │   ├── triggers.rs         # threshold/pattern detection
+│   │   └── dependency.rs       # petgraph field DAG
+│   │
+│   ├── hongmeng/               # Phase 2+
+│   ├── nuwa/                   # Phase 3+
+│   ├── storage.rs              # rusqlite: worldlines, runs, profiles, checkpoints
+│   ├── llm.rs                  # LLM abstraction layer
+│   │
+│   ├── cli/                    # clap derive
+│   ├── tui/                    # ratatui
+│   ├── daemon/                 # axum + UNIX socket
+│   ├── webui.rs                # axum serve static
+│   └── output.rs               # terminal formatting (tabled + JSON)
+│
+├── profiles/                   # Actor profile YAML
+├── rules/                      # Auto trigger rules
+├── tianji/webui/               # Static Web UI (preserved)
+├── tests/
+│   ├── fixtures/sample_feed.xml
+│   ├── test_pipeline.rs
+│   ├── test_scoring.rs
+│   └── ...
+├── plan.md
 └── README.md
 ```
 
+### Current State (Milestone 1A+1B Complete)
+
+The Rust crate currently implements Cangjie/Fuxi core parity:
+
+```
+src/
+├── main.rs          # CLI entry: cargo run -- run --fixture <path>
+├── lib.rs           # Pipeline orchestration + integration tests
+├── models.rs        # RawItem, NormalizedEvent, ScoredEvent, RunArtifact, etc.
+├── fetch.rs         # RSS/Atom parsing + canonical hashing (Cangjie)
+├── normalize.rs     # Keyword/actor/region extraction + field scores (Cangjie)
+├── scoring.rs       # Im/Fa scoring + rationale (Fuxi)
+├── grouping.rs      # Event grouping + causal ordering (Fuxi)
+└── backtrack.rs     # Intervention candidate generation (Fuxi)
+```
+
+This will expand to the target structure as milestones are implemented.
+
 ---
 
-## Module Organization
+## Rust Module Organization
 
-### Flat Package with Stage-Oriented Files
+### Stage-Oriented Modules
 
-Each pipeline stage gets its own file:
-- `fetch.py` → `normalize.py` → `scoring.py` → `backtrack.py`
-- `pipeline.py` orchestrates them
+Each pipeline stage gets its own module, grouped under subsystem namespaces:
+
+- `cangjie::feed` → `cangjie::normalize` (Milestone 1A, currently flat in `src/`)
+- `fuxi::scoring` → `fuxi::grouping` → `fuxi::backtrack` (Milestone 1B, currently flat in `src/`)
 
 ### Naming Conventions
 
 | Convention | Pattern | When to Use |
 |------------|---------|-------------|
-| Stage files | `{stage}.py` | One file per pipeline stage (`fetch.py`, `scoring.py`) |
-| Prefixed sub-files | `{prefix}_{name}.py` | When a module grows too large — share a prefix (`cli_*.py`, `storage_*.py`, `tui_*.py`) |
-| Hub re-exports | `{prefix}.py` | Re-export the public API from sub-modules (`storage.py` re-exports from `storage_write.py`, `storage_views.py`, etc.) |
-| Test files | `test_{feature}.py` | One test file per feature, all in the flat `tests/` directory |
-| Test support | `tests/support.py` | Single shared import hub for all tests |
+| Stage modules | `{stage}.rs` | One file per pipeline stage (`scoring.rs`, `backtrack.rs`) |
+| Subsystem dirs | `{subsystem}/mod.rs` + `*.rs` | When a subsystem has 3+ modules (`cangjie/`, `fuxi/`) |
+| CLI commands | `cli/{command}.rs` | One file per CLI command (`cli/run.rs`, `cli/history.rs`) |
+| Test modules | `#[cfg(test)] mod tests` inside each module | Unit tests co-located with code |
+| Integration tests | Tests in `src/lib.rs` | End-to-end pipeline tests |
 
 ### Spec Document Naming
 
-Specification documents under `.trellis/spec/` use **lowercase kebab-case** filenames instead of root-doc uppercase names.
-
-| Document Type | Pattern | Examples |
-|---------------|---------|----------|
-| Backend specs | `lowercase-kebab-case.md` | `scoring-spec.md`, `development-plan.md` |
-| Backend contracts | `lowercase-kebab-case.md` | `daemon-contract.md`, `local-api-contract.md`, `tui-contract.md`, `web-ui-contract.md` |
-| Guide docs | `lowercase-kebab-case.md` | `code-reuse-thinking-guide.md`, `cross-layer-thinking-guide.md` |
-
-Why this project uses it:
-- spec files behave like a structured documentation tree, not root-level product docs
-- kebab-case keeps paths visually consistent in indexes and cross-links
-- it avoids carrying older root-doc naming style such as `SCORING_SPEC.md` or `TUI_CONTRACT.md` into the Trellis spec tree
-
-Examples:
+Specification documents under `.trellis/spec/` use **lowercase kebab-case** filenames.
 
 ```text
 .trellis/spec/backend/scoring-spec.md
-.trellis/spec/backend/development-plan.md
 .trellis/spec/backend/contracts/local-api-contract.md
-```
-
-```text
-# Don't do this inside .trellis/spec/
-.trellis/spec/backend/SCORING_SPEC.md
-.trellis/spec/backend/contracts/LOCAL_API_CONTRACT.md
 ```
 
 ### Forbidden Patterns
 
-- **No `utils.py` catch-all** — every file has a specific purpose and name
-- **No deeply nested sub-packages** — keep the package flat until multiple files per stage justify nesting
-- **No `__init__.py` that does work** — `tianji/__init__.py` is empty
-- **No test subdirectories** — `tests/` stays flat
-- **No root-doc uppercase names inside `.trellis/spec/`** — use lowercase kebab-case for spec and contract documents
+- **No `utils.rs` catch-all** — every file has a specific purpose and name
+- **No premature subsystem directories** — create `cangjie/` when it has 3+ files, not before
+- **No root-doc uppercase names inside `.trellis/spec/`** — use lowercase kebab-case
 
 ---
 
-## Examples of Well-Organized Modules
+## Python Oracle Directory Layout (Compatibility Reference)
 
-- **Storage split**: `storage_write.py:402` handles writes, `storage_views.py:475` handles reads, `storage_filters.py:251` handles in-memory filtering, `storage_compare.py:423` handles comparisons — all re-exported through `storage.py:81`
-- **CLI split**: `cli.py:789` defines the command tree, delegates heavy handlers to `cli_history.py`, `cli_daemon.py`, `cli_sources.py`, `cli_validation.py`
-- **TUI split**: `tui.py:77` (entry), `tui_render.py` (rendering), `tui_state.py` (state machine)
+The Python codebase is preserved as the migration oracle. It is NOT the product
+direction — it is the compatibility contract that Rust must match.
+
+```
+tianji/
+├── tianji/                  # Python oracle source
+│   ├── __init__.py
+│   ├── __main__.py          # Entry: python3 -m tianji
+│   ├── cli.py               # Click CLI entry
+│   ├── cli_*.py             # CLI subcommand handlers
+│   ├── models.py            # Dataclasses: RawItem, NormalizedEvent, ScoredEvent...
+│   ├── fetch.py             # Feed parsing + canonical hashing
+│   ├── normalize.py         # Event extraction + field scoring
+│   ├── scoring.py           # Im/Fa scoring + rationale
+│   ├── backtrack.py         # Intervention candidates
+│   ├── pipeline.py          # Orchestration + grouping
+│   ├── storage*.py          # SQLite persistence hub + sub-modules
+│   ├── daemon.py            # UNIX-socket daemon
+│   ├── api.py               # Loopback HTTP API
+│   ├── tui*.py              # Rich TUI (oracle — target is ratatui per plan.md §9)
+│   └── webui*/              # Optional web UI
+├── tests/                   # Python oracle tests
+│   ├── support.py           # Shared imports hub
+│   ├── test_*.py            # Feature tests
+│   └── fixtures/            # Test data + contract fixtures
+├── pyproject.toml
+└── README.md
+```
+
+---
+
+## Examples of Well-Organized Rust Modules
+
+- **Models**: `src/models.rs` — flat struct definitions for all pipeline data types
+- **Scoring**: `src/scoring.rs` — `compute_im`, `compute_fa`, `compute_divergence_score`, `build_rationale`, `score_events`
+- **Grouping**: `src/grouping.rs` — `group_events`, `summarize_group`, `build_evidence_chain`
+- **Backtracking**: `src/backtrack.rs` — `backtrack_candidates`, `infer_intervention_type`, `build_reason`
 
 ---
 

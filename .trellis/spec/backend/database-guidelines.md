@@ -1,6 +1,15 @@
 # Database Guidelines
 
-> Database patterns and conventions for this project.
+> **Status: Oracle-only.** This document describes the Python oracle's SQLite
+> patterns. The Rust target uses `rusqlite` (Milestone 2). Until then, database
+> concerns are deferred.
+
+---
+
+## Python Oracle Database Patterns (Compatibility Reference)
+
+The sections below document the Python oracle's SQLite patterns for parity
+verification. They are **not** coding standards for new Rust code.
 
 ---
 
