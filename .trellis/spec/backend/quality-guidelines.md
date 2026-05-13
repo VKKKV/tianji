@@ -157,6 +157,41 @@ See `error-handling.md` for full details.
 
 Specification documents under `.trellis/spec/` use **lowercase kebab-case** filenames.
 
+### Determinism and Hot-Path Helpers
+
+- State-affecting collections must use deterministic ordering (`BTreeMap`, sorted `Vec`, or explicit sorting) rather than relying on `HashMap` iteration order. This applies to pipeline grouping, backtracking candidate selection, daemon job registries, and any future worldline state.
+- Regexes used inside per-item, per-event, per-keyword, or timestamp parse paths must be compiled once with `std::sync::LazyLock<regex::Regex>` or an equivalent module-local cache. Do not call `Regex::new(...)` inside loops or frequently called helpers unless the pattern is truly dynamic.
+
+```rust
+use regex::Regex;
+use std::sync::LazyLock;
+
+static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-z0-9][a-z0-9-]{2,}").unwrap());
+
+fn extract_tokens(text: &str) -> Vec<&str> {
+    TOKEN_RE.find_iter(text).map(|m| m.as_str()).collect()
+}
+```
+
+#### Wrong
+
+```rust
+fn extract_tokens(text: &str) -> Vec<&str> {
+    let token_re = Regex::new(r"[a-z0-9][a-z0-9-]{2,}").unwrap();
+    token_re.find_iter(text).map(|m| m.as_str()).collect()
+}
+```
+
+#### Correct
+
+```rust
+static TOKEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-z0-9][a-z0-9-]{2,}").unwrap());
+
+fn extract_tokens(text: &str) -> Vec<&str> {
+    TOKEN_RE.find_iter(text).map(|m| m.as_str()).collect()
+}
+```
+
 ---
 
 ## File Size Guidelines

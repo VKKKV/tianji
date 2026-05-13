@@ -79,6 +79,12 @@ Recommended response:
 Purpose:
 - API form of current `history`
 
+Contract:
+- `limit` is optional and defaults to the backend history default.
+- `limit <= 0` is invalid and returns an API error envelope.
+- Implementations must cap excessive positive `limit` values to a bounded maximum before calling storage. The Rust implementation currently caps at `200` to keep the local read API from allocating unbounded result vectors.
+- Storage may push `LIMIT` into SQL when no read-time filters are active. If filters are active, preserve filter-before-limit semantics rather than returning the first N rows before filtering.
+
 Recommended `data` shape:
 
 ```json

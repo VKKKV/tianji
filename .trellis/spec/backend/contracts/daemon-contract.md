@@ -40,6 +40,69 @@ The daemon is not a second source of truth for writes. The synchronous CLI `run`
 - API port: `8765`
 - SQLite path in examples: `runs/tianji.sqlite3`
 
+## Process Lifecycle Contract
+
+### 1. Scope / Trigger
+
+- Trigger: `tianji daemon start` launches the current executable as a detached `daemon serve` child process and the parent process returns after socket/API readiness checks.
+
+### 2. Signatures
+
+- `tianji daemon start --sqlite-path <path> --socket-path <path> --pid-path <path> --host <loopback> --port <port>`
+- Internal child command: `tianji daemon serve --sqlite-path <path> --socket-path <path> --host <loopback> --port <port>`
+
+### 3. Contracts
+
+- `--host` must validate to a loopback host before bind or readiness URL construction.
+- IPv6 loopback hosts must be bracketed when formatted as socket addresses or URLs, e.g. `[::1]:8765` and `http://[::1]:8765/api/v1/meta`.
+- The parent process must retain the spawned `Child` until the readiness checks complete.
+- On startup failure after spawn, the parent must terminate and wait on the child before returning an error. Dropping `Child` without `wait` is forbidden because it can leave zombie processes.
+- On startup success, the parent may return without waiting because the daemon child has become the long-lived process advertised by the PID file.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+|-----------|----------|
+| Host is not loopback | Return a usage/input error before spawn/bind |
+| Child process cannot be spawned | Return an I/O error and do not write a PID file |
+| Socket or API readiness times out | Remove the PID file, terminate the child, wait/reap it, then return a startup error |
+| Child exits before readiness | Reap the child and return a startup error |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `tianji daemon start --host 127.0.0.1 --port 8765` writes a PID file only for a daemon that passed readiness checks.
+- Base: `tianji daemon start --host ::1 --port 8765` formats checks as `[::1]:8765` / `http://[::1]:8765/...`.
+- Bad: spawning the child, timing out, calling `kill`, and returning without `wait`.
+
+### 6. Tests Required
+
+- Unit-test loopback address formatting for IPv4 and IPv6.
+- Unit-test host validation rejects non-loopback hosts.
+- Regression-test failure-path cleanup where feasible without depending on a long-lived external process.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+let child = cmd.spawn()?;
+if !ready {
+    child.kill()?;
+    return Err(error);
+}
+```
+
+#### Correct
+
+```rust
+let mut child = cmd.spawn()?;
+if !ready {
+    let _ = child.kill();
+    let _ = child.wait();
+    return Err(error);
+}
+```
+
 ## Operator Commands
 
 Start the daemon and hosted read API:
