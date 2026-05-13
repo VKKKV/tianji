@@ -395,7 +395,10 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("/tmp/tianji_test_{}.sqlite3", id)
+        let path = format!("/tmp/tianji_test_{}.sqlite3", id);
+        // Ensure clean slate — previous runs may have left stale files
+        let _ = std::fs::remove_file(&path);
+        path
     }
 
     fn cleanup_db(path: &str) {

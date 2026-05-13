@@ -93,11 +93,12 @@ pub fn normalize_item(item: &RawItem) -> NormalizedEvent {
         item.content_hash.clone()
     };
     let text = clean_text(&format!("{title}\n{summary}"));
-    let event_id = format!(
-        "{:x}",
+    let event_id =
         Sha256::digest(format!("{}|{}|{}", item.source, item.title, item.link).as_bytes())
-    )[..16]
-        .to_string();
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()[..16]
+            .to_string();
 
     NormalizedEvent {
         event_id,

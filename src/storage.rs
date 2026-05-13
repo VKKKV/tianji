@@ -221,7 +221,7 @@ fn insert_intervention_candidates(
             "INSERT INTO intervention_candidates (run_id, priority, event_id, target, intervention_type, reason, expected_effect) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 run_id,
-                candidate.priority,
+                candidate.priority as i64,
                 candidate.event_id,
                 candidate.target,
                 candidate.intervention_type,

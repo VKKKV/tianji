@@ -337,7 +337,7 @@ pub fn build_router() -> Router<AppState> {
         .route("/api/v1/meta", get(get_meta))
         .route("/api/v1/runs", get(get_runs))
         .route("/api/v1/runs/latest", get(get_latest_run))
-        .route("/api/v1/runs/:run_id", get(get_run_by_id))
+        .route("/api/v1/runs/{run_id}", get(get_run_by_id))
         .route("/api/v1/compare", get(get_compare))
         .fallback(fallback)
 }
