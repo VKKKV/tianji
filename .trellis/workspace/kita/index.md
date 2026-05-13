@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-0.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-05-13
 <!-- @@@/auto:current-status -->
 
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-05-13 | Rust Cangjie/Fuxi core parity + trellis spec alignment | `04dff73`, `aed6b82`, `b24e0a8`, `4835f4b`, `3d4a40e` | `rust-cli` |
 | 1 | 2026-05-13 | Align Rust migration plan with Trellis | `adf560f` | `rust-cli` |
 <!-- @@@/auto:session-history -->
 
