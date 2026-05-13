@@ -1,294 +1,344 @@
-# TianJi 全量 Rust 重写计划
+# TianJi 全量 Rust 重写计划 v2
 
 > 分支: `rust-cli` | 更新: 2026-05-13
-> 目标: 用 Rust 完全重写 tianji，零 Python 依赖，所有功能 Rust 原生
+> 目标: 智库级双向推理引擎 — 推演世界线 + 反推干预路径
+> 灵感: Karpathy llm-wiki 模式 + angr 符号执行反推 + 多 Agent 博弈
 
-## 架构
+---
 
-```
-tianji (single binary)
-├── CLI (clap)           ── 命令路由 + 参数校验
-├── Pipeline (sync)      ── fetch → normalize → score → group → backtrack → emit
-├── Storage (rusqlite)   ── SQLite 持久化 + history 查询
-├── Daemon (tokio)        ── UNIX socket + loopback HTTP API (axum)
-├── TUI (ratatui)         ── 终端 UI，Vim 键位
-└── WebUI (axum static)   ── 可选，serve 静态 HTML/CSS/JS
-```
-
-**原则:**
-- 单二进制，无外部运行时依赖
-- 管线同步执行（fetch → emit 是一条直线）
-- Daemon 异步（tokio），管线在 spawn_blocking 中运行
-- 所有 Python 代码删除，`.venv/` `pyproject.toml` `uv.lock` 全部移除
-
-## Crate 选型
-
-| 用途 | Crate | 理由 |
-|------|-------|------|
-| CLI | clap 4 (derive) | 生态标准 |
-| XML 解析 | quick-xml + serde | RSS/Atom feed 解析 |
-| HTTP 客户端 | reqwest | fetch live feeds |
-| HTTP 服务端 | axum | daemon loopback API |
-| SQLite | rusqlite (bundled) | 持久化 + history 查询 |
-| TUI | ratatui + crossterm | 替代 Python Rich |
-| JSON | serde + serde_json | artifact 序列化 |
-| 异步运行时 | tokio (full) | daemon + HTTP server |
-| 正则 | regex | normalize 关键词提取 |
-| 时间 | chrono | 时间戳/ISO 8601 |
-| 哈希 | sha2 | content-hash / identity-hash |
-| 错误处理 | anyhow + thiserror | |
-| 日志 | tracing + tracing-subscriber | --verbose |
-| 表格输出 | tabled | history 命令表格 |
-| Unix socket | tokio::net::UnixListener | daemon 控制面 |
-
-## 模块映射 (Python → Rust)
+## 1. 系统架构
 
 ```
-tianji/fetch.py        → src/ingest/mod.rs, src/ingest/feed.rs, src/ingest/fetch.rs
-tianji/normalize.py    → src/normalize.rs
-tianji/scoring.py      → src/scoring.rs
-tianji/backtrack.py    → src/backtrack.rs
-tianji/models.py       → src/models.rs
-tianji/pipeline.py     → src/pipeline.rs
-tianji/storage.py      → src/storage.rs
-tianji/cli.py          → src/cli/run.rs, src/cli/history.rs, src/cli/daemon.rs
-tianji/cli_daemon.py   → src/daemon/mod.rs, src/daemon/socket.rs, src/daemon/server.rs
-tianji/cli_history.py  → src/cli/history.rs
-tianji/tui.py          → src/tui/mod.rs
-tianji/webui_server.py → src/webui.rs (axum static serve)
-tests/                 → tests/ (Rust integration tests)
+┌──────────────────────────────────────────────────────┐
+│  Hongmeng (鸿蒙) — 编排中枢                           │
+│  ├─ tokio actor 模型                                  │
+│  ├─ Agent 生命周期管理 (spawn/kill/pause/resume)      │
+│  ├─ 消息路由 (Cangjie ↔ Fuxi ↔ Nuwa)                 │
+│  └─ 碰撞检测 + 矛盾解决                               │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────┐  │
+│  │ Cangjie (仓颉)│  │ Fuxi (伏羲)   │  │ Nuwa (女娲) │  │
+│  │ 无头 OSINT    │  │ 分歧建模     │  │ 仿真沙盒    │  │
+│  │              │  │              │  │            │  │
+│  │ RSS/Atom     │  │ field 状态机  │  │ 前向推演    │  │
+│  │ Web scraping │  │ 阈值监控     │  │ 后向反推    │  │
+│  │ API feeds    │  │ 模式检测     │  │ 干预测试    │  │
+│  │              │  │ divergence   │  │ 扰动回放    │  │
+│  │ → signals    │  │ → alerts     │  │ → branches  │  │
+│  └──────────────┘  └──────────────┘  └────────────┘  │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+         │                  │                  │
+         ▼                  ▼                  ▼
+    ┌─────────────────────────────────────────────┐
+    │  CLI / TUI / HTTP API / Web UI               │
+    │  tianji run | watch | predict | backtrack    │
+    └─────────────────────────────────────────────┘
 ```
 
-## 项目结构
+**四子系统职责：**
+
+| 子系统 | 做什么 | Rust 实现 |
+|--------|--------|-----------|
+| Cangjie | 采集信号 → 归一化 → 入库 | `src/cangjie/` quick-xml + reqwest + regex |
+| Fuxi | worldline 状态机 + divergence 计算 | `src/fuxi/` field 引擎 + 阈值/模式检测 |
+| Hongmeng | Agent 编排 + IPC + 消息路由 | `src/hongmeng/` tokio actors + channel |
+| Nuwa | 仿真沙盒：前向推演 + 后向反推 | `src/nuwa/` 沙盒环境 + Agent 执行器 |
+
+---
+
+## 2. Worldline 数据模型
+
+状态机模型。worldline = 可变的 fields + 不可变的事件因果图。
+
+```rust
+struct Worldline {
+    id: WorldlineId,
+    fields: HashMap<FieldKey, f64>,     // "east-asia.conflict": 0.72
+    events: Vec<EventId>,                // 导致当前状态的信号序列
+    causal_graph: DiGraph<EventId, CausalRelation>,
+    active_actors: HashSet<ActorId>,
+    divergence: f64,                     // 与 baseline 的向量距离
+    parent: Option<WorldlineId>,         // fork 来源 (Nuwa 沙盒用)
+    timestamp: DateTime,
+}
+
+struct FieldKey {
+    region: String,       // "east-asia" | "europe" | "middle-east" | "global" | ...
+    domain: String,       // "conflict" | "economy" | "diplomacy" | "technology" | ...
+}
+```
+
+**Field 体系：预定义核心 + LLM 补充分支**
+
+核心 fields 人工设计，确定性评分。Cangjie 摄入信号 → regex 提取 actor/region/domain → 匹配核心 field → 加减 impact_score。
+
+LLM 负责：
+- 建议新增 fields（"检测到新的信号模式：北极航道竞争"）
+- Nuwa 仿真阶段辅助 Agent 判断干预连锁影响
+
+---
+
+## 3. 管线 (Cangjie → Fuxi)
+
+```
+RSS/Atom feed
+  │
+  ▼
+ingest::feed  ──→ Vec<RawItem>
+  │  quick-xml 解析 RSS 2.0 + Atom 1.0
+  │  SHA256 content-hash / identity-hash
+  ▼
+normalize     ──→ Vec<NormalizedEvent>
+  │  regex 提取: keywords, actors, regions, field_scores
+  │  patterns 从 Python normalize.py 移植
+  ▼
+score         ──→ Vec<ScoredEvent>
+  │  Im = actor_weight + region_weight + keyword_density + ...
+  │  Fa = dominant_field_strength + dominance_margin + coherence
+  │  divergence_score = f(Im, Fa)
+  ▼
+group         ──→ Vec<EventGroupSummary>
+  │  共享 keyword/actor/region + 时间窗口 24h
+  │  causal ordering + evidence chain
+  ▼
+backtrack     ──→ Vec<InterventionCandidate>
+  │  硬编码映射: dominant_field → intervention_type
+  ▼
+update worldline
+  │  Fuxi 更新 fields: target_field += Σ impact_score × field_attraction
+  │  events 追加到因果图
+  │  重算 divergence
+  ▼
+emit artifact + persist SQLite
+```
+
+**与 Python 版的差异：**
+- 管线结束不是输出 JSON 就完——是更新 worldline 状态
+- `backtrack` 从硬编码映射升级为 field-aware（干预建议关联到具体 field）
+- 每次 run 产生一个 worldline snapshot，SQLite 存完整历史
+
+---
+
+## 4. Hongmeng 编排层
+
+**触发机制（混合）：**
+- 操作者手动: `tianji predict --field east-asia.conflict --horizon 30d`
+- 自动规则: field 偏离 > 阈值 或 事件模式匹配 → 自动拉起仿真
+- 规则可配置: `~/.tianji/rules.yaml`
+
+**Agent 分工：按角色分配**
+
+Hongmeng 读取 worldline.active_actors → 为每个 actor spawn 一个 Agent → 下发角色 + worldline 状态。
+
+Agent 之间用**多轮博弈**：
+1. Round 1: 各 Agent 独立推演（不知道其他 Agent 的预测）
+2. Hongmeng 汇总 → 碰撞检测 → 标记矛盾
+3. Round 2: 公开部分结果（"Actor A 可能做 X"）→ Agent 调整预测
+4. 迭代到收敛或最大轮数
+
+---
+
+## 5. Actor Profile（Agent 角色约束）
+
+LLM 辅助 profile。骨架 YAML + LLM 推理。
+
+```yaml
+# profiles/china.yaml
+id: china
+name: China
+interests:
+  - "maintain territorial integrity in South China Sea" (salience: 0.95)
+  - "secure energy supply routes through Malacca Strait" (salience: 0.85)
+  - "expand semiconductor technology independence" (salience: 0.80)
+  - "maintain stable trade relationships with EU" (salience: 0.70)
+red_lines:
+  - "foreign military presence in Taiwan Strait → full retaliatory posture"
+  - "technology export ban on advanced chips → accelerate domestic R&D pipeline"
+capabilities:
+  military: 0.85
+  economic: 0.80
+  technological: 0.70
+  diplomatic: 0.75
+  cyber: 0.82
+behavior_patterns:
+  - "responds to sanctions with proportional counter-sanctions"
+  - "prefers economic leverage (BRI investments, rare earth exports) before military signaling"
+  - "uses state-owned enterprises as policy instruments"
+  - "prioritizes stability in neighboring regions over distant interventions"
+historical_analogues:
+  - "2016 South China Sea arbitration response"
+  - "2017 THAAD deployment in South Korea → economic retaliation against Lotte"
+```
+
+Agent 演绎时：read profile + current worldline → LLM 推理（"given constraints X/Y/Z, most likely action is..."）→ 输出 ActionProposal。
+
+**Profile 来源：**
+- 人工编写核心 actor profiles
+- LLM 辅助生成次要 actor profiles（从公开信息提取）
+- profile 本身可以版本化，随 worldline 演化
+
+---
+
+## 6. Nuwa 仿真沙盒
+
+### 前向推演 (Forward)
+
+```
+tianji predict --field east-asia.conflict --horizon 30d
+
+1. Hongmeng fork 当前 worldline → 创建沙盒 worldline
+2. 按 worldline.active_actors spawn Agents (每个一个 tokio task)
+3. 多轮博弈:
+   Round 1: 各 Agent 独立推演 → ActionProposal
+   Round 2: Hongmeng 碰撞检测 → 公开矛盾 → Agent 调整
+   Round N: 收敛或 max_rounds
+4. 每个 ActionProposal 应用到沙盒 worldline → field 变化
+5. 输出: Vec<WorldlineBranch> (各分支的概率 + 关键事件序列)
+```
+
+### 后向反推 (Backward / angr 模式)
+
+```
+tianji backtrack --goal "东亚区域稳定，贸易正常化" --max-interventions 5
+
+1. LLM 解析 goal → field 约束: east-asia.conflict < 0.3, global.trade_volume > 0.7
+2. Hongmeng fork 当前 worldline → 创建反向沙盒
+3. 约束前置剪枝:
+   - 行动不能违反 agent profile red_lines
+   - 不能超出 capabilities
+   - 不符合 behavior_patterns 的降权
+4. LLM 粗筛: 每个 Agent 在每轮前推演 3-5 个最可能的行动方向
+5. 约束精剪: 博弈评分 + alpha-beta
+6. 人工剪枝: 推演中遇歧义 → Hongmeng 暂停 → TUI 呈现选项 → 操作者选择
+7. 输出: Vec<InterventionPath> (按干预步数 + 成功率排序)
+```
+
+### 人工剪枝协议
+
+推演中遇到以下情况时 Hongmeng 暂停:
+- LLM 对某 Agent 的行动方向分歧过大（多个选项概率接近）
+- 碰撞检测发现不可调和矛盾
+- 操作者预设的暂停点（`--pause-on field.east-asia.conflict > 0.7`）
+
+暂停时 TUI 呈现:
+```
+[Simulation Paused] Round 3, Agent: China
+  Worldline: east-asia.conflict=0.72
+  Decision point: "US carrier group enters South China Sea"
+  Options:
+    [1] Diplomatic protest + UN appeal           (概率: 0.45)
+    [2] Naval exercises in response zone         (概率: 0.35)
+    [3] Economic sanctions against US allies      (概率: 0.15)
+    [4] No immediate response (monitor)           (概率: 0.05)
+    [p] Prune all military options
+    [a] Auto-continue (pick highest probability)
+> _
+```
+
+**剪枝决策存为规则** — 操作者的剪枝选择可以存为全局/场景规则，后续仿真自动应用，减少重复暂停。
+
+---
+
+## 7. 项目结构
 
 ```
 tianji/
 ├── Cargo.toml
-├── build.rs                    # 可选: build-time metadata
 ├── src/
 │   ├── main.rs                 # clap 入口
-│   ├── lib.rs                  # 库根，暴露 Pipeline、Storage 等
-│   ├── models.rs               # serde structs: RawItem, NormalizedEvent, ScoredEvent,
-│   │                           #   EventGroupSummary, InterventionCandidate, RunArtifact
-│   ├── pipeline.rs             # run_pipeline() 编排器
-│   ├── ingest/
+│   ├── lib.rs                  # 库根
+│   │
+│   ├── models.rs               # Worldline, NormalizedEvent, ScoredEvent, etc.
+│   ├── error.rs
+│   │
+│   ├── cangjie/                # 仓颉: 信号采集
 │   │   ├── mod.rs
-│   │   ├── feed.rs             # RSS/Atom XML 解析 → Vec<RawItem>
-│   │   └── fetch.rs            # HTTP fetch + 文件读取
-│   ├── normalize.rs            # RawItem → NormalizedEvent (regex 提取)
-│   ├── scoring.rs              # NormalizedEvent → ScoredEvent (Im/Fa)
-│   ├── backtrack.rs            # ScoredEvent + EventGroup → InterventionCandidate
-│   ├── storage.rs              # rusqlite: schema, persist_run, history queries
-│   ├── daemon/
-│   │   ├── mod.rs              # daemon start/stop 逻辑
-│   │   ├── socket.rs           # UNIX socket 客户端 (CLI ↔ daemon)
-│   │   └── server.rs           # axum HTTP API + socket 服务端 + job queue
-│   ├── cli/
-│   │   ├── mod.rs              # clap 命令定义
-│   │   ├── run.rs              # tianji run
-│   │   ├── history.rs          # tianji history / history-show / history-compare
-│   │   ├── daemon.rs           # tianji daemon start/stop/status/run/schedule
-│   │   └── tui.rs              # tianji tui (启动 ratatui)
-│   ├── tui/
-│   │   ├── mod.rs              # ratatui 应用入口
-│   │   ├── list.rs             # run 历史列表
-│   │   ├── detail.rs           # 单 run 详情
-│   │   └── compare.rs          # run 对比视图
-│   ├── webui.rs                # axum serve tianji/webui/ 静态文件
-│   ├── output.rs               # 终端输出: JSON pretty-print, 表格, 颜色
-│   └── error.rs                # 错误类型定义
+│   │   ├── feed.rs             # RSS/Atom 解析 (quick-xml)
+│   │   ├── fetch.rs            # HTTP fetch (reqwest)
+│   │   ├── normalize.rs        # 关键词/actor/region 提取 (regex)
+│   │   └── sources.rs          # source registry + fetch policy
+│   │
+│   ├── fuxi/                   # 伏羲: 分歧建模
+│   │   ├── mod.rs
+│   │   ├── worldline.rs        # Worldline 状态机 (fields + causal graph)
+│   │   ├── scoring.rs          # Im/Fa 评分 + divergence 计算
+│   │   ├── grouping.rs         # 事件分组 + causal ordering
+│   │   ├── backtrack.rs        # 干预候选生成
+│   │   └── triggers.rs         # 阈值/模式检测 → Hongmeng 告警
+│   │
+│   ├── hongmeng/               # 鸿蒙: 编排层
+│   │   ├── mod.rs              # tokio 运行时 + 子系统启动
+│   │   ├── agent_lifecycle.rs  # Agent spawn/kill/pause/resume
+│   │   ├── router.rs           # 消息路由 (channel-based)
+│   │   ├── collision.rs        # 多 Agent 碰撞检测 + 矛盾解决
+│   │   └── rules.rs            # 自动触发规则引擎
+│   │
+│   ├── nuwa/                   # 女娲: 仿真沙盒
+│   │   ├── mod.rs
+│   │   ├── sandbox.rs          # 沙盒环境: fork worldline, 隔离变更
+│   │   ├── forward.rs          # 前向推演: 多轮博弈
+│   │   ├── backward.rs         # 后向反推: angr 模式 + 剪枝
+│   │   ├── agent.rs            # Agent 执行器: profile + LLM 推理
+│   │   ├── profile.rs          # Actor profile 加载/管理
+│   │   └── pruning.rs          # 剪枝策略引擎
+│   │
+│   ├── storage.rs              # rusqlite: worldline snapshots, runs, profiles
+│   │
+│   ├── cli/                    # CLI (clap derive)
+│   │   ├── mod.rs
+│   │   ├── run.rs              # tianji run (管线)
+│   │   ├── watch.rs            # tianji watch (持续监控)
+│   │   ├── predict.rs          # tianji predict (前向推演)
+│   │   ├── backtrack.rs        # tianji backtrack (后向反推)
+│   │   ├── history.rs          # tianji history/show/compare
+│   │   ├── daemon.rs           # tianji daemon start/stop/status
+│   │   └── tui.rs              # tianji tui
+│   │
+│   ├── tui/                    # ratatui 终端 UI
+│   │   ├── mod.rs
+│   │   ├── dashboard.rs        # worldline 状态总览
+│   │   ├── simulation.rs       # 仿真监控 + 暂停/人工剪枝交互
+│   │   ├── history.rs          # run 历史浏览
+│   │   └── profiles.rs         # Actor profile 浏览/编辑
+│   │
+│   ├── daemon/                 # axum HTTP API + UNIX socket 控制
+│   │   ├── mod.rs
+│   │   ├── server.rs           # axum HTTP 服务 (loopback)
+│   │   ├── socket.rs           # UNIX socket 控制面
+│   │   └── jobs.rs             # 后台 job 队列
+│   │
+│   ├── webui.rs                # axum serve static web UI
+│   ├── llm.rs                  # LLM 调用抽象层 (local/remote, 可插拔)
+│   └── output.rs               # 终端输出格式化
+│
+├── profiles/                   # Actor profile YAML 文件
+│   ├── china.yaml
+│   ├── russia.yaml
+│   ├── usa.yaml
+│   ├── eu.yaml
+│   └── ...
+│
+├── rules/                      # 自动触发规则
+│   └── default.yaml
+│
+├── tianji/webui/               # 静态 Web UI (保留现有)
 ├── tests/
-│   ├── fixtures/
-│   │   └── sample_feed.xml     # 测试用 RSS fixture (从 Python 版复制)
-│   ├── test_pipeline.rs        # 管线集成测试
-│   ├── test_scoring.rs         # 评分单元测试
-│   ├── test_storage.rs         # 持久化测试
-│   ├── test_daemon.rs          # daemon 集成测试
-│   └── test_cli.rs             # CLI 参数解析测试
-├── tianji/webui/               # 静态 Web UI 文件 (保留现有)
-│   ├── index.html
-│   ├── app.js
-│   └── styles.css
-├── plan.md                     # 本文件
-└── README.md                   # 重写后更新
+│   ├── fixtures/sample_feed.xml
+│   ├── test_pipeline.rs
+│   ├── test_scoring.rs
+│   ├── test_worldline.rs
+│   ├── test_nuwa_forward.rs
+│   ├── test_nuwa_backward.rs
+│   └── test_agent_pruning.rs
+├── plan.md
+└── README.md
 ```
 
-## 数据模型 (src/models.rs)
+---
 
-```rust
-// --- Pipeline stages ---
-
-struct RawItem {
-    source: String,
-    title: String,
-    summary: String,
-    link: Option<String>,
-    published_at: Option<String>,
-    entry_identity_hash: String,   // SHA256(source + id)
-    content_hash: String,           // SHA256(title + summary)
-}
-
-struct NormalizedEvent {
-    event_id: String,
-    title: String,
-    summary: String,
-    source: String,
-    published_at: Option<String>,
-    keywords: Vec<String>,
-    actors: Vec<String>,
-    regions: Vec<String>,
-    field_scores: HashMap<String, f64>,
-    dominant_field: String,
-}
-
-struct ScoredEvent {
-    event_id: String,
-    title: String,
-    summary: String,
-    source: String,
-    published_at: Option<String>,
-    keywords: Vec<String>,
-    actors: Vec<String>,
-    regions: Vec<String>,
-    dominant_field: String,
-    impact_score: f64,         // Im
-    field_attraction: f64,     // Fa
-    divergence_score: f64,     // combined
-    rationale: Rationale,
-}
-
-struct EventGroupSummary {
-    group_id: String,
-    headline_event_id: String,
-    headline_title: String,
-    member_event_ids: Vec<String>,
-    member_count: usize,
-    dominant_field: String,
-    shared_keywords: Vec<String>,
-    shared_actors: Vec<String>,
-    shared_regions: Vec<String>,
-    group_score: f64,
-    causal_ordered_event_ids: Vec<String>,
-    causal_span_hours: Option<f64>,
-    evidence_chain: Vec<EventChainLink>,
-    chain_summary: String,
-    causal_summary: String,
-}
-
-struct InterventionCandidate {
-    event_id: String,
-    title: String,
-    intervention_type: String,
-    target: String,
-    reason: String,
-    priority: u8,
-}
-
-struct RunArtifact {
-    schema_version: String,
-    mode: String,              // "fixture" | "fetch" | "fetch+fixture"
-    generated_at: String,
-    input_summary: InputSummary,
-    scenario_summary: ScenarioSummary,
-    scored_events: Vec<ScoredEvent>,
-    intervention_candidates: Vec<InterventionCandidate>,
-}
-```
-
-## 开发阶段
-
-### Phase 1: 管线核心 (主要工作量)
-
-**目标**: `tianji run --fixture tests/fixtures/sample_feed.xml` 输出与 Python 版一致的 JSON
-
-**文件**: `models.rs` `ingest/` `normalize.rs` `scoring.rs` `backtrack.rs` `pipeline.rs` `error.rs`
-
-**要点:**
-- quick-xml 解析 RSS 2.0 + Atom 1.0
-- regex patterns 从 `normalize.py` 逐字移植 (ACTOR_PATTERNS, REGION_PATTERNS, FIELD_KEYWORDS)
-- scoring 公式移植: Im = actor_weight + region_weight + keyword_density + dominant_field_bonus + ...
-- Fa = dominant_field_strength + dominance_margin + coherence
-- 分组逻辑移植 (link_score_between_events, group_events)
-- 输出 JSON 与 Python 版 artifact 字段级对齐
-
-**验证:** `diff <(python -m tianji run --fixture ...) <(cargo run -- run --fixture ...)`
-
-### Phase 2: SQLite 持久化 + History
-
-**目标**: `tianji run --sqlite-path ...` 写入，`history/show/compare` 读取
-
-**文件**: `storage.rs` `cli/history.rs`
-
-**要点:**
-- rusqlite schema: runs, source_items, raw_items, normalized_events, scored_events, interventions (与 Python storage.py schema 兼容或重设计)
-- run 去重: entry_identity_hash + content_hash
-- history 过滤: mode, dominant_field, risk_level, since/until, score thresholds
-- history-show: run detail + scored events + interventions + event groups
-- history-compare: 双 run diff + comparable 标记
-
-### Phase 3: CLI (clap)
-
-**目标**: 完整命令面，与 Python CLI 行为一致
-
-**文件**: `main.rs` `cli/mod.rs` `cli/run.rs` `output.rs`
-
-**要点:**
-- clap derive 定义所有命令/参数/默认值
-- `--fixture` 多值, `--fetch` flag, `--source-url` 多值
-- `--source-config` JSON 文件解析
-- `--fetch-policy` (always/if-missing/if-changed)
-- `--output` 默认 `runs/latest-run.json`
-- 输出格式: 默认 JSON pretty-print, `--json` 原始 JSON
-
-### Phase 4: Daemon + HTTP API
-
-**目标**: `tianji daemon start` 启动后台进程，HTTP API 可查询
-
-**文件**: `daemon/socket.rs` `daemon/server.rs` `daemon/mod.rs` `cli/daemon.rs`
-
-**要点:**
-- tokio 异步 daemon 进程
-- UNIX socket 控制面 (JSON 协议)
-- axum HTTP API: GET /api/v1/meta, /runs, /runs/{id}, /runs/latest, /compare
-- job queue: daemon run / schedule (bounded --every-seconds + --count)
-- job lifecycle: queued → running → succeeded | failed
-- 管线执行在 spawn_blocking 中运行
-
-### Phase 5: TUI (ratatui)
-
-**目标**: `tianji tui --sqlite-path ...` 启动终端 UI
-
-**文件**: `tui/mod.rs` `tui/list.rs` `tui/detail.rs` `tui/compare.rs` `cli/tui.rs`
-
-**要点:**
-- Vim 键位 (j/k/h/l, gg/G, / 搜索)
-- 三面板: 左侧 run 列表, 中央详情, 右侧对比
-- 只读, 数据来自 SQLite
-- 复用 CLI history 的查询逻辑
-- 彩色输出, 与 CLI 风格一致
-
-### Phase 6: Web UI (axum static)
-
-**目标**: `tianji daemon start` 同时 serve 静态 Web UI
-
-**文件**: `webui.rs`
-
-**要点:**
-- axum serve `tianji/webui/` 目录
-- 保留现有 index.html / app.js / styles.css
-- app.js 通过 `/api/v1/*` 读数据 (daemon HTTP API 已存在)
-- Web UI 默认关闭, `--webui` flag 开启
-
-### Phase 7: 清理 + 文档
-
-- 删除所有 Python 代码: `tianji/*.py` `tests/*.py` `pyproject.toml` `uv.lock`
-- 删除 `.venv/` `.pytest_cache/`
-- 删除 `.agents/` `.codex/` `.gemini/` (保留 `.opencode/` 中仍需要的 agent config)
-- 更新 README.md 为新 Rust CLI 用法
-- 更新 `.gitignore`
-- `cargo build --release` 验证
-
-## 依赖清单 (Cargo.toml)
+## 8. 依赖清单
 
 ```toml
 [package]
@@ -297,24 +347,49 @@ version = "0.2.0"
 edition = "2024"
 
 [dependencies]
+# CLI
 clap = { version = "4", features = ["derive"] }
+
+# 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+
+# 管线
 quick-xml = { version = "0.37", features = ["serialize"] }
-reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
-axum = "0.8"
-tokio = { version = "1", features = ["full"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-ratatui = "0.29"
-crossterm = "0.28"
 regex = "1"
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
+
+# HTTP
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+axum = "0.8"
+
+# 异步
+tokio = { version = "1", features = ["full"] }
+
+# 持久化
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# 输出
+tabled = "0.18"
+
+# LLM
+async-openai = "0.27"          # OpenAI-compatible API
+ollama-rs = "0.2"              # local Ollama
+
+# 图 (causal graph)
+petgraph = "0.7"
+
+# 错误/日志
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-tabled = "0.18"
 
 [dev-dependencies]
 tempfile = "3"
@@ -325,28 +400,69 @@ opt-level = 3
 lto = true
 ```
 
-## 不变的部分
+---
 
-以下保留不动:
-- `tianji/webui/index.html` `app.js` `styles.css` — 静态 Web UI，由 axum serve
-- `tests/fixtures/sample_feed.xml` — 复制到 Rust tests/ 目录
-- `.trellis/` 规约文档（可选保留或删除）
-- `LICENSE` `README.md`（重写后更新内容）
+## 9. 开发阶段
 
-## 要删除的部分
+### Phase 1: Worldline 核心 + 管线 (最大工作量)
+- models.rs: 所有数据结构
+- cangjie/: feed 解析, normalize, fetch
+- fuxi/: worldline 状态机, scoring, grouping, backtrack, triggers
+- storage.rs: SQLite schema
+- CLI: `tianji run`
+- 验证: 输出与 Python 版 JSON 字段级对齐
+
+### Phase 2: Hongmeng 编排层
+- tokio actor 模型
+- Agent 生命周期管理
+- 消息路由
+- 碰撞检测
+- 自动触发规则引擎
+- CLI: `tianji watch` (持续运行)
+
+### Phase 3: Nuwa 仿真沙盒
+- sandbox.rs: worldline fork + 隔离
+- agent.rs: Agent 执行器 + profile 加载
+- forward.rs: 多轮博弈前向推演
+- backward.rs: 后向反推 + 剪枝引擎
+- pruning.rs: LLM粗筛 + 约束精剪 + 人工暂停
+- CLI: `tianji predict`, `tianji backtrack`
+
+### Phase 4: TUI
+- dashboard: worldline 状态总览
+- simulation: 仿真监控 + 人工剪枝交互
+- history: run 历史浏览
+- profiles: Actor profile 管理
+
+### Phase 5: Daemon + Web UI
+- axum HTTP API + UNIX socket
+- 后台 job 队列
+- static web UI serve
+
+### Phase 6: 清理 + 文档
+- 删除所有 Python 代码
+- 删除 `.venv/` `.agents/` `.codex/` `.gemini/`
+- 更新 README
+- shell completions
+
+---
+
+## 10. 删除清单
 
 - 所有 Python 代码: `tianji/*.py` `tests/*.py` `pyproject.toml` `uv.lock`
 - `.venv/` `.pytest_cache/` `__pycache__/`
-- `.agents/` `.codex/` `.gemini/`（多套 agent 框架残留）
-- `node_modules/`（`.opencode/node_modules/` 保留或清理）
-- `dummy.sqlite3` 空测试文件
+- `.agents/` `.codex/` `.gemini/`（保留需要的 `.opencode/` 配置）
+- `node_modules/`（`.opencode/` 内需要的保留）
+- `dummy.sqlite3`
 
-## 验证标准
+---
+
+## 11. 验证标准
 
 - `cargo build --release` 零 warning
 - `cargo test` 全绿
-- `./target/release/tianji run --fixture tests/fixtures/sample_feed.xml` JSON 输出与 Python 版逐字段一致
-- `tianji run --sqlite-path /tmp/test.sqlite3` → `tianji history --sqlite-path /tmp/test.sqlite3` 表头正确
-- `tianji daemon start` → `curl http://127.0.0.1:8765/api/v1/meta` 返回 200
-- `tianji tui --sqlite-path ...` 启动无 panic
-- 单二进制 (< 20MB release) 可直接分发
+- `tianji run --fixture ...` 输出与 Python 版字段级一致
+- `tianji predict --field east-asia.conflict --horizon 30d` 产出一组 WorldlineBranch
+- `tianji backtrack --goal "东亚稳定" --max-interventions 5` 产出一组 InterventionPath
+- 人工剪枝: 仿真中暂停 → TUI 呈现选项 → 选择后继续 → 仿真完成
+- 单二进制 < 25MB release
