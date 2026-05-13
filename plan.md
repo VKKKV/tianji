@@ -711,7 +711,7 @@ lto = true
 
 ### Phase 1: Worldline 核心 + 管线
 
-**状态: Milestone 1A+1B 完成，Milestone 2 进行中**
+**状态: Milestone 1A+1B+M2+M3 完成，M4 TUI 待开发，Python oracle 保留至 M6**
 
 #### Milestone 1A — Feed + Normalization (已完成)
 - RSS 2.0 / Atom 1.0 fixture 解析 (roxmltree)

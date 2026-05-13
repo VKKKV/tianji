@@ -11,8 +11,8 @@ architecture document is root `plan.md`, which defines four subsystems
 phased build order.
 
 **Current state:**
-- Rust: Milestone 1A+1B complete (feed + normalization + scoring + grouping + backtracking parity). Pipeline produces field-for-field compatible `RunArtifact` with Python oracle.
-- Python: shipped product surface under `tianji/` and `tests/` — preserved as the migration oracle until Rust parity gates pass.
+- Rust: Milestone 1A+1B+M2+M3 complete. Full pipeline (feed→normalize→score→backtrack), SQLite storage + history CLI, daemon (start/stop/status/run) + read-first HTTP API + optional Web UI all implemented and parity-verified against Python oracle.
+- Python: shipped product surface under `tianji/` and `tests/` — preserved as the migration oracle until M6 retirement.
 
 ## STRUCTURE
 ```text
@@ -45,12 +45,25 @@ tianji/
 ## CODE MAP (Rust)
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
-| `main` | function | `src/main.rs` | CLI entry and run dispatch |
+| `main` | function | `src/main.rs` | CLI entry, all subcommand dispatch (run, history, daemon, webui) |
 | `RawItem` | struct | `src/models.rs` | Parsed feed item |
 | `NormalizedEvent` | struct | `src/models.rs` | Extracted event with keywords/actors/regions |
+| `ScoredEvent` | struct | `src/models.rs` | Event with Im/Fa/divergence scores |
 | `RunArtifact` | struct | `src/models.rs` | Pipeline output contract |
 | `parse_feed` | function | `src/fetch.rs` | RSS/Atom parsing |
 | `normalize_items` | function | `src/normalize.rs` | Event extraction and field scoring |
+| `score_events` | function | `src/scoring.rs` | Im/Fa scoring + rationale |
+| `group_events` | function | `src/grouping.rs` | Event grouping + causal ordering |
+| `backtrack_candidates` | function | `src/backtrack.rs` | Intervention candidate generation |
+| `persist_run` | function | `src/storage.rs` | SQLite persistence (6 tables) |
+| `list_runs` | function | `src/storage.rs` | History list with filters |
+| `AppState` | struct | `src/api.rs` | axum shared state (sqlite_path) |
+| `build_router` | function | `src/api.rs` | axum Router (5 GET routes) |
+| `DaemonState` | struct | `src/daemon.rs` | In-memory job queue (Mutex+Condvar) |
+| `serve` | function | `src/daemon.rs` | tokio runtime: socket + API + worker loop |
+| `RunJobRequest` | struct | `src/daemon.rs` | Deserialized job payload |
+| `WebUiState` | struct | `src/webui.rs` | axum state (api_base_url, socket_path) |
+| `serve_webui` | function | `src/webui.rs` | Static file serve + API proxy + /queue-run |
 
 ## CODE MAP (Python — Oracle)
 | Symbol | Type | Location | Role |

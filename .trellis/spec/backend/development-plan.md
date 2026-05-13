@@ -26,7 +26,7 @@ parity gate has passed. After parity is verified, Python code is retired per
 | - | Hongmeng orchestration layer | Deferred |
 | 3 | Nuwa simulation sandbox | Deferred |
 | 4 | TUI (ratatui + Kanagawa Dark) | Deferred |
-| 5 | Daemon + Web UI | Deferred |
+| 5 | Daemon + Web UI | Absorbed by Milestone 3 |
 | 6 | Cleanup + docs (Python retirement) | Deferred |
 
 Each phase must reach parity with the current Python behavior before moving to the next.
