@@ -9,6 +9,13 @@ Owned TianJi source is intentionally narrow:
 
 Everything else at the workspace root is support material and product documentation, not the long-term product codebase.
 
+Root `plan.md` describes a full Rust rewrite vision with Cangjie, Fuxi,
+Hongmeng, and Nuwa subsystem names. That document is planning material, not
+shipped state. The staged compatibility gates for turning that vision into
+reviewable work live in `rust-migration-plan.md`; future Rust implementation
+should start there and preserve the shipped Python operator contract until each
+parity gate is explicitly met.
+
 ## Product Direction
 
 TianJi should grow in this order:
@@ -21,6 +28,12 @@ TianJi should grow in this order:
 6. introduce a daemon/orchestrator only after the one-shot path is solid
 7. add an optional web UI only after CLI and TUI workflows are stable
 8. retire embedded reference repos once their useful ideas are reimplemented in first-party code
+
+If the `rust-cli` branch proceeds with migration work, it should reinterpret the
+same order as a compatibility-preserving port: first Cangjie/Fuxi one-shot
+artifact parity, then storage/history parity, then local runtime parity, and
+only then TUI/web or Hongmeng/Nuwa architecture. Python remains the executable
+oracle until the relevant Rust gate is reviewed.
 
 ## Roadmap Status Snapshot
 

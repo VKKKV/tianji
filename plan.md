@@ -5,26 +5,33 @@
 > 灵感: Karpathy llm-wiki 模式 + angr 符号执行反推 + 多 Agent 博弈
 > 研究参考: Geopol-Forecaster, Centaur, hormuz-agent-sandbox, WarAgent, adk-graph
 
+> Trellis alignment: this file is a long-range Rust architecture vision, not
+> shipped behavior. Current shipped TianJi remains the Python implementation
+> under `tianji/` with `unittest` coverage under `tests/`. The staged migration
+> gates and first implementation slice are defined in
+> `.trellis/spec/backend/rust-migration-plan.md`; do not delete Python or claim
+> Hongmeng/Nuwa architecture is shipped before those parity gates pass.
+
 ---
 
 ## 1. 系统架构
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Hongmeng (鸿蒙) — 编排中枢 (tokio actor 模型)                │
-│  ├─ Agent 生命周期 (spawn/kill/pause/resume)                  │
-│  ├─ 消息路由 + Board/Stick 分层信息公开                        │
-│  ├─ 碰撞检测 + 矛盾解决                                       │
-│  ├─ Checkpoint 管理 (每 round 自动 SQLite snapshot)            │
-│  └─ 运行模式: CLI 手动 + daemon 常驻                          │
+│  Hongmeng (鸿蒙) — 编排中枢 (tokio actor 模型)               │
+│  ├─ Agent 生命周期 (spawn/kill/pause/resume)                 │
+│  ├─ 消息路由 + Board/Stick 分层信息公开                      │
+│  ├─ 碰撞检测 + 矛盾解决                                      │
+│  ├─ Checkpoint 管理 (每 round 自动 SQLite snapshot)          │
+│  └─ 运行模式: CLI 手动 + daemon 常驻                         │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐  │
-│  │ Cangjie (仓颉)│  │ Fuxi (伏羲)   │  │ Nuwa (女娲)         │  │
-│  │ 信号采集      │  │ 分歧建模     │  │ 仿真沙盒            │  │
+│  │ Cangjie (仓颉)│  │ Fuxi (伏羲)   │  │ Nuwa (女娲)      │  │
+│  │ 信号采集      │  │ 分歧建模     │  │ 仿真沙盒          │  │
 │  │              │  │              │  │                    │  │
-│  │ RSS/Atom     │  │ Worldline    │  │ Forward: 多轮博弈   │  │
-│  │ Web scraping │  │ 状态机       │  │ Backward: angr 反推 │  │
+│  │ RSS/Atom     │  │ Worldline    │  │ Forward: 多轮博弈  │  │
+│  │ Web scraping │  │ 状态机       │  │ Backward: angr 反推│  │
 │  │ API feeds    │  │ petgraph DAG │  │ ┌─ Board (公开)    │  │
 │  │ content-hash │  │ Blake3 hash  │  │ ├─ Stick (私密)    │  │
 │  │              │  │ divergence   │  │ ├─ Referee (汇总)  │  │

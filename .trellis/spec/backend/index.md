@@ -54,6 +54,7 @@ Before writing backend code:
 |------|-------------|
 | [Scoring Spec](./scoring-spec.md) | Deterministic `Im`/`Fa` scoring model: formulas, rationale, deferred work |
 | [Development Plan](./development-plan.md) | Long-range product roadmap: phases, milestones, scoring-branch candidates |
+| [Rust Migration Plan](./rust-migration-plan.md) | Staged Rust rewrite migration plan and Python compatibility gates |
 
 ---
 
