@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use regex::Regex;
 
@@ -53,6 +54,20 @@ const IM_TEXT_SIGNAL_MAX_KEYWORD_HITS: usize = 4;
 const IM_TEXT_SIGNAL_MAX_TITLE_HITS: usize = 2;
 const IM_TEXT_SIGNAL_MAX_SUMMARY_HITS: usize = 2;
 const IM_TEXT_SIGNAL_MAX_BONUS: f64 = 1.0;
+
+static TEXT_SIGNAL_REGEXES: LazyLock<BTreeMap<&'static str, Regex>> = LazyLock::new(|| {
+    FIELD_KEYWORDS
+        .iter()
+        .flat_map(|(_, keywords)| keywords.iter().map(|(keyword, _)| *keyword))
+        .map(|keyword| {
+            (
+                keyword,
+                Regex::new(&format!(r"\b{}\b", regex::escape(keyword)))
+                    .expect("valid text signal pattern"),
+            )
+        })
+        .collect()
+});
 
 fn weight_lookup(table: &[(&str, f64)], key: &str, default: f64) -> f64 {
     table
@@ -249,9 +264,9 @@ fn count_text_signal_surface_hits(
     dominant_keywords
         .iter()
         .filter(|(keyword, _)| {
-            let pattern = Regex::new(&format!(r"\b{}\b", regex::escape(keyword)))
-                .expect("valid text signal pattern");
-            pattern.is_match(&lowered)
+            TEXT_SIGNAL_REGEXES
+                .get(keyword)
+                .is_some_and(|pattern| pattern.is_match(&lowered))
         })
         .count()
         .min(max_hits)

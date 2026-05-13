@@ -277,7 +277,7 @@ pub async fn serve_webui(
     socket_path: &str,
     sqlite_path: Option<&str>,
 ) -> Result<(), String> {
-    crate::daemon::validate_loopback_host(host).map_err(|e| e.to_string())?;
+    let validated_host = crate::daemon::validate_loopback_host(host).map_err(|e| e.to_string())?;
 
     let state = WebUiState {
         api_base_url: api_base_url.to_string(),
@@ -295,7 +295,7 @@ pub async fn serve_webui(
         .fallback(fallback_static)
         .with_state(state);
 
-    let addr = format!("{host}:{port}");
+    let addr = crate::daemon::loopback_socket_addr(&validated_host, port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("Failed to bind web UI server: {e}"))?;

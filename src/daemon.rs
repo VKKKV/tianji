@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
@@ -26,6 +26,22 @@ pub fn validate_loopback_host(host: &str) -> Result<String, TianJiError> {
         )));
     }
     Ok(normalized.to_string())
+}
+
+pub fn loopback_socket_addr(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
+pub fn loopback_http_base_url(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("http://[{host}]:{port}")
+    } else {
+        format!("http://{host}:{port}")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +183,7 @@ impl JobRecord {
 // ---------------------------------------------------------------------------
 
 struct DaemonStateInner {
-    jobs: HashMap<String, JobRecord>,
+    jobs: BTreeMap<String, JobRecord>,
     queue: VecDeque<String>,
 }
 
@@ -187,7 +203,7 @@ impl DaemonState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(DaemonStateInner {
-                jobs: HashMap::new(),
+                jobs: BTreeMap::new(),
                 queue: VecDeque::new(),
             }),
             queue_condvar: Condvar::new(),

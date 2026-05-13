@@ -27,6 +27,7 @@ impl IntoResponse for JsonEnvelope {
 
 const API_VERSION: &str = "v1";
 const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";
+const MAX_RUNS_LIMIT: usize = 200;
 
 fn api_meta_data() -> JsonValue {
     serde_json::json!({
@@ -133,7 +134,7 @@ async fn get_runs(
     Query(params): Query<RunsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let limit = match params.limit {
-        Some(l) if l > 0 => l as usize,
+        Some(l) if l > 0 => (l as usize).min(MAX_RUNS_LIMIT),
         _ => 20,
     };
 
@@ -349,7 +350,7 @@ pub async fn serve_api(host: &str, port: u16, sqlite_path: &str) -> Result<(), S
 
     let app = build_router().with_state(state);
 
-    let addr = format!("{host}:{port}");
+    let addr = crate::daemon::loopback_socket_addr(host, port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("Failed to bind API server: {e}"))?;

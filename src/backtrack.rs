@@ -1,4 +1,5 @@
 use crate::models::{EventGroupSummary, InterventionCandidate, ScoredEvent};
+use std::collections::BTreeMap;
 
 const FIELD_INTERVENTION_TYPES: &[(&str, &str)] = &[
     ("conflict", "de-escalation"),
@@ -29,15 +30,14 @@ pub fn backtrack_candidates(
     limit: usize,
     event_groups: Option<&[EventGroupSummary]>,
 ) -> Vec<InterventionCandidate> {
-    let event_group_by_headline_id: std::collections::HashMap<&str, &EventGroupSummary> =
-        event_groups
-            .map(|groups| {
-                groups
-                    .iter()
-                    .map(|g| (g.headline_event_id.as_str(), g))
-                    .collect()
-            })
-            .unwrap_or_default();
+    let event_group_by_headline_id: BTreeMap<&str, &EventGroupSummary> = event_groups
+        .map(|groups| {
+            groups
+                .iter()
+                .map(|g| (g.headline_event_id.as_str(), g))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let selected_events = select_backtrack_events(scored_events, limit, event_groups);
     let mut candidates = Vec::new();
@@ -74,7 +74,7 @@ fn select_backtrack_events<'a>(
         _ => return scored_events.iter().take(limit).collect(),
     };
 
-    let events_by_id: std::collections::HashMap<&str, &ScoredEvent> = scored_events
+    let events_by_id: BTreeMap<&str, &ScoredEvent> = scored_events
         .iter()
         .map(|e| (e.event_id.as_str(), e))
         .collect();
@@ -290,7 +290,7 @@ fn infer_group_corroboration_text(event_group: &EventGroupSummary) -> String {
 }
 
 fn infer_group_dominant_relationship(event_group: &EventGroupSummary) -> String {
-    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for link in &event_group.evidence_chain {
         *counts.entry(link.relationship.clone()).or_insert(0) += 1;
     }

@@ -1,11 +1,17 @@
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use rusqlite::{params, Connection};
 
 use crate::fetch::{derive_canonical_content_hash, derive_canonical_entry_identity_hash};
 use crate::models::{InterventionCandidate, NormalizedEvent, RawItem, RunArtifact, ScoredEvent};
 use crate::TianJiError;
+
+static HISTORY_TIMESTAMP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})")
+        .expect("valid history timestamp regex")
+});
 
 // ---------------------------------------------------------------------------
 // Write path
@@ -426,10 +432,18 @@ pub fn list_runs(
     let connection = Connection::open(sqlite_path)?;
     connection.execute_batch("PRAGMA foreign_keys = ON")?;
 
-    let mut stmt = connection.prepare(
-        "SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json FROM runs ORDER BY id DESC",
-    )?;
-    let mut rows = stmt.query([])?;
+    let has_filters = has_run_list_filters(filters);
+    let sql = if has_filters {
+        "SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json FROM runs ORDER BY id DESC"
+    } else {
+        "SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json FROM runs ORDER BY id DESC LIMIT ?1"
+    };
+    let mut stmt = connection.prepare(sql)?;
+    let mut rows = if has_filters {
+        stmt.query([])?
+    } else {
+        stmt.query(params![limit as i64])?
+    };
 
     let mut run_rows: Vec<(i64, String, String, String, String, String)> = Vec::new();
     while let Some(row) = rows.next()? {
@@ -548,6 +562,23 @@ fn get_top_scored_event_summaries(
         );
     }
     Ok(summaries)
+}
+
+fn has_run_list_filters(filters: &RunListFilters) -> bool {
+    filters.mode.is_some()
+        || filters.dominant_field.is_some()
+        || filters.risk_level.is_some()
+        || filters.since.is_some()
+        || filters.until.is_some()
+        || filters.min_top_impact_score.is_some()
+        || filters.max_top_impact_score.is_some()
+        || filters.min_top_field_attraction.is_some()
+        || filters.max_top_field_attraction.is_some()
+        || filters.min_top_divergence_score.is_some()
+        || filters.max_top_divergence_score.is_some()
+        || filters.top_group_dominant_field.is_some()
+        || filters.min_event_group_count.is_some()
+        || filters.max_event_group_count.is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -1381,8 +1412,7 @@ fn parse_history_timestamp(value: Option<&str>) -> Option<i64> {
     let value = value?;
     let value = value.replace('Z', "+00:00");
     // Simple parser for ISO timestamp prefix
-    let re = regex::Regex::new(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})").ok()?;
-    let caps = re.captures(&value)?;
+    let caps = HISTORY_TIMESTAMP_RE.captures(&value)?;
     let year: i64 = caps[1].parse().ok()?;
     let month: i64 = caps[2].parse().ok()?;
     let day: i64 = caps[3].parse().ok()?;
@@ -1419,12 +1449,13 @@ fn days_since_epoch(year: i64, month: i64, day: i64) -> i64 {
     let y = year - 1;
     let leap_years = y / 4 - y / 100 + y / 400;
     let days_from_years = y * 365 + leap_years;
-    let month_days: [i64; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    let cumulative_days_before_month: [i64; 12] =
+        [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
     let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
     let month_offset = if month >= 3 && is_leap {
-        month_days[month as usize - 1] + 1
+        cumulative_days_before_month[month as usize - 1] + 1
     } else {
-        month_days[month as usize - 1]
+        cumulative_days_before_month[month as usize - 1]
     };
     days_from_years + month_offset + day - 719528
 }

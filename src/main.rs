@@ -386,7 +386,10 @@ fn wait_for_socket(socket_path: &str, timeout_secs: f64) -> bool {
 
 fn wait_for_api(host: &str, port: u16, timeout_secs: f64) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout_secs);
-    let url = format!("http://{host}:{port}/api/v1/meta");
+    let url = format!(
+        "{}/api/v1/meta",
+        tianji::daemon::loopback_http_base_url(host, port)
+    );
     while std::time::Instant::now() < deadline {
         if let Ok(resp) = reqwest::blocking::Client::new()
             .get(&url)
@@ -412,7 +415,7 @@ fn handle_daemon_start(
     host: &str,
     port: u16,
 ) -> Result<String, TianJiError> {
-    tianji::daemon::validate_loopback_host(host)?;
+    let validated_host = tianji::daemon::validate_loopback_host(host)?;
 
     let start_timeout_secs = 2.0;
 
@@ -440,7 +443,7 @@ fn handle_daemon_start(
         .arg("--sqlite-path")
         .arg(sqlite_path)
         .arg("--host")
-        .arg(host)
+        .arg(&validated_host)
         .arg("--port")
         .arg(port.to_string())
         .stdout(std::process::Stdio::null())
@@ -454,43 +457,56 @@ fn handle_daemon_start(
         });
     }
 
-    let child = cmd.spawn()?;
+    let mut child = cmd.spawn()?;
     let pid = child.id();
     write_pid_file(socket_path, pid)?;
 
     // Wait for socket
     if !wait_for_socket(socket_path, start_timeout_secs) {
         remove_pid_file(socket_path);
-        // Try to kill the process
-        unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
-        }
+        terminate_child(&mut child, start_timeout_secs);
         return Err(TianJiError::Usage(format!(
             "Daemon did not become ready within {start_timeout_secs:.1}s for socket {socket_path}."
         )));
     }
 
     // Wait for API
-    if !wait_for_api(host, port, start_timeout_secs) {
+    if !wait_for_api(&validated_host, port, start_timeout_secs) {
         remove_pid_file(socket_path);
-        unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
-        }
+        terminate_child(&mut child, start_timeout_secs);
         return Err(TianJiError::Usage(
-            format!("Daemon HTTP API did not become ready within {start_timeout_secs:.1}s at http://{host}:{port}/api/v1/meta.")
+            format!("Daemon HTTP API did not become ready within {start_timeout_secs:.1}s at {}/api/v1/meta.", tianji::daemon::loopback_http_base_url(&validated_host, port))
         ));
     }
+
+    let api_base_url = tianji::daemon::loopback_http_base_url(&validated_host, port);
 
     let payload = serde_json::json!({
         "socket_path": socket_path,
         "sqlite_path": sqlite_path,
         "pid": pid,
-        "host": host,
+        "host": validated_host,
         "port": port,
-        "api_base_url": format!("http://{host}:{port}"),
+        "api_base_url": api_base_url,
         "running": true,
     });
     Ok(serde_json::to_string_pretty(&payload)?)
+}
+
+fn terminate_child(child: &mut std::process::Child, timeout_secs: f64) {
+    let pid = child.id() as i32;
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout_secs);
+    while std::time::Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn handle_daemon_stop(socket_path: &str) -> Result<String, TianJiError> {

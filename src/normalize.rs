@@ -1,10 +1,38 @@
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
 use crate::fetch::{derive_canonical_content_hash, derive_canonical_entry_identity_hash};
 use crate::models::{NormalizedEvent, RawItem};
+
+static WHITESPACE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+").expect("valid whitespace regex"));
+static TOKEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[a-zA-Z][a-zA-Z0-9_-]+").expect("valid token regex"));
+static ACTOR_REGEXES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
+    ACTOR_PATTERNS
+        .iter()
+        .map(|(name, pattern)| {
+            (
+                *name,
+                Regex::new(pattern).expect("valid oracle actor pattern"),
+            )
+        })
+        .collect()
+});
+static REGION_REGEXES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
+    REGION_PATTERNS
+        .iter()
+        .map(|(name, pattern)| {
+            (
+                *name,
+                Regex::new(pattern).expect("valid oracle region pattern"),
+            )
+        })
+        .collect()
+});
 
 pub const REGION_PATTERNS: &[(&str, &str)] = &[
     ("ukraine", r"\bukraine\b"),
@@ -117,18 +145,13 @@ pub fn normalize_item(item: &RawItem) -> NormalizedEvent {
 }
 
 pub fn clean_text(text: &str) -> String {
-    Regex::new(r"\s+")
-        .expect("valid whitespace regex")
-        .replace_all(text, " ")
-        .trim()
-        .to_string()
+    WHITESPACE_RE.replace_all(text, " ").trim().to_string()
 }
 
 pub fn extract_keywords(text: &str, limit: usize) -> Vec<String> {
-    let token_re = Regex::new(r"[a-zA-Z][a-zA-Z0-9_-]+").expect("valid token regex");
     let lowered = text.to_lowercase();
     let mut seen = Vec::new();
-    for matched in token_re.find_iter(&lowered) {
+    for matched in TOKEN_RE.find_iter(&lowered) {
         let token = matched.as_str().to_string();
         if token.len() > 2 && !seen.contains(&token) {
             seen.push(token);
@@ -142,6 +165,20 @@ pub fn extract_keywords(text: &str, limit: usize) -> Vec<String> {
 
 pub fn match_patterns(text: &str, patterns: &[(&str, &str)]) -> Vec<String> {
     let lowered = text.to_lowercase();
+    if std::ptr::eq(patterns, ACTOR_PATTERNS) {
+        return ACTOR_REGEXES
+            .iter()
+            .filter(|(_, regex)| regex.is_match(&lowered))
+            .map(|(name, _)| (*name).to_string())
+            .collect();
+    }
+    if std::ptr::eq(patterns, REGION_PATTERNS) {
+        return REGION_REGEXES
+            .iter()
+            .filter(|(_, regex)| regex.is_match(&lowered))
+            .map(|(name, _)| (*name).to_string())
+            .collect();
+    }
     patterns
         .iter()
         .filter(|&(_, pattern)| {

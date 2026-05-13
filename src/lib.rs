@@ -974,6 +974,19 @@ mod tests {
         assert!(daemon::validate_loopback_host("example.com").is_err());
     }
 
+    #[test]
+    fn loopback_helpers_bracket_ipv6_hosts() {
+        assert_eq!(
+            daemon::loopback_socket_addr("127.0.0.1", 8765),
+            "127.0.0.1:8765"
+        );
+        assert_eq!(daemon::loopback_socket_addr("::1", 8765), "[::1]:8765");
+        assert_eq!(
+            daemon::loopback_http_base_url("::1", 8765),
+            "http://[::1]:8765"
+        );
+    }
+
     // --- RunJobRequest parsing tests ---
 
     #[test]
