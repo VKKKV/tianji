@@ -23,6 +23,7 @@ parity gate has passed. After parity is verified, Python code is retired per
 | 1 | Worldline core + pipeline (Cangjie/Fuxi) | Milestone 1A+1B complete |
 | 2 | Storage + History | Milestone 2 complete |
 | 3 | Local Runtime (daemon + API + webui) | Milestone 3 complete |
+| - | Hongmeng orchestration layer | Deferred |
 | 3 | Nuwa simulation sandbox | Deferred |
 | 4 | TUI (ratatui + Kanagawa Dark) | Deferred |
 | 5 | Daemon + Web UI | Deferred |

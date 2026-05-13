@@ -751,35 +751,36 @@ lto = true
 - `tianji run --sqlite-path ...` 自动持久化
 - 验证: Rust history 输出与 Python history 输出逐字段一致
 
-#### Milestone 3 — Local Runtime Parity (启动)
+#### Milestone 3 — Local Runtime Parity (已完成)
 
 设计决策 (2026-05-13):
 
-- **D1 — Module 结构: 继续扁平。** 本里程碑先新增 `src/daemon.rs`、`src/api.rs`、`src/webui.rs`，不提前重构为 `src/daemon/` 子模块。目标是先完成 Python oracle parity，再在接口稳定后机械拆分。`plan.md` §10 的 `src/daemon/{server,socket,jobs}.rs` 仍是后续稳定后的目标形态。
+- **D1 — Module 结构: 继续扁平。** 三个扁平文件 `src/daemon.rs`、`src/api.rs`、`src/webui.rs`，不提前重构为 `src/daemon/` 子模块。`plan.md` §10 的 `src/daemon/{server,socket,jobs}.rs` 仍是后续稳定后的目标形态。
 
-- **D2 — tokio 运行时形状: 单 runtime + spawned tasks。** 一个 tokio runtime 承载 UNIX socket 控制面、loopback HTTP API、后台 worker loop。共享状态用 `Arc<AppState>`，优先保持 shutdown、状态共享和 axum 集成简单明确。
+- **D2 — tokio 运行时形状: 单 runtime + spawned tasks。** 一个 tokio runtime 承载 UNIX socket 控制面（`tokio::net::UnixListener`）、loopback HTTP API（axum `Router`）、后台 worker loop（`std::thread` + `Mutex<Condvar>`）。共享状态用 `Arc<AppState>`。
 
-- **D3 — Daemon 启动机制: 子进程模式。** `tianji daemon start` spawn 自身为子进程执行内部 `tianji daemon serve --socket-path ... --sqlite-path ... --host ... --port ...`，并由 PID file + UNIX socket 暴露可观测生命周期。保持与 Python `start_new_session=True` 模式和 `start/stop/status/run` 操作语义一致。
+- **D3 — Daemon 启动机制: 子进程模式。** `tianji daemon start` spawn 自身为子进程执行内部 `#[command(hide = true)] daemon serve`，通过 `libc::setsid()` 创建新 session，PID file 记录子进程 PID。`daemon stop` 通过 SIGTERM → SIGKILL 逐级终止。
 
-- **D4 — Web UI 子命令层级: 顶层 `tianji webui`。** 保持与 Python CLI 形态和 `web-ui-contract.md` 一致。daemon 负责控制面与 read-first API，web UI 作为可选独立 surface，单独启动并消费 daemon API。
+- **D4 — Web UI 子命令层级: 顶层 `tianji webui`。** 与 Python CLI 和 `web-ui-contract.md` 一致。daemon 负责控制面与 read-first API，web UI 作为可选独立 surface 单独启动。
 
-- **D5 — schedule 子命令: 延后。** 本里程碑先实现 `daemon start/stop/status/run` + read-first loopback API，不把 `daemon schedule` 纳入第一刀。重复提交、timer 生命周期和调度状态语义留到后续小里程碑，避免 runtime parity 与 bounded scheduler 语义纠缠。
+- **D5 — schedule 子命令: 延后。** `schedule` 的 timer 生命周期、重复提交语义和测试矩阵留到后续 3C。当前仅实现 `daemon start/stop/status/run/serve`。
 
-- **D6 — Web UI 静态文件: 编译时嵌入。** 采用编译期嵌入静态资源，保持单二进制分发，不依赖运行时 `tianji/webui/` 目录存在。行为对齐 Python surface，分发形态对齐 Rust rewrite 的自包含目标。
+- **D6 — Web UI 静态文件: 编译时嵌入。** 三个 `include_str!()` 嵌入 `tianji/webui/{index.html,app.js,styles.css}`，保持单二进制分发。
 
-范围切分:
+范围切分（3A + 3B 完成，3C 后续）:
 
-- **Milestone 3A — Daemon + Local API 基础面。** `tianji daemon start/stop/status/run`、内部 `daemon serve`、UNIX socket 控制面、read-first loopback HTTP API。
-- **Milestone 3B — Optional Web UI。** `tianji webui` 顶层子命令、静态资源嵌入、面向 daemon API 的薄浏览器 UI。
-- **Milestone 3C — Bounded schedule（后续）。** `tianji daemon schedule --every-seconds N --count M` 及其测试矩阵，待 3A/3B 稳定后补齐。
+- **Milestone 3A — Daemon + Local API 基础面。** ✅ `tianji daemon start/stop/status/run`、内部 `daemon serve`、UNIX socket JSON-lines 协议、read-first loopback HTTP API（5 个 axum 路由: meta, runs, runs/:id, runs/latest, compare）。
+- **Milestone 3B — Optional Web UI。** ✅ `tianji webui` 顶层子命令、编译时静态嵌入、daemon API 反向代理、`/queue-run` 重试 logic。
+- **Milestone 3C — Bounded schedule（后续）。** `tianji daemon schedule --every-seconds N --count M` 及其测试矩阵。
 
-待实现:
-- 依赖: `tokio` + `axum` + 必要的 HTTP/static serve 组件，严格按本里程碑需要最小引入
-- `src/daemon.rs`: daemon start/stop/status/run/serve 入口、PID file、子进程拉起、共享 runtime 状态
-- `src/api.rs`: `GET /api/v1/meta`、`GET /api/v1/runs`、`GET /api/v1/runs/{run_id}`、`GET /api/v1/compare?left_run_id=<id>&right_run_id=<id>`，可选 `GET /api/v1/runs/latest`
-- `src/webui.rs`: `tianji webui --api-base-url ... --host ... --port ...`，静态资源编译时嵌入并提供 thin proxy/serve 行为
-- worker loop: 复用同步 `run` 的单次 work unit，后台执行并映射为 `queued/running/succeeded/failed`
-- 验证: Rust daemon/API/webui 表面行为与 Python oracle contract 对齐；HTTP vocabulary 对齐 `.trellis/spec/backend/contracts/*.md`
+完成内容:
+- 依赖: `tokio` (full) + `axum` (0.7) + `uuid` (v4) + `reqwest` (rustls-tls + blocking) + `libc`
+- `src/daemon.rs` (551 行): RunJobRequest 解析、DaemonState (Mutex+Condvar job queue)、UnixListener socket 控制面、worker loop、`send_daemon_request` 同步客户端
+- `src/api.rs` (360 行): axum Router、5 个 GET 路由、`JsonEnvelope` 响应包装、envelope 格式对齐 contract fixtures
+- `src/webui.rs` (306 行): 3 个 `include_str!` 嵌入、index/app.js/styles.css 路由、API 反向代理（reqwest async）、`/queue-run` POST handler
+- `src/main.rs` (+456 行): `DaemonCommands` enum (Start/Stop/Status/Run/Serve)、`Cli::Webui` variant、PID file 读写、`wait_for_socket`/`wait_for_api` 就绪检查
+- 新增 19 个测试（共 52 pass）: daemon state 生命周期、socket 协议、loopback 校验、RunJobRequest 解析
+- `cargo fmt --check` 通过，`cargo clippy -- -D warnings` 通过
 
 ### Phase 2: Hongmeng 编排层
 - tokio actor 模型 + Board/Stick 消息路由

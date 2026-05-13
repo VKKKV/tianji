@@ -33,7 +33,7 @@ sha2 = "0.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
-axum = "0.8"
+axum = "0.7"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 libc = "0.2"
