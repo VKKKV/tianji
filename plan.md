@@ -710,12 +710,46 @@ lto = true
 ## 12. 开发阶段
 
 ### Phase 1: Worldline 核心 + 管线
-- models.rs: 所有数据结构
-- cangjie/: feed, normalize, fetch
-- fuxi/: worldline 状态机, scoring, grouping, backtrack, triggers, dependency DAG
-- storage.rs: SQLite schema + Blake3 snapshot
-- CLI: `tianji run`, `tianji history`
-- 验证: 输出与 Python 版 JSON 字段级对齐
+
+**状态: Milestone 1A+1B 完成，Milestone 2 进行中**
+
+#### Milestone 1A — Feed + Normalization (已完成)
+- RSS 2.0 / Atom 1.0 fixture 解析 (roxmltree)
+- SHA-256 canonical hashing (identity + content)
+- Deterministic normalization: keywords, actors, regions, field scores, event IDs
+- Rust test parity with Python oracle
+
+#### Milestone 1B — Scoring + Grouping + Backtrack (已完成)
+- Im/Fa scoring + divergence_score
+- Event grouping (shared signals + 24h time window)
+- Intervention candidate generation
+- Contract fixture parity (artifact keys, summary fields)
+- 18 项 Rust 测试对标 Python oracle 全绿
+
+#### Milestone 2 — Storage + History + CLI (进行中)
+
+设计决策 (2026-05-13):
+
+- **D1 — Event groups 持久化: 读取时重算。** event_groups 是 scored_events 的派生数据。LiveStore 事件溯源原则: "never include derived values in events — compute at query time." 当前规模 3-10 events/run 重算开销可忽略。只有 scored_events 是 source of truth。
+
+- **D2 — --sqlite-path 默认值: 显式必填。** 与 Python oracle 一致。后续可从 config file 读取默认值，但不在本里程碑引入。
+
+- **D3 — CLI 结构: 本里程碑加 clap derive。** 研究确认成本低(~50-100 行)，收益大(--help 自动生成、类型安全、内置校验)。使用平级子命令与 Python CLI 一致。
+
+- **D4 — run 持久化: --sqlite-path 可选。** 不给 --sqlite-path → 仅 stdout JSON (和 Python 一致)。指定了才写 SQLite。
+
+- **D5 — history 子命令: 平级。** `tianji history`、`tianji history-show`、`tianji history-compare` 都是顶层子命令，与 Python CLI 形态一致。
+
+- **D6 — 模块结构: 本里程碑不重构。** 当前 6 个扁平 src/*.rs 文件不变，只加 `src/storage.rs`。`cangjie/` `fuxi/` 子模块留给 Phase 2-3 (Hongmeng/Nuwa)。
+
+待实现:
+- `src/storage.rs`: rusqlite schema (6 表: runs, source_items, raw_items, normalized_events, scored_events, interventions)
+- CLI: clap derive 子命令 (run, history, history-show, history-compare)
+- `history` 命令: 列表 + 过滤 (mode, dominant_field, risk_level, since/until, score thresholds)
+- `history-show`: 单 run 详情 (scored events, interventions, event groups 重算)
+- `history-compare`: 双 run diff (comparable 标记, 投影 filter)
+- `tianji run --sqlite-path ...` 自动持久化
+- 验证: Rust history 输出与 Python history 输出逐字段一致
 
 ### Phase 2: Hongmeng 编排层
 - tokio actor 模型 + Board/Stick 消息路由
