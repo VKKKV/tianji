@@ -376,7 +376,148 @@ agent_model_map:
 
 ---
 
-## 9. 测试策略 (四层)
+## 9. TUI 设计规范
+
+风格方向: Minimal Dashboard。与用户终端环境一致。
+
+### 配色 — Kanagawa Dark
+
+```
+背景:       #1F1F28  (Kanagawa bg)
+面板背景:   #272727  (Alacritty background — 略亮于 Kanagawa 区分层)
+面板边框:   #363646  (Kanagawa dim, 细线)
+前景:       #DCD7BA  (Kanagawa fg)
+字段标签:   #7E9CD8  (Kanagawa blue)
+数值:       #DCD7BA  (fg)
+数值上升:   #98BB6C  (Kanagawa green, ↑)
+数值下降:   #E46876  (Kanagawa red, ↓)
+警告/偏离:   #FFA066  (Kanagawa peach, 仅关键告警)
+状态栏:     #363646  (dim bg)
+按键提示:   #938AA9  (Kanagawa purple)
+标题:       #E6C384  (Kanagawa yellow, 温和)
+```
+
+### 字体
+
+- 主字体: MapleMono NF CN (用户终端字体)
+- Nerd Font glyphs 可选:  (warning)  (arrow)
+- ASCII fallback: 用 [x] [-] [>] 代替，检测到非 Nerd Font 终端自动降级
+
+### 布局
+
+```
+┌─ Title Bar ─────────────────────────────────────────┐
+│ tianji · divergence 0.337261 · run #42               │
+├─ Main Panel ────────────────────────────────────────┤
+│  (当前视图: dashboard | history | detail | compare)  │
+├─ Status Bar ────────────────────────────────────────┤
+│ watch:active  daemon:running  [h]elp [q]uit          │
+└──────────────────────────────────────────────────────┘
+```
+
+### Vim 键位
+
+```
+j/k         — 列表上下移动
+h/l         — 面板焦点左右切换
+gg/G        — 跳转列表首/尾
+/           — 搜索/过滤
+Enter       — 选择/展开
+Esc         — 退出/返回
+q           — 退出
+?           — 帮助
+数字 + G    — 跳转到第 N 行
+Ctrl+d/u    — 半页滚动
+```
+
+### 动画
+
+无。不闪烁，不过渡。panel 切换是即时 repaint。
+
+### 视图
+
+**Dashboard (主页)**
+
+```
+┌─ Worldline ────────────────────────────────────────┐
+│ divergence   0.337261                               │
+│ last run     2026-05-13 14:22:03 (run #42)          │
+│ baseline     run #1 (2026-03-15)                     │
+├─ Fields ───────────────────────────────────────────┤
+│ east-asia.conflict     0.72  ↑0.04                   │
+│ europe.stability       0.58  —                      │
+│ global.trade_volume    0.63  ↓0.02                   │
+│ middle-east.stability  0.31  ↓0.08                   │
+│ technology.ai_race     0.81  ↑0.06                   │
+├─ Top Events ───────────────────────────────────────┤
+│ US carrier group enters SCS              Im:18.2    │
+│ Iran nuclear talks resume in Vienna      Im:12.1    │
+│ EU announces new chip export framework   Im:10.7    │
+└─────────────────────────────────────────────────────┘
+```
+
+**History 列表**
+
+```
+┌─ Run History ──────────────────────────────────────┐
+│  #   date        mode    divergence  dominant_field │
+│  42  05-13 14:22 fetch   0.337261    conflict       │
+│  41  05-13 13:25 fetch   0.332104    conflict       │
+│  40  05-13 12:30 fixture 0.328773    technology     │
+├─ Filters ──────────────────────────────────────────┤
+│  mode:all  field:all  risk:all  limit:20            │
+└─────────────────────────────────────────────────────┘
+```
+
+**仿真监控 (predict / backtrack 运行时)**
+
+```
+┌─ Simulation ───────────────────────────────────────┐
+│ mode: forward  field: east-asia.conflict  round 3/10│
+│ progress  ████████░░  30%                           │
+├─ Worldline ────────────────────────────────────────┤
+│ east-asia.conflict   0.84  ↑0.12                    │
+│ global.trade_volume  0.55  ↓0.08                    │
+├─ Agents ───────────────────────────────────────────┤
+│ China      done      (naval exercise)               │
+│ USA        running…                                 │
+│ Russia     pending                                  │
+└─────────────────────────────────────────────────────┘
+```
+
+人工剪枝暂停时，暂停提示覆盖底部区域。
+
+### 实现
+
+- ratatui `Block::bordered()` 细线边框
+- Style 硬编码 Kanagawa 色值 (不使用 ratatui 内置 Color enum)
+- 配色集中定义在 `tui/theme.rs`
+- 事件循环: `crossterm::event::poll(Duration::from_millis(100))` 非阻塞
+- 窗口 resize: `Constraint::Percentage` + `Constraint::Min`
+- 列表: `List::new()` + `highlight_style` 标记选中行
+- 状态栏: `Paragraph::new()` 右对齐快捷键
+
+```rust
+// tui/theme.rs
+pub const KANAGAWA: Theme = Theme {
+    bg:        Color::Rgb(0x1F, 0x1F, 0x28),
+    panel_bg:  Color::Rgb(0x27, 0x27, 0x27),
+    border:    Color::Rgb(0x36, 0x36, 0x46),
+    fg:        Color::Rgb(0xDC, 0xD7, 0xBA),
+    label:     Color::Rgb(0x7E, 0x9C, 0xD8),
+    value:     Color::Rgb(0xDC, 0xD7, 0xBA),
+    up:        Color::Rgb(0x98, 0xBB, 0x6C),
+    down:      Color::Rgb(0xE4, 0x68, 0x76),
+    warn:      Color::Rgb(0xFF, 0xA0, 0x66),
+    status_bg: Color::Rgb(0x36, 0x36, 0x46),
+    key_hint:  Color::Rgb(0x93, 0x8A, 0xA9),
+    title:     Color::Rgb(0xE6, 0xC3, 0x84),
+};
+```
+
+---
+
+## 10. 测试策略 (四层)
 
 ```
 Layer 1: aimock / llmreplay — 录制真实 LLM 响应, CI 中 replay 确定性测试
