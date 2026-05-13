@@ -69,6 +69,61 @@ Out of scope:
 - Nuwa simulation or LLM providers
 - deleting Python code
 
+#### Milestone 0 Code Contract
+
+The provisional Rust CLI command is:
+
+```bash
+cargo run -- run --fixture <path>
+```
+
+Contract:
+
+- `<path>` must point to a local fixture file readable by the process.
+- The command writes a pretty JSON `RunArtifact` payload to stdout.
+- The payload must include the current top-level `RunArtifact` keys:
+  `schema_version`, `mode`, `generated_at`, `input_summary`,
+  `scenario_summary`, `scored_events`, and `intervention_candidates`.
+- `input_summary` and `scenario_summary` must preserve the current nested key
+  vocabulary from `tests/fixtures/contracts/run_artifact_v1.json` where the
+  Milestone 0 scaffold implements those sections.
+- Missing Cangjie/Fuxi parity must stay explicit: scaffold output may leave
+  scored events and intervention candidates empty, but must not imply scoring,
+  grouping, or backtracking parity is complete.
+
+Validation and errors:
+
+| Condition | Required behavior |
+|---|---|
+| command is not `run --fixture <path>` | exit non-zero and print usage to stderr |
+| fixture cannot be read as UTF-8 text | exit non-zero and print the read error to stderr |
+| JSON serialization fails | exit non-zero and print the serialization error to stderr |
+
+Good/base/bad cases:
+
+- Good: `cargo run -- run --fixture tests/fixtures/sample_feed.xml` emits valid
+  JSON with the current artifact key vocabulary.
+- Base: the scaffold reports fixture mode and a deterministic explicit
+  no-parity headline while semantic parity is incomplete.
+- Bad: adding daemon/API/TUI/LLM dependencies or deleting Python code during
+  Milestone 0.
+
+Tests required:
+
+- Rust tests compare emitted top-level and nested summary keys against
+  `tests/fixtures/contracts/run_artifact_v1.json`.
+- Rust tests assert incomplete scoring/backtracking parity is explicit.
+- Existing Python unittest coverage must still pass using the repo-local `uv`
+  environment when available; if `.venv` is absent, create it with `uv venv`
+  before using `.venv/bin/python`.
+
+Wrong vs correct:
+
+```text
+Wrong: cargo run -- predict --field east-asia.conflict
+Correct: cargo run -- run --fixture tests/fixtures/sample_feed.xml
+```
+
 ### Milestone 1 — Cangjie + Fuxi Core Parity
 
 Goal: Rust one-shot output is semantically compatible with the current Python
