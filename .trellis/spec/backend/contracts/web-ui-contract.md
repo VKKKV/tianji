@@ -13,7 +13,7 @@ The web UI exists as a convenience read surface for local operators who want bro
    - Operators start the UI explicitly when they want it.
 
 2. **Separate from the daemon**
-   - The UI is served by `python3 -m tianji.webui_server`.
+   - The UI is served by `tianji webui` (Rust, Milestone 5+) or `python3 -m tianji.webui_server` (Python oracle).
    - By default it binds to `127.0.0.1:8766`.
    - It consumes the daemon-hosted API instead of replacing it.
 
@@ -36,13 +36,21 @@ The web UI exists as a convenience read surface for local operators who want bro
 Start the daemon first so the API is available:
 
 ```bash
-.venv/bin/python -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
+# Rust (Milestone 5+)
+tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
+
+# Python oracle (current)
+python3 -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
 ```
 
 Then start the optional web UI:
 
 ```bash
-.venv/bin/python -m tianji.webui_server --api-base-url http://127.0.0.1:8765 --host 127.0.0.1 --port 8766
+# Rust (Milestone 5+)
+tianji webui --api-base-url http://127.0.0.1:8765 --host 127.0.0.1 --port 8766
+
+# Python oracle (current)
+python3 -m tianji.webui_server --api-base-url http://127.0.0.1:8765 --host 127.0.0.1 --port 8766
 ```
 
 Then open:

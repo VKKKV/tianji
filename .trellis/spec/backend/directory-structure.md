@@ -27,7 +27,7 @@ tianji/
 │   │
 │   ├── cangjie/
 │   │   ├── mod.rs
-│   │   ├── feed.rs             # RSS/Atom (quick-xml)
+│   │   ├── feed.rs             # RSS/Atom (roxmltree)
 │   │   ├── fetch.rs            # HTTP (reqwest)
 │   │   ├── normalize.rs        # regex keyword/actor/region extraction
 │   │   └── sources.rs          # source registry + fetch policy
@@ -129,7 +129,7 @@ direction — it is the compatibility contract that Rust must match.
 tianji/
 ├── tianji/                  # Python oracle source
 │   ├── __init__.py
-│   ├── __main__.py          # Entry: python3 -m tianji
+│   ├── __main__.py          # Entry: python3 -m tianji (oracle only)
 │   ├── cli.py               # Click CLI entry
 │   ├── cli_*.py             # CLI subcommand handlers
 │   ├── models.py            # Dataclasses: RawItem, NormalizedEvent, ScoredEvent...
