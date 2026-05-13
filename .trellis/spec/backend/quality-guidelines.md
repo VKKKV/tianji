@@ -18,15 +18,8 @@ match gate-by-gate before replacing any Python surface.
 | Concern | Choice | Constraint |
 |---------|--------|------------|
 | **Language** | Rust 2021 edition | `Cargo.toml`-based |
-| **CLI framework** | `clap` (derive) | Phase 5+ |
+| **CLI framework** | `clap` (derive) | Phase 1 (replacing manual arg parse) |
 | **XML parsing** | `roxmltree` | Feed parsing (Cangjie) |
-| **Regex** | `regex` crate | Normalization, scoring |
-| **Hashing** | `sha2` crate | Canonical hashes |
-| **Serialization** | `serde` + `serde_json` | Artifact JSON output |
-| **Testing** | `cargo test` | Built-in test framework |
-| **Formatting** | `cargo fmt` | Required: `cargo fmt --check` must pass |
-| **Linting** | `cargo clippy` | Required: `cargo clippy -- -D warnings` must pass |
-
 ### Rust Dependencies (Current)
 
 Only dependencies needed for implemented milestones:

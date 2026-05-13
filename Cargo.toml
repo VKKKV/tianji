@@ -1,8 +1,8 @@
 [package]
 name = "tianji"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Rust migration scaffold for TianJi fixture artifact emission"
+description = "TianJi — geopolitical intelligence engine"
 
 [dependencies]
 regex = "1.10"

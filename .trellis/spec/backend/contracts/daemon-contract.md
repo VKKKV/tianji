@@ -15,8 +15,9 @@ The daemon is not a second source of truth for writes. The synchronous CLI `run`
 ## Boundaries
 
 1. **CLI remains the write authority**
-   - `python3 -m tianji run ...` is still the direct source-of-truth write path.
-   - `python3 -m tianji daemon run ...` and `python3 -m tianji daemon schedule ...` submit that same work unit for background execution.
+   - `tianji run ...` (Rust binary) is the direct source-of-truth write path.
+   - `tianji daemon run ...` and `tianji daemon schedule ...` submit that same work unit for background execution.
+   - Python oracle equivalent: `python3 -m tianji run ...`
 
 2. **Local-first and loopback-only**
    - The daemon socket is local filesystem IPC.
@@ -44,37 +45,42 @@ The daemon is not a second source of truth for writes. The synchronous CLI `run`
 Start the daemon and hosted read API:
 
 ```bash
-.venv/bin/python -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
+# Rust (Milestone 5+)
+tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
+
+# Python oracle (current)
+python3 -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
 ```
 
 Inspect daemon availability:
 
 ```bash
-.venv/bin/python -m tianji daemon status --socket-path runs/tianji.sock
+# Python oracle
+python3 -m tianji daemon status --socket-path runs/tianji.sock
 ```
 
 Inspect one queued job:
 
 ```bash
-.venv/bin/python -m tianji daemon status --socket-path runs/tianji.sock --job-id 1
+python3 -m tianji daemon status --socket-path runs/tianji.sock --job-id 1
 ```
 
 Queue one background run:
 
 ```bash
-.venv/bin/python -m tianji daemon run --socket-path runs/tianji.sock --fixture tests/fixtures/sample_feed.xml
+python3 -m tianji daemon run --socket-path runs/tianji.sock --fixture tests/fixtures/sample_feed.xml
 ```
 
 Queue a bounded repeated run set:
 
 ```bash
-.venv/bin/python -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
+python3 -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
 ```
 
 Stop the daemon:
 
 ```bash
-.venv/bin/python -m tianji daemon stop --socket-path runs/tianji.sock
+python3 -m tianji daemon stop --socket-path runs/tianji.sock
 ```
 
 ## Job Lifecycle

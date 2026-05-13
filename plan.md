@@ -112,7 +112,7 @@ struct FieldKey {
 
 ```
 RSS/Atom feed
-  │  quick-xml 解析 RSS 2.0 + Atom 1.0
+  │  roxmltree 解析 RSS 2.0 + Atom 1.0
   │  SHA256 content-hash / identity-hash (去重用)
   ▼
 Vec<RawItem>
@@ -543,7 +543,7 @@ tianji/
 │   │
 │   ├── cangjie/
 │   │   ├── mod.rs
-│   │   ├── feed.rs             # RSS/Atom (quick-xml)
+│   │   ├── feed.rs             # RSS/Atom (roxmltree)
 │   │   ├── fetch.rs            # HTTP (reqwest)
 │   │   ├── normalize.rs        # regex 关键词/actor/region 提取
 │   │   └── sources.rs          # source registry + fetch policy
@@ -656,7 +656,7 @@ serde_json = "1"
 serde_yaml = "0.9"
 
 # 管线
-quick-xml = { version = "0.37", features = ["serialize"] }
+roxmltree = "0.20"
 regex = "1"
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
