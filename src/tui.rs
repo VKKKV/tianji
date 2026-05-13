@@ -99,11 +99,16 @@ impl HistoryRow {
 pub struct TuiState {
     pub rows: Vec<HistoryRow>,
     selected: usize,
+    pending_g: bool,
 }
 
 impl TuiState {
     pub fn new(rows: Vec<HistoryRow>) -> Self {
-        Self { rows, selected: 0 }
+        Self {
+            rows,
+            selected: 0,
+            pending_g: false,
+        }
     }
 
     pub fn selected(&self) -> usize {
@@ -120,6 +125,14 @@ impl TuiState {
 
     pub fn select_previous(&mut self) {
         self.selected = self.selected.saturating_sub(1);
+    }
+
+    pub fn select_first(&mut self) {
+        self.selected = 0;
+    }
+
+    pub fn select_last(&mut self) {
+        self.selected = self.rows.len().saturating_sub(1);
     }
 
     fn list_state(&self) -> ListState {
@@ -220,14 +233,38 @@ fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
     match code {
         KeyCode::Char('q') => false,
         KeyCode::Char('j') | KeyCode::Down => {
+            state.pending_g = false;
             state.select_next();
             true
         }
         KeyCode::Char('k') | KeyCode::Up => {
+            state.pending_g = false;
             state.select_previous();
             true
         }
-        _ => true,
+        KeyCode::Char('G') | KeyCode::End => {
+            state.pending_g = false;
+            state.select_last();
+            true
+        }
+        KeyCode::Char('g') => {
+            if state.pending_g {
+                state.select_first();
+                state.pending_g = false;
+            } else {
+                state.pending_g = true;
+            }
+            true
+        }
+        KeyCode::Home => {
+            state.pending_g = false;
+            state.select_first();
+            true
+        }
+        _ => {
+            state.pending_g = false;
+            true
+        }
     }
 }
 
@@ -282,6 +319,8 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
         Span::raw(" move  "),
         Span::styled("[↑/↓]", Style::default().fg(KANAGAWA.key_hint)),
         Span::raw(" move  "),
+        Span::styled("[gg/G]", Style::default().fg(KANAGAWA.key_hint)),
+        Span::raw(" first/last  "),
         Span::styled("[q]", Style::default().fg(KANAGAWA.key_hint)),
         Span::raw(" quit"),
     ]))
@@ -358,6 +397,16 @@ mod tests {
     }
 
     #[test]
+    fn state_selects_first_and_last_rows() {
+        let mut state = TuiState::new(vec![row(1), row(2), row(3)]);
+
+        state.select_last();
+        assert_eq!(state.selected(), 2);
+        state.select_first();
+        assert_eq!(state.selected(), 0);
+    }
+
+    #[test]
     fn history_row_maps_from_storage_payload() {
         let value = serde_json::json!({
             "run_id": 42,
@@ -411,5 +460,40 @@ mod tests {
         assert!(handle_key_code(&mut state, KeyCode::Char('k')));
         assert_eq!(state.selected(), 0);
         assert!(!handle_key_code(&mut state, KeyCode::Char('q')));
+    }
+
+    #[test]
+    fn key_handler_maps_vim_first_and_last_navigation() {
+        let mut state = TuiState::new(vec![row(1), row(2), row(3)]);
+
+        assert!(handle_key_code(&mut state, KeyCode::Char('G')));
+        assert_eq!(state.selected(), 2);
+        assert!(handle_key_code(&mut state, KeyCode::Char('g')));
+        assert_eq!(state.selected(), 2);
+        assert!(handle_key_code(&mut state, KeyCode::Char('g')));
+        assert_eq!(state.selected(), 0);
+    }
+
+    #[test]
+    fn key_handler_maps_home_and_end_aliases() {
+        let mut state = TuiState::new(vec![row(1), row(2), row(3)]);
+
+        assert!(handle_key_code(&mut state, KeyCode::End));
+        assert_eq!(state.selected(), 2);
+        assert!(handle_key_code(&mut state, KeyCode::Home));
+        assert_eq!(state.selected(), 0);
+    }
+
+    #[test]
+    fn key_handler_clears_pending_g_after_unrelated_key() {
+        let mut state = TuiState::new(vec![row(1), row(2), row(3)]);
+        state.select_last();
+
+        assert!(handle_key_code(&mut state, KeyCode::Char('g')));
+        assert_eq!(state.selected(), 2);
+        assert!(handle_key_code(&mut state, KeyCode::Char('x')));
+        assert_eq!(state.selected(), 2);
+        assert!(handle_key_code(&mut state, KeyCode::Char('g')));
+        assert_eq!(state.selected(), 2);
     }
 }
