@@ -203,6 +203,15 @@ enum Cli {
         #[arg(long = "sqlite-path")]
         sqlite_path: Option<String>,
     },
+    /// Browse persisted runs in a read-only terminal UI
+    Tui {
+        /// SQLite database path containing persisted TianJi runs
+        #[arg(long = "sqlite-path")]
+        sqlite_path: String,
+        /// Maximum number of runs to list
+        #[arg(long = "limit", default_value_t = 20)]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -271,7 +280,9 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(cli) {
         Ok(output) => {
-            println!("{output}");
+            if !output.is_empty() {
+                println!("{output}");
+            }
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -1002,5 +1013,6 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
             })?;
             Ok(String::new())
         }
+        Cli::Tui { sqlite_path, limit } => tianji::tui::run_history_browser(&sqlite_path, limit),
     }
 }
