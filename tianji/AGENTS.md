@@ -1,40 +1,43 @@
 # TIANJI PACKAGE
 
 ## OVERVIEW
-Owned TianJi runtime: one-shot Python pipeline from feed input to JSON artifact.
+
+This directory contains the **Python migration oracle** — the shipped TianJi runtime
+that Rust implementations must match for parity before replacing. The product
+direction is the full Rust rewrite defined in root `plan.md`.
+
+**Status: Migration Oracle.** Code here is preserved for compatibility verification,
+not extended as the product direction.
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
 | CLI contract | `cli.py` | Argument rules, default output path |
 | End-to-end flow | `pipeline.py` | Read this first for control flow |
-| Input parsing | `fetch.py` | Fixture and live feed loading |
-| Optional persistence | `storage.py` | SQLite schema and per-run persistence |
-| Run history reads | `storage.py`, `cli.py` | `history`, `history-show`, and `history-compare` are read-only SQLite entrypoints with filtering, grouped compare, and latest/relative navigation shortcuts |
-| Event extraction | `normalize.py` | Keywords, actors, regions, field scores |
-| Heuristic ranking | `scoring.py` | Impact, field attraction, scenario summary |
-| Reverse inference | `backtrack.py` | Intervention candidate generation |
-| Data contracts | `models.py` | Dataclasses define all stage boundaries |
+| Input parsing | `fetch.py` | Fixture and live feed loading — match in Rust `src/fetch.rs` |
+| Optional persistence | `storage.py` | SQLite schema and per-run persistence — match in Milestone 2 |
+| Run history reads | `storage.py`, `cli.py` | `history`, `history-show`, `history-compare` |
+| Event extraction | `normalize.py` | Keywords, actors, regions, field scores — match in Rust `src/normalize.rs` |
+| Heuristic ranking | `scoring.py` | Impact, field attraction, scenario summary — match in Milestone 1B |
+| Reverse inference | `backtrack.py` | Intervention candidate generation — match in Milestone 1B |
+| Data contracts | `models.py` | Dataclasses define all stage boundaries — match in Rust `src/models.rs` |
 
 ## CONVENTIONS
-- Keep the package flat until multiple files per stage justify nesting.
-- New behavior should land in the stage it belongs to, not inside `cli.py` or `__main__.py`.
+- This package is the oracle: Rust must match its output, not extend it.
+- Keep the package flat until Rust parity is verified.
 - `pipeline.py` orchestrates; subordinate modules stay single-purpose.
-- `cli.py` currently owns source-config resolution because that logic is still operator-surface policy.
-- Use the repo-local uv environment for package work: `uv venv .venv` and `.venv/bin/python -m ...`.
-- `cli.py` also owns lightweight operator-facing history commands; keep `history`, `history-show`, and `history-compare` read-only unless a broader service layer appears, including latest/previous/next shortcut flags.
 - Preserve deterministic behavior unless a change explicitly introduces an optional model-assisted layer.
 - Maintain artifact stability through `RunArtifact.to_dict()`.
+- Do not add new features here — add them in Rust.
 
 ## ANTI-PATTERNS
+- Do not extend this package as the product direction.
 - Do not dump business logic into `cli.py` or `__main__.py`.
 - Do not add a generic `utils.py` catch-all module.
-- Do not import reference-repo code directly into this package.
-- Do not make fetch mode depend on external network for tests.
 - Do not let scoring and backtracking mutate shared input structures in place.
 - Do not let SQLite persistence become mandatory for the one-shot flow.
 
 ## NOTES
-- The current package has no shared `utils/` hub; stage files are the module boundaries.
-- Persistence already lives in `storage.py`; continue extending it there instead of widening unrelated modules.
-- History inspection, filtering, and comparison should stay in `storage.py`; keep `cli.py` as the thin operator surface.
+- Root `plan.md` defines the target Rust architecture.
+- `.trellis/spec/backend/development-plan.md` tracks migration milestones.
+- Once a Rust parity gate passes, the corresponding Python code is retired per `plan.md` §13.

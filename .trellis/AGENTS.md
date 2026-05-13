@@ -1,103 +1,102 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-03-26
-**Commit:** 155633a
-**Branch:** main
+**Updated:** 2026-05-13
+**Branch:** rust-cli
 
 ## OVERVIEW
-TianJi currently ships a terminal-first local stack: synchronous CLI writes for one-shot `fetch -> normalize -> score -> backtrack -> emit` runs, SQLite-backed history reads, a read-only Rich TUI, a thin local daemon for bounded queueing and status, a loopback read-first HTTP API, and an optional separate web UI. Upstream inspiration still matters historically, but the active workspace now centers on first-party TianJi source, tests, and docs only.
+
+TianJi is migrating from Python to a full Rust implementation. The authoritative
+architecture document is root `plan.md`, which defines four subsystems
+(Cangjie, Fuxi, Hongmeng, Nuwa), the project structure, TUI design, and
+phased build order.
+
+**Current state:**
+- Rust: Milestone 0 scaffold landed (`cargo run -- run --fixture <path>`), Milestone 1A (feed + normalization parity) in progress on the `rust-cli` branch.
+- Python: shipped product surface under `tianji/` and `tests/` — preserved as the migration oracle until Rust parity gates pass.
 
 ## STRUCTURE
 ```text
 tianji/
-├── tianji/                # Owned Python source; current product surface
-├── tests/                 # Owned verification surface; fixture-first unittest suite
-├── README.md              # Product-facing status and roadmap
-└── .trellis/spec/backend/development-plan.md  # TianJi build and extraction roadmap
+├── src/                    # Rust implementation (in progress)
+├── Cargo.toml              # Rust crate manifest
+├── tianji/                 # Python source — migration oracle, NOT direction
+├── tests/                  # Python + Rust tests
+├── plan.md                 # Authoritative Rust architecture + build phases
+├── profiles/               # Actor profile YAML (planned)
+└── .trellis/spec/backend/  # Development guidelines and contracts
 ```
 
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Run the product | `tianji/__main__.py`, `tianji/cli.py` | Canonical entry is `python3 -m tianji run ...` |
-| Understand orchestration | `tianji/pipeline.py` | Stage spine for the owned MVP |
-| Understand data model | `tianji/models.py` | Raw item -> normalized event -> scored event -> artifact |
-| Change ingestion | `tianji/fetch.py` | RSS/Atom fixture loading and one-time URL fetch |
-| Change source selection | `tianji/cli.py` | Source registry parsing and URL selection live here today |
-| Change persistence | `tianji/storage.py` | Optional SQLite persistence boundary |
-| Inspect persisted runs | `tianji/cli.py`, `tianji/storage.py` | `history` lists/filters runs; `history-show` supports run id, latest, previous, or next; `history-compare` supports explicit ids and latest/relative presets |
-| Change heuristics | `tianji/normalize.py`, `tianji/scoring.py`, `tianji/backtrack.py` | Deterministic first |
-| Verify changes | `tests/test_pipeline.py`, `tests/fixtures/sample_feed.xml` | Local fixture + local HTTP server |
-| Plan future divergence ideas | `.trellis/spec/backend/development-plan.md` | Keep concept notes first-party and cite upstream work only as history |
-| Plan future orchestration/UI ideas | `README.md`, `.trellis/spec/backend/development-plan.md` | Keep planning first-party and cite upstream work only as history |
+| Rust architecture | `plan.md` | Authority for all subsystems, phases, structure |
+| Rust implementation | `src/main.rs`, `src/lib.rs` | Current Rust entry |
+| Rust models | `src/models.rs` | Data structures |
+| Rust feed parsing | `src/fetch.rs` | RSS/Atom fixture loading |
+| Rust normalization | `src/normalize.rs` | Keyword/actor/region extraction |
+| Python oracle (compatibility) | `tianji/fetch.py`, `tianji/normalize.py` | Match these for parity |
+| Python scoring oracle | `tianji/scoring.py` | Match for Milestone 1B |
+| Python data model | `tianji/models.py` | RawItem → NormalizedEvent → ScoredEvent → RunArtifact |
+| Python persistence | `tianji/storage.py` | SQLite schema for Milestone 2 |
+| Python TUI (reference) | `tianji/tui.py` | Rich TUI; target is ratatui per plan.md §9 |
+| Development plan | `.trellis/spec/backend/development-plan.md` | Migration milestones and guardrails |
+| TUI contract (legacy) | `.trellis/spec/backend/contracts/tui-contract.md` | Superseded by plan.md §9 |
 
-## CODE MAP
+## CODE MAP (Rust)
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
-| `main` | function | `tianji/cli.py` | CLI entry and input guardrails |
+| `main` | function | `src/main.rs` | CLI entry and run dispatch |
+| `RawItem` | struct | `src/models.rs` | Parsed feed item |
+| `NormalizedEvent` | struct | `src/models.rs` | Extracted event with keywords/actors/regions |
+| `RunArtifact` | struct | `src/models.rs` | Pipeline output contract |
+| `parse_feed` | function | `src/fetch.rs` | RSS/Atom parsing |
+| `normalize_items` | function | `src/normalize.rs` | Event extraction and field scoring |
+
+## CODE MAP (Python — Oracle)
+| Symbol | Type | Location | Role |
+|--------|------|----------|------|
 | `run_pipeline` | function | `tianji/pipeline.py` | End-to-end pipeline coordinator |
 | `parse_feed` | function | `tianji/fetch.py` | RSS/Atom parsing boundary |
 | `normalize_item` | function | `tianji/normalize.py` | Event extraction and field scoring prep |
-| `score_event` | function | `tianji/scoring.py` | Deterministic divergence-style heuristic |
+| `score_event` | function | `tianji/scoring.py` | Deterministic Im/Fa scoring |
 | `backtrack_candidates` | function | `tianji/backtrack.py` | Intervention ranking |
 | `RunArtifact` | dataclass | `tianji/models.py` | Serializable output contract |
-| `PipelineTests` | test class | `tests/test_pipeline.py` | Fixture, fetch, and CLI validation |
 
 ## CONVENTIONS
-- First-party TianJi source is only `tianji/` and `tests/`.
-- Prefer the repo-local uv environment: `uv venv .venv` and `.venv/bin/python -m tianji`.
-- Python 3.12+; stdlib-first; no heavy framework implied by current code.
-- Verification is `unittest`-based even though `pyproject.toml` includes a minimal pytest stanza.
-- Current CLI also supports `--source-config`, `--source-name`, `--sqlite-path`, `history`, `history-show`, `history-compare`, `tui`, and `daemon`.
-- `runs/` contains generated artifacts and is not source.
-- Earlier upstream projects may still be cited in docs, but they are not part of the checked-out TianJi workspace.
+- `plan.md` is the architecture authority. When in doubt, follow it.
+- Rust implementation goes under `src/` per `plan.md` §10 project structure.
+- Python code under `tianji/` and `tests/` is the oracle — match it for parity, then replace it.
+- Do not delete Python code until the relevant Rust parity gate passes.
+- Rust build/test: `cargo build`, `cargo test`, `cargo fmt --check`.
+- Python oracle verification: `.venv/bin/python -m unittest discover -s tests -v`.
+- Milestone order: 1A (feed+normalize) → 1B (score+group+backtrack) → 2 (storage) → 3 (runtime) → 4 (TUI) → 5 (daemon+web) → 6 (cleanup).
 
-## ANTI-PATTERNS (THIS PROJECT)
-- Do not treat upstream inspiration as first-party TianJi implementation.
+## ANTI-PATTERNS
+- Do not treat Python as the product direction — it is the oracle.
+- Do not claim Rust parity without verifying against Python oracle output.
+- Do not add async runtimes, web frameworks, TUI crates, or LLM crates before the milestone that uses them.
 - Do not design for daemon/IPC/web UI before the one-shot flow stays correct.
-- Do not replace deterministic logic with opaque model-driven behavior prematurely.
-- Do not add cloud-required dependencies to the owned MVP.
 - Do not bypass CLI input rules: no run without `--fixture` or `--fetch` plus at least one resolved source.
+- Do not implement Hongmeng or Nuwa before Cangjie/Fuxi + storage parity.
 
-## UNIQUE STYLES
-- Flat owned package: `fetch.py`, `normalize.py`, `scoring.py`, `backtrack.py`, `pipeline.py` stay as explicit stages.
-- Historical upstream ideas should be cited briefly in docs, then reimplemented inside TianJi rather than mirrored locally.
-- Root docs must distinguish current reality from future architecture.
+## COMMANDS (Rust)
+```bash
+cargo build
+cargo test
+cargo fmt --check
+cargo run -- run --fixture tests/fixtures/sample_feed.xml
+```
 
-## REFERENCE REPO EXIT PLAN
-- Extract concepts into TianJi specs, tests, and first-party modules.
-- Reimplement useful ideas inside `tianji/` rather than depending on external local checkouts.
-- Keep upstream names or links in docs if historical context still matters.
-- Avoid rebuilding a side-by-side embedded reference workspace.
-
-## COMMANDS
+## COMMANDS (Python — Oracle)
 ```bash
 uv venv .venv
+uv pip install -e .
 .venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml
-.venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml --output runs/latest-run.json
-.venv/bin/python -m tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
-.venv/bin/python -m tianji run --fetch --source-url https://example.com/feed.xml
-.venv/bin/python -m tianji history --sqlite-path runs/tianji.sqlite3
-.venv/bin/python -m tianji history --sqlite-path runs/tianji.sqlite3 --since 2026-03-22T10:00:00+00:00 --until 2026-03-22T12:00:00+00:00
-.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1
-.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --latest
-.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 3 --previous
-.venv/bin/python -m tianji history-show --sqlite-path runs/tianji.sqlite3 --run-id 1 --next
-.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --left-run-id 1 --right-run-id 2
-.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --latest-pair
-.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-latest
-.venv/bin/python -m tianji history-compare --sqlite-path runs/tianji.sqlite3 --run-id 3 --against-previous
-.venv/bin/python -m tianji tui --sqlite-path runs/tianji.sqlite3
-.venv/bin/python -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
-.venv/bin/python -m tianji daemon status --socket-path runs/tianji.sock
-.venv/bin/python -m tianji daemon run --socket-path runs/tianji.sock --fixture tests/fixtures/sample_feed.xml
-.venv/bin/python -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
-.venv/bin/python -m tianji daemon stop --socket-path runs/tianji.sock
-.venv/bin/python -m tianji.webui_server --api-base-url http://127.0.0.1:8765 --host 127.0.0.1 --port 8766
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
 ## NOTES
-- Workspace scale is now centered on first-party TianJi code, tests, and docs.
-- The shipped local API contract is documented in `.trellis/spec/backend/contracts/local-api-contract.md`; the daemon hosts the loopback HTTP server at `127.0.0.1:8765` by default, and the optional web UI is served separately at `127.0.0.1:8766`.
-- Historical upstream repos may still matter for attribution, but this AGENTS file covers the active TianJi workspace itself.
+- The `rust-cli` branch is the active development branch for the Rust migration.
+- Python TUI uses Rich; the target Rust TUI uses ratatui with Kanagawa Dark palette per `plan.md` §9.
+- The local API contract is documented in `.trellis/spec/backend/contracts/local-api-contract.md`.
+- Scoring model spec: `.trellis/spec/backend/scoring-spec.md`.

@@ -1,5 +1,12 @@
 # TianJi TUI Contract
 
+> **Status: Superseded by `plan.md` §9 (TUI Design Spec).**
+> This document describes the shipped Python Rich-based TUI. The target TUI is
+> now the ratatui + Kanagawa Dark design defined in `plan.md` §9. Preserve the
+> read-only navigation semantics documented here during the Rust TUI port, but
+> the visual design, keybindings, color palette, and layout are governed by
+> `plan.md` §9.
+
 ## Purpose
 
 This document defines the shipped contract for TianJi's terminal UI.

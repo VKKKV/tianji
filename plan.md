@@ -5,11 +5,11 @@
 > 灵感: Karpathy llm-wiki 模式 + angr 符号执行反推 + 多 Agent 博弈
 > 研究参考: Geopol-Forecaster, Centaur, hormuz-agent-sandbox, WarAgent, adk-graph
 
-> Trellis alignment: this file is a long-range Rust architecture vision, not
-> shipped behavior. Current shipped TianJi remains the Python implementation
+> Trellis alignment: this file is the authoritative architecture document for
+> the TianJi Rust rewrite. Current shipped TianJi remains the Python implementation
 > under `tianji/` with `unittest` coverage under `tests/`. The staged migration
 > gates and first implementation slice are defined in
-> `.trellis/spec/backend/rust-migration-plan.md`; do not delete Python or claim
+> `.trellis/spec/backend/development-plan.md`; do not delete Python or claim
 > Hongmeng/Nuwa architecture is shipped before those parity gates pass.
 
 ---
