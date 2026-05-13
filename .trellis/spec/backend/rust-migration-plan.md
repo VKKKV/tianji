@@ -145,6 +145,81 @@ Acceptance criteria:
 - score-specific tests pin current deterministic scoring semantics
 - Python remains available as the oracle until parity is reviewed and accepted
 
+#### Milestone 1A Code Contract — Feed And Normalization Parity
+
+Scope / trigger:
+
+- Trigger: Rust now implements local fixture parsing, canonical hashes, and
+  normalized-event emission while scoring/grouping/backtracking parity remains
+  deferred.
+- This contract is a partial Milestone 1 gate. It must not be treated as full
+  Cangjie/Fuxi parity.
+
+Signatures:
+
+```rust
+parse_feed(feed_text: &str, source: &str) -> Result<Vec<RawItem>, TianJiError>
+assign_canonical_hashes(items: &mut [RawItem])
+normalize_items(items: &[RawItem]) -> Vec<NormalizedEvent>
+run_fixture_path(path: impl AsRef<Path>) -> Result<RunArtifact, TianJiError>
+```
+
+Contracts:
+
+- RSS parsing mirrors Python `tianji/fetch.py`: read direct child text for
+  `title`, `description`, `link`, and `pubDate`; skip entries with blank titles.
+- Atom parsing mirrors Python namespace behavior: only Atom-namespace `entry`,
+  `title`, `summary`, `content`, `published`, `updated`, and `link` nodes count;
+  title/content text is collected from descendant text like Python `itertext()`.
+- Canonical hashes mirror Python SHA-256 inputs exactly:
+  - `entry_identity_hash = sha256(clean(link) + "|" + clean(published_at or ""))`
+  - `content_hash = sha256(clean(title) + "|" + clean(summary) + "|" + clean(published_at or ""))`
+- Normalization mirrors Python `tianji/normalize.py` for cleaned title/summary,
+  token extraction, actor/region pattern order, field keyword scoring, and
+  `event_id = sha256(source + "|" + raw title + "|" + link)[:16]`.
+- Until scoring parity lands, Rust may place normalized-event-shaped payloads in
+  `scored_events`, but the scenario headline must explicitly say scoring,
+  grouping, and backtracking parity are not implemented yet.
+
+Validation and errors:
+
+| Condition | Required behavior |
+|---|---|
+| malformed XML | return input error for the source |
+| unsupported root | return input error naming RSS or Atom expectation |
+| RSS/Atom item has blank title | skip it |
+| unreadable fixture | return/read error through the CLI boundary |
+
+Good/base/bad cases:
+
+- Good: sample RSS fixture produces three raw items and three normalized events
+  matching Python oracle hashes, event IDs, actors, regions, keywords, and field
+  scores.
+- Base: Atom fixture with one titled entry and one blank-title entry emits only
+  the titled normalized event.
+- Bad: accepting non-Atom namespaced `entry` nodes as Atom entries, collecting
+  RSS descendant text instead of direct child text, or claiming scoring parity
+  because normalized events are emitted.
+
+Tests required:
+
+- Rust tests cover RSS raw count, canonical hashes, and normalized event parity
+  for `tests/fixtures/sample_feed.xml`.
+- Rust tests cover Atom namespace parsing and blank-title skipping.
+- Rust tests assert the no-scoring/no-backtracking headline remains explicit.
+- Python unittest coverage must still pass via the repo-local `uv` environment.
+
+Wrong vs correct:
+
+```text
+Wrong: treat every `<entry>` tag as Atom regardless of namespace.
+Correct: require the `http://www.w3.org/2005/Atom` namespace for Atom entries.
+
+Wrong: treat normalized events as scored-event parity.
+Correct: emit normalized events only as a transitional payload and keep the
+         no-scoring/no-backtracking message explicit.
+```
+
 ### Milestone 2 — Storage And History Parity
 
 Goal: port the durable local read model only after one-shot artifact parity.

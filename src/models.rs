@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 use serde_json::Value;
 
@@ -29,4 +31,31 @@ pub struct ScenarioSummary {
     pub risk_level: String,
     pub top_actors: Vec<String>,
     pub top_regions: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawItem {
+    pub source: String,
+    pub title: String,
+    pub summary: String,
+    pub link: String,
+    pub published_at: Option<String>,
+    pub entry_identity_hash: String,
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct NormalizedEvent {
+    pub event_id: String,
+    pub source: String,
+    pub title: String,
+    pub summary: String,
+    pub link: String,
+    pub published_at: Option<String>,
+    pub keywords: Vec<String>,
+    pub actors: Vec<String>,
+    pub regions: Vec<String>,
+    pub field_scores: BTreeMap<String, f64>,
+    pub entry_identity_hash: String,
+    pub content_hash: String,
 }
