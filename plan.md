@@ -847,7 +847,24 @@ lto = true
 
 ---
 
-## 15. 验证标准
+## 15. 研究文档参考
+
+项目研究过程中的产出文档，整理保存在知识库 projects/ 下：
+
+| 文档 | 篇幅 | 覆盖内容 |
+|------|------|----------|
+| tianji-research-multi-agent-negotiation.md | 467 行 | Agent 信息公开协议、非国家行为体建模、agent 版本化与学习、CrewAI/AutoGen/LangGraph 通信模式 |
+| tianji-research-orchestration-testing.md | 533 行 | Daemon vs on-demand 执行、多模型 provider 配置、checkpoint/状态恢复、LLM 非确定性测试 |
+| tianji-research-worldline-baseline.md | 334 行 | Baseline 定义（snapshot hash + 坐标 pin）、Field 关联（petgraph DAG）、causal graph |
+| tianji-research-sqlite-event-pipeline.md | 153 行 | Recompute-vs-Persist 策略、SQLite MV 替代方案、CQRS、Milestone 2 迁移路径 |
+| tianji-design-questions.md | 129 行 | 原始 16 个开放设计问题 |
+| tianji-design-recommendations.md | 253 行 | 基于并行研究的 16 问建议方案 |
+
+> 所有文档位于 `/home/kita/code/knowledge/projects/`，研究于 2026-05-13 完成。
+
+---
+
+## 16. 验证标准
 
 - `cargo build --release` 零 warning
 - `cargo test` 全绿 (含四层测试策略)
