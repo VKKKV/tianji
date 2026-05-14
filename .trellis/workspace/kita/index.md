@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-0.md`
-- **Total Sessions**: 4
+- **Total Sessions**: 5
 - **Last Active**: 2026-05-14
 <!-- @@@/auto:current-status -->
 
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-05-14 | Fix known bugs B1 + B6 | `450feee`, `c71be9e` | `main` |
 | 4 | 2026-05-14 | Continue TianJi Rust development | `d5c0ae1`, `5cdcd5b`, `a18a6af`, `7890e39` | `main` |
 | 3 | 2026-05-13 | Milestone 2 + Milestone 3: Storage/History + Daemon/API/WebUI | `57c91ee`, `4ef5e8a`, `6e096e3` | `rust-cli` |
 | 2 | 2026-05-13 | Rust Cangjie/Fuxi core parity + trellis spec alignment | `04dff73`, `aed6b82`, `b24e0a8`, `4835f4b`, `3d4a40e` | `rust-cli` |
