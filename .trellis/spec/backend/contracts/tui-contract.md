@@ -514,3 +514,103 @@ let baseline = format!("run #{}", latest_run_id - 41);
 // Render a stable placeholder until the worldline/baseline backend contract exists.
 let baseline = "Baseline/worldline model unavailable in current persisted data.";
 ```
+
+## Rust TUI Detail Contract
+
+### 1. Scope / Trigger
+
+- Trigger: Phase 4 extends the Rust TUI from dashboard/history browsing to a read-only single-run detail panel.
+- Scope: detail-only MVP for the selected history row, backed by the existing `history-show` storage read model.
+- Out of scope: run compare, search/filter entry, detail previous/next persisted-run stepping, projection lens controls, live simulation monitoring, profile browsing, daemon control, run queueing, feed fetching, and any storage mutation.
+
+### 2. Signatures
+
+Rust CLI command remains unchanged:
+
+```bash
+tianji tui --sqlite-path <path> [--limit <N>]
+```
+
+Rust module boundary remains unchanged:
+
+```rust
+pub fn run_history_browser(sqlite_path: &str, limit: usize) -> Result<String, TianJiError>
+```
+
+Read dependencies:
+
+```rust
+list_runs(sqlite_path, limit, &RunListFilters::default())
+get_run_summary(
+    sqlite_path,
+    selected_run_id,
+    &ScoredEventFilters::default(),
+    false,
+    &EventGroupFilters::default(),
+)
+```
+
+### 3. Contracts
+
+- The TUI remains read-only and must not write SQLite, queue daemon jobs, call daemon IPC, fetch feeds, or start simulations.
+- The detail view is reachable only from the history view for the currently selected persisted run.
+- `Enter` from history opens detail for the selected row.
+- `Esc` or `h` from detail returns to history without changing the selected history row.
+- The detail payload uses existing `get_run_summary` semantics with default scored-event filters, default event-group filters, and `only_matching_interventions=false`.
+- Detail formatting surfaces stable `history-show` root fields: `run_id`, `schema_version`, `mode`, `generated_at`, `input_summary`, `scenario_summary`, `scored_events`, and `intervention_candidates`.
+- Event groups are read from `scenario_summary.event_groups`, preserving the storage read model where event groups are recomputed on read rather than persisted as a separate table.
+- Missing or empty detail sections render stable placeholder text instead of panicking or fabricating state.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+|-----------|----------|
+| SQLite path does not exist before launching TUI | Return the existing empty-state message before launching the terminal |
+| SQLite path is missing while loading detail | Return a missing-detail placeholder and do not create a SQLite file |
+| Selected run is not found by `get_run_summary` | Render a missing-detail placeholder for that run id |
+| `get_run_summary` returns a storage or JSON error | Render a detail error placeholder for that run id |
+| User presses `Enter` outside history | Do not open detail; keep the current view |
+| User presses `Esc` in detail | Return to history |
+| User presses `h` in detail | Return to history |
+| User presses history navigation while detail is active | Keep history selection unchanged |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `tianji tui --sqlite-path runs/tianji.sqlite3` opens dashboard, `h` switches to history, and `Enter` opens detail for the selected persisted run.
+- Base: a selected run with no scored events, event groups, or interventions renders explicit `No ... available.` placeholders.
+- Bad: opening detail by querying SQLite without checking path existence first can create an empty database file and violates read-only TUI behavior.
+
+### 6. Tests Required
+
+- Unit-test detail mapping from a `get_run_summary`-shaped JSON payload.
+- Unit-test detail formatting includes run metadata, input/scenario summary, scored events, event groups, and intervention candidates.
+- Unit-test `Enter` opens detail only from history.
+- Unit-test `Esc` and `h` return from detail to history.
+- Unit-test missing detail path handling does not create a SQLite file.
+- Re-run existing dashboard/history selection and key-handling tests to ensure behavior remains intact.
+- Run `cargo fmt --check`, `cargo test`, and `cargo clippy -- -D warnings` after TUI detail changes.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// Connection::open can create a new empty database file, violating read-only TUI behavior.
+let detail = get_run_summary(sqlite_path, selected_run_id, filters, false, group_filters)?;
+```
+
+#### Correct
+
+```rust
+if !Path::new(sqlite_path).exists() {
+    return DetailState::missing(selected_run_id);
+}
+
+let detail = get_run_summary(
+    sqlite_path,
+    selected_run_id,
+    &ScoredEventFilters::default(),
+    false,
+    &EventGroupFilters::default(),
+)?;
+```

@@ -14,7 +14,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
 use ratatui::{Frame, Terminal};
 
-use crate::storage::{list_runs, RunListFilters};
+use crate::storage::{
+    get_run_summary, list_runs, EventGroupFilters, RunListFilters, ScoredEventFilters,
+};
 use crate::{classify_delta_tier, delta_memory_path, AlertTier, HotMemory, TianJiError};
 
 pub const EMPTY_TUI_MESSAGE: &str = "No persisted runs are available for the TUI browser.";
@@ -75,6 +77,75 @@ pub struct DashboardState {
     pub delta_direction: String,
     pub baseline_status: String,
     pub worldline_status: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetailState {
+    pub run_id: i64,
+    pub status: String,
+    pub schema_version: String,
+    pub mode: String,
+    pub generated_at: String,
+    pub input_summary: String,
+    pub scenario_summary: String,
+    pub scored_events: Vec<String>,
+    pub event_groups: Vec<String>,
+    pub intervention_candidates: Vec<String>,
+}
+
+impl DetailState {
+    pub fn missing(run_id: i64) -> Self {
+        Self {
+            run_id,
+            status: format!("Run #{run_id} could not be loaded."),
+            schema_version: "unavailable".to_string(),
+            mode: "unavailable".to_string(),
+            generated_at: "unavailable".to_string(),
+            input_summary: "No input summary available.".to_string(),
+            scenario_summary: "No scenario summary available.".to_string(),
+            scored_events: vec!["No scored events available.".to_string()],
+            event_groups: vec!["No event groups available.".to_string()],
+            intervention_candidates: vec!["No intervention candidates available.".to_string()],
+        }
+    }
+
+    pub fn error(run_id: i64, message: impl Into<String>) -> Self {
+        let mut state = Self::missing(run_id);
+        state.status = format!("Run #{run_id} detail error: {}", message.into());
+        state
+    }
+
+    pub fn from_json(value: &serde_json::Value) -> Self {
+        let run_id = value.get("run_id").and_then(|v| v.as_i64()).unwrap_or(0);
+        let schema_version = string_field(value, "schema_version", "unavailable");
+        let mode = string_field(value, "mode", "unavailable");
+        let generated_at = compact_timestamp(&string_field(value, "generated_at", "unavailable"));
+        let input_summary_value = value
+            .get("input_summary")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let scenario_summary_value = value
+            .get("scenario_summary")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let scored_events = format_scored_event_lines(value.get("scored_events"));
+        let event_groups = format_event_group_lines(scenario_summary_value.get("event_groups"));
+        let intervention_candidates =
+            format_intervention_lines(value.get("intervention_candidates"));
+
+        Self {
+            run_id,
+            status: "loaded".to_string(),
+            schema_version,
+            mode,
+            generated_at,
+            input_summary: format_summary_value(&input_summary_value),
+            scenario_summary: format_scenario_summary(&scenario_summary_value),
+            scored_events,
+            event_groups,
+            intervention_candidates,
+        }
+    }
 }
 
 impl DashboardState {
@@ -146,6 +217,7 @@ impl DashboardState {
 pub enum TuiView {
     Dashboard,
     History,
+    Detail,
 }
 
 impl HistoryRow {
@@ -187,6 +259,8 @@ pub struct TuiState {
     pub rows: Vec<HistoryRow>,
     pub dashboard: DashboardState,
     pub view: TuiView,
+    pub detail: Option<DetailState>,
+    sqlite_path: Option<String>,
     selected: usize,
     pending_g: bool,
 }
@@ -197,9 +271,21 @@ impl TuiState {
             rows,
             dashboard,
             view: TuiView::Dashboard,
+            detail: None,
+            sqlite_path: None,
             selected: 0,
             pending_g: false,
         }
+    }
+
+    pub fn new_with_storage(
+        rows: Vec<HistoryRow>,
+        dashboard: DashboardState,
+        sqlite_path: impl Into<String>,
+    ) -> Self {
+        let mut state = Self::new(rows, dashboard);
+        state.sqlite_path = Some(sqlite_path.into());
+        state
     }
 
     pub fn selected(&self) -> usize {
@@ -236,6 +322,27 @@ impl TuiState {
         self.view = TuiView::History;
     }
 
+    pub fn show_detail(&mut self, detail: DetailState) {
+        self.pending_g = false;
+        self.detail = Some(detail);
+        self.view = TuiView::Detail;
+    }
+
+    pub fn open_selected_detail(&mut self) {
+        self.pending_g = false;
+        if self.view != TuiView::History {
+            return;
+        }
+        let Some(row) = self.rows.get(self.selected) else {
+            return;
+        };
+        let detail = match self.sqlite_path.as_deref() {
+            Some(sqlite_path) => load_detail_state(sqlite_path, row.run_id),
+            None => DetailState::missing(row.run_id),
+        };
+        self.show_detail(detail);
+    }
+
     fn list_state(&self) -> ListState {
         let mut state = ListState::default();
         if !self.rows.is_empty() {
@@ -262,7 +369,7 @@ pub fn run_history_browser(sqlite_path: &str, limit: usize) -> Result<String, Ti
 
     let memory = HotMemory::load(&delta_memory_path(sqlite_path));
     let dashboard = DashboardState::from_history_and_memory(&rows, &memory);
-    run_terminal(TuiState::new(rows, dashboard))?;
+    run_terminal(TuiState::new_with_storage(rows, dashboard, sqlite_path))?;
     Ok(String::new())
 }
 
@@ -335,6 +442,22 @@ impl TerminalSession {
 fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
     match code {
         KeyCode::Char('q') => false,
+        KeyCode::Esc => {
+            if state.view == TuiView::Detail {
+                state.show_history();
+            } else {
+                state.pending_g = false;
+            }
+            true
+        }
+        KeyCode::Enter => {
+            if state.view == TuiView::History {
+                state.open_selected_detail();
+            } else {
+                state.pending_g = false;
+            }
+            true
+        }
         KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Char('1') => {
             state.show_dashboard();
             true
@@ -415,6 +538,7 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
     match state.view {
         TuiView::Dashboard => render_dashboard(frame, root[1], &state.dashboard),
         TuiView::History => render_history(frame, root[1], state),
+        TuiView::Detail => render_detail(frame, root[1], state.detail.as_ref()),
     }
 
     let mut spans = vec![
@@ -426,12 +550,21 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
     ];
     if state.view == TuiView::History {
         spans.extend(vec![
+            Span::styled("[Enter]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" detail  "),
             Span::styled("[j/k]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" move  "),
             Span::styled("[↑/↓]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" move  "),
             Span::styled("[gg/G]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" first/last  "),
+        ]);
+    } else if state.view == TuiView::Detail {
+        spans.extend(vec![
+            Span::styled("[Esc]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw("/"),
+            Span::styled("[h]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" back  "),
         ]);
     }
     spans.extend(vec![
@@ -482,6 +615,21 @@ fn render_dashboard(
     frame.render_widget(paragraph, area);
 }
 
+fn render_detail(frame: &mut Frame<'_>, area: ratatui::layout::Rect, detail: Option<&DetailState>) {
+    let text = detail
+        .map(format_detail)
+        .unwrap_or_else(|| "No detail loaded.".to_string());
+    let paragraph = Paragraph::new(text)
+        .block(
+            Block::bordered()
+                .title(" Run Detail ")
+                .border_style(Style::default().fg(KANAGAWA.border))
+                .style(base_style().bg(KANAGAWA.panel_bg)),
+        )
+        .style(base_style());
+    frame.render_widget(paragraph, area);
+}
+
 fn base_style() -> Style {
     Style::default().fg(KANAGAWA.fg).bg(KANAGAWA.bg)
 }
@@ -522,6 +670,178 @@ pub fn format_dashboard(dashboard: &DashboardState) -> String {
     )
 }
 
+pub fn format_detail(detail: &DetailState) -> String {
+    format!(
+        "Run #{}\n  status: {}\n  schema: {}\n  mode: {}\n  generated: {}\n\nInput summary\n  {}\n\nScenario summary\n  {}\n\nScored events\n  {}\n\nEvent groups\n  {}\n\nIntervention candidates\n  {}",
+        detail.run_id,
+        detail.status,
+        detail.schema_version,
+        detail.mode,
+        detail.generated_at,
+        detail.input_summary,
+        detail.scenario_summary,
+        detail.scored_events.join("\n  "),
+        detail.event_groups.join("\n  "),
+        detail.intervention_candidates.join("\n  ")
+    )
+}
+
+fn load_detail_state(sqlite_path: &str, run_id: i64) -> DetailState {
+    if !Path::new(sqlite_path).exists() {
+        return DetailState::missing(run_id);
+    }
+
+    match get_run_summary(
+        sqlite_path,
+        run_id,
+        &ScoredEventFilters::default(),
+        false,
+        &EventGroupFilters::default(),
+    ) {
+        Ok(Some(value)) => DetailState::from_json(&value),
+        Ok(None) => DetailState::missing(run_id),
+        Err(error) => DetailState::error(run_id, error.to_string()),
+    }
+}
+
+fn string_field(value: &serde_json::Value, key: &str, placeholder: &str) -> String {
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| placeholder_or_value(s, placeholder))
+        .unwrap_or_else(|| placeholder.to_string())
+}
+
+fn format_summary_value(value: &serde_json::Value) -> String {
+    if value.is_null() {
+        return "No summary available.".to_string();
+    }
+    let Some(object) = value.as_object() else {
+        return value.to_string();
+    };
+    if object.is_empty() {
+        return "No summary available.".to_string();
+    }
+    object
+        .iter()
+        .map(|(key, value)| format!("{key}: {}", compact_json_value(value)))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn format_scenario_summary(value: &serde_json::Value) -> String {
+    if value.is_null() {
+        return "No scenario summary available.".to_string();
+    }
+    let Some(object) = value.as_object() else {
+        return value.to_string();
+    };
+    let fields = ["headline", "dominant_field", "risk_level"];
+    let parts: Vec<String> = fields
+        .iter()
+        .filter_map(|key| {
+            object
+                .get(*key)
+                .map(|value| format!("{key}: {}", compact_json_value(value)))
+        })
+        .collect();
+    if parts.is_empty() {
+        format_summary_value(value)
+    } else {
+        parts.join("; ")
+    }
+}
+
+fn format_scored_event_lines(value: Option<&serde_json::Value>) -> Vec<String> {
+    let lines: Vec<String> = value
+        .and_then(|v| v.as_array())
+        .map(|events| {
+            events
+                .iter()
+                .map(|event| {
+                    let event_id = string_field(event, "event_id", "unknown");
+                    let title = string_field(event, "title", "Untitled event");
+                    let dominant_field = string_field(event, "dominant_field", "uncategorized");
+                    let divergence = event
+                        .get("divergence_score")
+                        .and_then(|v| v.as_f64())
+                        .map(|value| format!("{value:.6}"))
+                        .unwrap_or_else(|| "-".to_string());
+                    format!("{event_id} · {dominant_field} · div {divergence} · {title}")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if lines.is_empty() {
+        vec!["No scored events available.".to_string()]
+    } else {
+        lines
+    }
+}
+
+fn format_event_group_lines(value: Option<&serde_json::Value>) -> Vec<String> {
+    let lines: Vec<String> = value
+        .and_then(|v| v.as_array())
+        .map(|groups| {
+            groups
+                .iter()
+                .map(|group| {
+                    let headline_id = string_field(group, "headline_event_id", "unknown");
+                    let dominant_field = string_field(group, "dominant_field", "uncategorized");
+                    let member_count = group
+                        .get("member_count")
+                        .and_then(|v| v.as_u64())
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "0".to_string());
+                    format!("{headline_id} · {dominant_field} · {member_count} members")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if lines.is_empty() {
+        vec!["No event groups available.".to_string()]
+    } else {
+        lines
+    }
+}
+
+fn format_intervention_lines(value: Option<&serde_json::Value>) -> Vec<String> {
+    let lines: Vec<String> = value
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let priority = item
+                        .get("priority")
+                        .and_then(|v| v.as_i64())
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    let event_id = string_field(item, "event_id", "unknown");
+                    let target = string_field(item, "target", "unknown target");
+                    let intervention_type = string_field(item, "intervention_type", "unknown type");
+                    format!("{priority}. {event_id} · {target} · {intervention_type}")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if lines.is_empty() {
+        vec!["No intervention candidates available.".to_string()]
+    } else {
+        lines
+    }
+}
+
+fn compact_json_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(items) => format!("{} items", items.len()),
+        serde_json::Value::Object(object) => format!("{} fields", object.len()),
+        serde_json::Value::Null => "null".to_string(),
+        _ => value.to_string(),
+    }
+}
+
 fn compact_timestamp(value: &str) -> String {
     value
         .replace('T', " ")
@@ -550,6 +870,7 @@ fn title_line(state: &TuiState) -> Line<'static> {
     let view = match state.view {
         TuiView::Dashboard => "dashboard",
         TuiView::History => "history",
+        TuiView::Detail => "detail",
     };
     Line::from(vec![
         Span::styled(
@@ -594,6 +915,15 @@ mod tests {
         let mut state = TuiState::new(rows, dashboard());
         state.show_history();
         state
+    }
+
+    fn temp_sqlite_path() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(10_000);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = format!("/tmp/tianji_tui_test_{id}.sqlite3");
+        let _ = std::fs::remove_file(&path);
+        path
     }
 
     fn delta_report(total_changes: usize, critical_changes: usize) -> DeltaReport {
@@ -796,5 +1126,126 @@ mod tests {
 
         assert!(handle_key_code(&mut state, KeyCode::Char('d')));
         assert_eq!(state.view, TuiView::Dashboard);
+    }
+
+    #[test]
+    fn detail_state_maps_from_history_show_payload() {
+        let payload = serde_json::json!({
+            "run_id": 42,
+            "schema_version": "1.0",
+            "mode": "fixture",
+            "generated_at": "1970-01-01T00:00:00+00:00",
+            "input_summary": {"raw_item_count": 3, "normalized_event_count": 2},
+            "scenario_summary": {
+                "headline": "technology pressure rises",
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "event_groups": [{
+                    "headline_event_id": "evt-1",
+                    "dominant_field": "technology",
+                    "member_count": 2
+                }]
+            },
+            "scored_events": [{
+                "event_id": "evt-1",
+                "title": "AI export controls expand",
+                "dominant_field": "technology",
+                "divergence_score": 8.5
+            }],
+            "intervention_candidates": [{
+                "priority": 1,
+                "event_id": "evt-1",
+                "target": "technology",
+                "intervention_type": "monitor"
+            }]
+        });
+
+        let detail = DetailState::from_json(&payload);
+
+        assert_eq!(detail.run_id, 42);
+        assert_eq!(detail.schema_version, "1.0");
+        assert_eq!(detail.mode, "fixture");
+        assert!(detail.input_summary.contains("raw_item_count: 3"));
+        assert!(detail
+            .scenario_summary
+            .contains("technology pressure rises"));
+        assert!(detail.scored_events[0].contains("evt-1"));
+        assert!(detail.event_groups[0].contains("2 members"));
+        assert!(detail.intervention_candidates[0].contains("monitor"));
+    }
+
+    #[test]
+    fn detail_format_includes_history_show_sections() {
+        let detail = DetailState::from_json(&serde_json::json!({
+            "run_id": 7,
+            "schema_version": "1.0",
+            "mode": "fixture",
+            "generated_at": "1970-01-01T00:00:00+00:00",
+            "input_summary": {"raw_item_count": 1},
+            "scenario_summary": {"headline": "talks resume", "event_groups": []},
+            "scored_events": [],
+            "intervention_candidates": []
+        }));
+
+        let formatted = format_detail(&detail);
+
+        assert!(formatted.contains("Run #7"));
+        assert!(formatted.contains("Input summary"));
+        assert!(formatted.contains("Scenario summary"));
+        assert!(formatted.contains("Scored events"));
+        assert!(formatted.contains("No event groups available."));
+        assert!(formatted.contains("No intervention candidates available."));
+    }
+
+    #[test]
+    fn key_handler_opens_detail_from_history_and_returns_with_escape_or_h() {
+        let mut state = history_state(vec![row(1), row(2)]);
+        state.select_next();
+
+        assert!(handle_key_code(&mut state, KeyCode::Enter));
+        assert_eq!(state.view, TuiView::Detail);
+        assert_eq!(state.detail.as_ref().map(|detail| detail.run_id), Some(2));
+        assert_eq!(state.selected(), 1);
+
+        assert!(handle_key_code(&mut state, KeyCode::Esc));
+        assert_eq!(state.view, TuiView::History);
+        assert_eq!(state.selected(), 1);
+
+        assert!(handle_key_code(&mut state, KeyCode::Enter));
+        assert_eq!(state.view, TuiView::Detail);
+        assert!(handle_key_code(&mut state, KeyCode::Char('h')));
+        assert_eq!(state.view, TuiView::History);
+    }
+
+    #[test]
+    fn detail_load_uses_storage_summary_defaults() {
+        let db_path = temp_sqlite_path();
+        let _ = crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+            .expect("run + persist");
+
+        let detail = load_detail_state(&db_path, 1);
+
+        assert_eq!(detail.status, "loaded");
+        assert_eq!(detail.run_id, 1);
+        assert_eq!(detail.mode, "fixture");
+        assert!(detail.input_summary.contains("raw_item_count: 3"));
+        assert!(detail
+            .scored_events
+            .iter()
+            .any(|line| line.contains("technology")));
+        assert!(!detail.intervention_candidates.is_empty());
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn detail_missing_state_is_stable_placeholder() {
+        let db_path = temp_sqlite_path();
+        let detail = load_detail_state(&db_path, 99);
+
+        assert_eq!(detail.run_id, 99);
+        assert!(detail.status.contains("could not"));
+        assert!(format_detail(&detail).contains("No scored events available."));
+        assert!(!Path::new(&db_path).exists());
     }
 }
