@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-0.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-05-14
 <!-- @@@/auto:current-status -->
 
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-05-14 | Crucix Delta Engine Phase 2 | `fd33f55`, `b3883a4` | `main` |
 | 7 | 2026-05-14 | Fix known bugs B4/B10 — all 10 bugs resolved | `20b6440`, `a4d307d` | `main` |
 | 6 | 2026-05-14 | Fix known bugs B3/B5/B8/B9 | `180f2a5`, `33ed6f0` | `main` |
 | 5 | 2026-05-14 | Fix known bugs B1 + B6 | `450feee`, `c71be9e` | `main` |
