@@ -229,6 +229,78 @@ fn extract_tokens(text: &str) -> Vec<&str> {
 
 ## Common Mistakes
 
+### Converting `TianJiError` to `String` mid-chain (error variant loss)
+
+**Symptom**: Structured error information (`Usage`/`Input`/`Io`/`Json`/`Storage` variants)
+is lost when an error is converted to a plain `String` via `format!("TianJiError: {e}")`
+or `.to_string()` before being propagated.
+
+**Cause**: Rust's `?` operator automatically converts errors via `From` impls, preserving
+the full type chain. Manually converting to `String` breaks this chain — downstream code
+cannot match on the variant or extract structured info.
+
+**Fix**: Always propagate `TianJiError` directly via `?`. If a boundary (like job storage)
+requires a string, convert only at the final storage point — not in the intermediate layers.
+
+#### Wrong
+
+```rust
+fn run_pipeline_for_job(request: &RunJobRequest) -> Result<(), String> {
+    run_fixture_path(fixture_path, sqlite_path)
+        .map_err(|e| format!("TianJiError: {e}"))?;  // variant lost
+    Ok(())
+}
+```
+
+#### Correct
+
+```rust
+fn run_pipeline_for_job(request: &RunJobRequest) -> Result<(), TianJiError> {
+    run_fixture_path(fixture_path, sqlite_path)?;  // variant preserved
+    Ok(())
+}
+```
+
+### Discarding daemon child stdout/stderr (`Stdio::null()`)
+
+**Symptom**: Daemon child process crashes or panics, but no output is captured — making
+post-mortem debugging impossible.
+
+**Cause**: Using `Stdio::null()` for child stdout/stderr silently discards all output.
+
+**Fix**: Redirect child stdout/stderr to a log file (e.g., `<socket-path>.log`) using
+`Stdio::from(File)`. This captures diagnostic output while still detaching from the
+parent's terminal.
+
+#### Wrong
+
+```rust
+.stdout(std::process::Stdio::null())
+.stderr(std::process::Stdio::null())
+```
+
+#### Correct
+
+```rust
+let log_path = format!("{socket_path}.log");
+let log_file = std::fs::File::create(&log_path)?;
+let log_file_err = log_file.try_clone()?;
+.stdout(Stdio::from(log_file))
+.stderr(Stdio::from(log_file_err))
+```
+
+### Duplicating utility functions across modules
+
+**Symptom**: Helper functions like `round2`, `days_since_epoch` are copy-pasted into
+multiple modules with minor inconsistencies (`.unwrap()` vs `.expect()`).
+
+**Cause**: Avoiding a shared utility module because the functions "feel too small to
+extract." Over time this creates maintenance burden — any bug fix or behavior change
+must be applied in multiple places.
+
+**Fix**: Extract shared helpers to `src/utils.rs` as `pub fn`. Import from `crate::utils`.
+Standardize on `.expect()` for consistency.
+
 ### Dropping `std::process::Child` without reaping (zombie process leak)
 
 **Symptom**: After spawning a daemon child process with `Command::spawn()`, the parent
