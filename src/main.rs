@@ -21,6 +21,9 @@ enum Cli {
         /// Optional SQLite database path for persisting run data
         #[arg(long = "sqlite-path")]
         sqlite_path: Option<String>,
+        /// Include delta and alert tier context in a wrapper JSON payload
+        #[arg(long = "show-delta")]
+        show_delta: bool,
     },
     /// List persisted runs
     History {
@@ -305,6 +308,97 @@ fn main() -> ExitCode {
             eprintln!("error: {error}");
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    const SAMPLE_FIXTURE: &str = "tests/fixtures/sample_feed.xml";
+
+    fn temp_sqlite_path(label: &str) -> String {
+        std::env::temp_dir()
+            .join(format!(
+                "tianji_cli_{label}_{}_{}.sqlite3",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system time after epoch")
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn cleanup_sqlite_path(path: &str) {
+        let _ = std::fs::remove_file(path);
+        let memory_path = tianji::delta_memory_path(path);
+        if let Some(parent) = memory_path.parent() {
+            let _ = std::fs::remove_dir_all(parent);
+        }
+    }
+
+    #[test]
+    fn run_default_output_remains_run_artifact_json() {
+        let db_path = temp_sqlite_path("default_output");
+        let _ = run(Cli::Run {
+            fixture: SAMPLE_FIXTURE.to_string(),
+            sqlite_path: Some(db_path.clone()),
+            show_delta: false,
+        })
+        .expect("seed run");
+
+        let output = run(Cli::Run {
+            fixture: SAMPLE_FIXTURE.to_string(),
+            sqlite_path: Some(db_path.clone()),
+            show_delta: false,
+        })
+        .expect("default output run");
+        let value: Value = serde_json::from_str(&output).expect("json output");
+
+        assert_eq!(value["schema_version"], tianji::RUN_ARTIFACT_SCHEMA_VERSION);
+        assert!(value.get("input_summary").is_some());
+        assert!(value.get("scenario_summary").is_some());
+        assert!(value.get("scored_events").is_some());
+        assert!(value.get("intervention_candidates").is_some());
+        assert!(value.get("artifact").is_none());
+        assert!(value.get("delta").is_none());
+        assert!(value.get("alert_tier").is_none());
+
+        cleanup_sqlite_path(&db_path);
+    }
+
+    #[test]
+    fn run_show_delta_outputs_wrapper_json() {
+        let db_path = temp_sqlite_path("show_delta");
+        let _ = run(Cli::Run {
+            fixture: SAMPLE_FIXTURE.to_string(),
+            sqlite_path: Some(db_path.clone()),
+            show_delta: false,
+        })
+        .expect("seed run");
+
+        let output = run(Cli::Run {
+            fixture: SAMPLE_FIXTURE.to_string(),
+            sqlite_path: Some(db_path.clone()),
+            show_delta: true,
+        })
+        .expect("show delta run");
+        let value: Value = serde_json::from_str(&output).expect("json output");
+
+        assert_eq!(
+            value["artifact"]["schema_version"],
+            tianji::RUN_ARTIFACT_SCHEMA_VERSION
+        );
+        assert!(value.get("delta").is_some());
+        assert!(value.get("alert_tier").is_some());
+        assert!(value.get("schema_version").is_none());
+        assert_eq!(value["delta"]["summary"]["total_changes"], 0);
+        assert!(value["alert_tier"].is_null() || value["alert_tier"].is_string());
+
+        cleanup_sqlite_path(&db_path);
     }
 }
 
@@ -688,9 +782,19 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
         Cli::Run {
             fixture,
             sqlite_path,
+            show_delta,
         } => {
             let result = run_fixture_path(fixture, sqlite_path.as_deref())?;
-            artifact_json(&result.artifact)
+            if show_delta {
+                let payload = serde_json::json!({
+                    "artifact": result.artifact,
+                    "delta": result.delta,
+                    "alert_tier": result.alert_tier,
+                });
+                Ok(serde_json::to_string_pretty(&payload)?)
+            } else {
+                artifact_json(&result.artifact)
+            }
         }
         Cli::History {
             sqlite_path,
