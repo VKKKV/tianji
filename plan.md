@@ -12,7 +12,7 @@
 > `tests/` is the migration oracle — preserved until M6 retirement. Do not delete
 > Python or claim Hongmeng/Nuwa architecture is shipped before parity gates pass.
 > 当前实际状态: M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成, Crucix Delta Engine
-> 核心实现完成并已集成到 persisted fixture run 的 hot-memory 更新路径。详情见 §12。
+> daemon auto-delta / AlertTier surfacing 完成并已集成到 persisted run、daemon job status 与 read API。详情见 §12。
 
 ---
 
@@ -544,7 +544,7 @@ tianji/
 ├── Cargo.toml                  # 当前: 15 deps (见 §11)
 ├── src/
 │   ├── main.rs                 # CLI 入口 (1092 行, 8 子命令)
-│   ├── lib.rs                  # Pipeline 入口 + 68 集成测试 (1200 行)
+│   ├── lib.rs                  # Pipeline 入口 + 集成测试 (当前 Rust 测试总数 85)
 │   ├── models.rs               # RawItem → NormalizedEvent → ScoredEvent → RunArtifact
 │   │
 │   ├── fetch.rs                # RSS/Atom (roxmltree) + SHA-256 hash
@@ -727,8 +727,8 @@ lto = true
 ## 12. 开发阶段
 
 **当前状态 (2026-05-14):** M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成,
-Crucix Delta Engine 核心实现完成并已接入 persisted fixture run hot-memory 更新路径, M3C schedule 延后。
-Python oracle 保留至 M6 退役。72 个 Rust 测试通过。
+Crucix Delta Engine daemon auto-delta / AlertTier surfacing 完成并已接入 persisted run hot-memory 更新路径、daemon job status 与 read API, M3C schedule 延后。
+Python oracle 保留至 M6 退役。85 个 Rust 测试通过。
 
 ### Phase 1: Worldline 核心 + 管线
 
@@ -800,7 +800,7 @@ Python oracle 保留至 M6 退役。72 个 Rust 测试通过。
 - `src/main.rs`: `DaemonCommands` enum (Start/Stop/Status/Run/Serve)、`Cli::Webui` variant、PID file 读写、`wait_for_socket`/`wait_for_api` 就绪检查
 - `src/tui.rs` (499 行): ratatui history browser MVP, Kanagawa Dark 硬编码调色板, Vim 键位
 
-#### Milestone 3.5 — Crucix Delta Engine 🟡 核心完成, persisted fixture run 已集成 hot memory
+#### Milestone 3.5 — Crucix Delta Engine ✅ daemon auto-delta 完成
 
 外部借鉴: Crucix (`/home/kita/code/Crucix`) — 29 源 OSINT 引擎的跨 sweep 变化追踪。
 设计文档: `plan-crucix.md` (823 行)。
@@ -808,13 +808,19 @@ Python oracle 保留至 M6 退役。72 个 Rust 测试通过。
 已完成:
 - `src/delta.rs` (647 行): `compute_delta()` — 两次 run 的结构化 diff。数值指标 (NumericMetricDef) + 计数指标 (CountMetricDef)，三级严重度 (moderate/high/critical)，风险方向推断 (RiskOff/RiskOn/Mixed)，语义去重
 - `src/delta_memory.rs` (509 行): `HotMemory` 热/冷双层存储、`AlertDecayModel` 衰减冷却模型 (0h/6h/12h/24h 阶梯)、原子 I/O (tmp → rename + .bak)、`AlertTier` 三级分级 (Flash/Priority/Routine)
-- CLI `tianji delta` 子命令 (手动指定 run pair 或 --latest-pair)
+- `RunResult { artifact, delta, alert_tier }`: persisted run 返回 delta 与 AlertTier，同时 CLI artifact 输出继续序列化原 `RunArtifact` 以保持兼容
+- CLI `tianji delta` 子命令 (手动指定 run pair 或 --latest-pair)，输出包含 `alert_tier`
 - `run_fixture_path(..., Some(sqlite_path))` 在成功持久化后更新 `<db-stem>.memory/hot.json`
+- Daemon worker loop 成功运行后自动计算 delta + AlertTier，并在 job status 中暴露 `delta_tier` 与 `delta_summary`
+- Read API 新增 `GET /api/v1/delta/latest?sqlite_path=<path>`，返回 latest delta 与 `classify_delta_tier(delta)`；无 delta 时返回 null 字段
+- `DeltaConfig.numeric_thresholds` 使用 `f64`，匹配百分比阈值语义
+- 共享 `collect_string_array` utility，统一 scored-event 的 actors / regions / keywords 提取，避免重复解析逻辑
 - `lib.rs` 集成测试 (delta + hot-memory persistence 相关 test)
 
 待完成:
-- Daemon 自动通知: worker loop 在每次 run 后自动计算 delta + AlertTier 推送
-- Hot memory 剪枝策略的 cron/daemon 自动触发
+- 外部通知投递: Telegram/Discord/webhook 等推送按需实现
+- Cold archive rotation / 冷归档策略
+- Hot memory 剪枝策略的 cron/daemon 自动触发（M3C schedule/housekeeping 延后）
 
 #### 已知问题 (2026-05-14 Code Review)
 
@@ -921,9 +927,9 @@ B1–B10 全部已修复。
 ## 16. 验证标准
 
 - `cargo build` / `cargo build --release` 零 error
-- `cargo test` 68 pass / 0 fail (当前)
+- `cargo test` 85 pass / 0 fail (当前)
 - `tianji run --fixture ...` 输出与 Python 版字段级一致
-- `tianji delta --latest-pair` 跨 run 变化追踪可用 (手动模式)
+- `tianji delta --latest-pair` 跨 run 变化追踪可用，daemon job status 与 `/api/v1/delta/latest` 自动暴露 latest delta / AlertTier
 - 已知问题清单见 §12 "已知问题" 表 — 修复前不阻塞现有功能
 - 目标 (远期):
   - `tianji predict --field east-asia.conflict --horizon 30d` → Vec<WorldlineBranch>

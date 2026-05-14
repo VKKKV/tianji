@@ -784,24 +784,26 @@ Delta 计算**复用但不侵入**现有 SQLite storage。
 
 ## 10. 迁移路径
 
-### Phase 1: 核心算法 + 无侵入集成 (本周可完成)
+### Phase 1: 核心算法 + 无侵入集成 ✅ 完成
 
-1. 创建 `src/delta.rs` — `compute_delta()` 纯函数
-2. 创建 `src/delta_memory.rs` — `HotMemory` + 原子 I/O
-3. 在 `lib.rs` 的 `run_fixture_path()` 末尾插入 delta 计算 (不改变现有返回)
-4. 添加 CLI `delta` 子命令
-5. 添加 `lib.rs` 测试: 两轮 fixture run → 验证 delta 输出
+1. ✅ 创建 `src/delta.rs` — `compute_delta()` 纯函数
+2. ✅ 创建 `src/delta_memory.rs` — `HotMemory` + 原子 I/O
+3. ✅ 在 `lib.rs` 的 `run_fixture_path()` 持久化路径插入 delta 计算与 hot-memory 更新；CLI artifact 输出保持原 `RunArtifact` 兼容
+4. ✅ 添加 CLI `delta` 子命令，支持 `--latest-pair` 与显式 run pair，输出 `alert_tier`
+5. ✅ 添加 `lib.rs` 测试: 两轮 fixture run → 验证 delta 输出、hot-memory 顺序与 alert tier
 
-### Phase 2: daemon 自动 delta (下周)
+### Phase 2: daemon 自动 delta ✅ 完成
 
-6. daemon worker 在每次 run 后自动计算 delta
-7. 将 delta 嵌入 daemon 的 run status 响应中
-8. 添加 `AlertTier` 分级 + webui 显示
+6. ✅ daemon worker 在每次 persisted run 后自动计算 delta + AlertTier
+7. ✅ 将 delta 嵌入 daemon 的 run status 响应中：`delta_tier` + `delta_summary`
+8. ✅ 添加 `AlertTier` 分级并通过 read API 暴露 latest delta：`GET /api/v1/delta/latest?sqlite_path=<path>`
+9. ✅ `RunResult { artifact, delta, alert_tier }` 串联 pipeline / CLI / daemon
+10. ✅ `DeltaConfig.numeric_thresholds` 使用 `f64` 百分比阈值，`collect_string_array` 共享 scored-event 字符串数组提取逻辑
 
-### Phase 3: 告警通知 (按需)
+### Phase 3: 外部 webhook 告警通知 (按需 / pending)
 
-9. Telegram/Discord webhook 推送 (如果 tianji 需要)
-10. AlertDecay 衰减 + 信号修剪
+11. Telegram/Discord webhook 推送 (如果 TianJi 需要)
+12. Cold archive rotation / cron-like housekeeping（与 M3C schedule 相关，延后）
 
 ---
 
