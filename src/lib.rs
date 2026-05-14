@@ -78,10 +78,17 @@ impl From<rusqlite::Error> for TianJiError {
     }
 }
 
+#[derive(Debug)]
+pub struct RunResult {
+    pub artifact: RunArtifact,
+    pub delta: Option<DeltaReport>,
+    pub alert_tier: Option<AlertTier>,
+}
+
 pub fn run_fixture_path(
     path: impl AsRef<Path>,
     sqlite_path: Option<&str>,
-) -> Result<RunArtifact, TianJiError> {
+) -> Result<RunResult, TianJiError> {
     let path = path.as_ref();
     let feed_text = fs::read_to_string(path)?;
     let source = fixture_source_name(path);
@@ -132,7 +139,7 @@ pub fn run_fixture_path(
         intervention_candidates: intervention_candidates_json,
     };
 
-    if let Some(db_path) = sqlite_path {
+    let (delta, alert_tier) = if let Some(db_path) = sqlite_path {
         persist_run(
             db_path,
             &artifact,
@@ -141,13 +148,23 @@ pub fn run_fixture_path(
             &scored_events,
             &interventions,
         )?;
-        update_delta_memory_for_latest_run(db_path)?;
-    }
+        let delta = update_delta_memory_for_latest_run(db_path)?;
+        let alert_tier = delta.as_ref().and_then(classify_delta_tier);
+        (delta, alert_tier)
+    } else {
+        (None, None)
+    };
 
-    Ok(artifact)
+    Ok(RunResult {
+        artifact,
+        delta,
+        alert_tier,
+    })
 }
 
-fn update_delta_memory_for_latest_run(sqlite_path: &str) -> Result<(), TianJiError> {
+fn update_delta_memory_for_latest_run(
+    sqlite_path: &str,
+) -> Result<Option<DeltaReport>, TianJiError> {
     let current_run_id = get_latest_run_id(sqlite_path)?.ok_or_else(|| {
         TianJiError::Usage("No persisted run exists after persistence completed.".to_string())
     })?;
@@ -179,7 +196,7 @@ fn update_delta_memory_for_latest_run(sqlite_path: &str) -> Result<(), TianJiErr
     } else {
         HotMemory::default()
     };
-    memory.push_run(compact_run_data(&current), delta, 3);
+    memory.push_run(compact_run_data(&current), delta.clone(), 3);
     memory.prune_stale_signals_at_timestamp(
         &AlertDecayModel::default(),
         current
@@ -188,10 +205,10 @@ fn update_delta_memory_for_latest_run(sqlite_path: &str) -> Result<(), TianJiErr
             .unwrap_or(""),
     );
     memory.save_atomic(&delta_memory_path(sqlite_path))?;
-    Ok(())
+    Ok(delta)
 }
 
-fn delta_memory_path(sqlite_path: &str) -> std::path::PathBuf {
+pub fn delta_memory_path(sqlite_path: &str) -> std::path::PathBuf {
     let db_path = Path::new(sqlite_path);
     let parent = db_path.parent().unwrap_or_else(|| Path::new("."));
     let stem = db_path
@@ -216,7 +233,9 @@ mod tests {
 
     #[test]
     fn fixture_artifact_uses_current_top_level_contract_keys() {
-        let artifact = run_fixture_path(SAMPLE_FIXTURE, None).expect("fixture artifact");
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
         let emitted = serde_json::to_value(artifact).expect("artifact json value");
         let contract: Value =
             serde_json::from_str(&fs::read_to_string(CONTRACT_FIXTURE).expect("contract fixture"))
@@ -227,7 +246,9 @@ mod tests {
 
     #[test]
     fn fixture_artifact_uses_current_nested_summary_contract_keys() {
-        let artifact = run_fixture_path(SAMPLE_FIXTURE, None).expect("fixture artifact");
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
         let emitted = serde_json::to_value(artifact).expect("artifact json value");
         let contract: Value =
             serde_json::from_str(&fs::read_to_string(CONTRACT_FIXTURE).expect("contract fixture"))
@@ -245,7 +266,9 @@ mod tests {
 
     #[test]
     fn fixture_scoring_parity_with_python_oracle() {
-        let artifact = run_fixture_path(SAMPLE_FIXTURE, None).expect("fixture artifact");
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
 
         assert_eq!(artifact.scored_events.len(), 3);
 
@@ -276,7 +299,9 @@ mod tests {
 
     #[test]
     fn fixture_rationale_matches_python_oracle() {
-        let artifact = run_fixture_path(SAMPLE_FIXTURE, None).expect("fixture artifact");
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
 
         let e0 = &artifact.scored_events[0];
         let rationale = e0["rationale"].as_array().expect("rationale array");
@@ -298,7 +323,9 @@ mod tests {
 
     #[test]
     fn fixture_scenario_summary_matches_python_oracle() {
-        let artifact = run_fixture_path(SAMPLE_FIXTURE, None).expect("fixture artifact");
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
         let summary = &artifact.scenario_summary;
 
         assert_eq!(summary.dominant_field, "technology");
@@ -314,7 +341,9 @@ mod tests {
 
     #[test]
     fn fixture_intervention_candidates_match_python_oracle() {
-        let artifact = run_fixture_path(SAMPLE_FIXTURE, None).expect("fixture artifact");
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
 
         assert_eq!(artifact.intervention_candidates.len(), 3);
 
@@ -339,7 +368,9 @@ mod tests {
 
     #[test]
     fn fixture_event_groups_are_empty_for_sample_feed() {
-        let artifact = run_fixture_path(SAMPLE_FIXTURE, None).expect("fixture artifact");
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
         let groups = &artifact.scenario_summary.event_groups;
         assert!(groups.is_empty());
     }
@@ -474,7 +505,9 @@ mod tests {
     #[test]
     fn persist_run_creates_all_six_tables() {
         let db_path = temp_sqlite_path();
-        let artifact = run_fixture_path(SAMPLE_FIXTURE, None).expect("fixture artifact");
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
 
         // We need the intermediate data, so re-run pipeline
         let feed_text = fs::read_to_string(SAMPLE_FIXTURE).expect("fixture");
@@ -902,6 +935,25 @@ mod tests {
     }
 
     #[test]
+    fn run_fixture_path_returns_run_result_with_delta_for_persisted_pair() {
+        let db_path = temp_sqlite_path();
+        let first = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
+        let second = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 2");
+
+        assert_eq!(first.artifact.schema_version, RUN_ARTIFACT_SCHEMA_VERSION);
+        assert!(first.delta.is_none());
+        assert!(first.alert_tier.is_none());
+
+        let delta = second.delta.as_ref().expect("delta report");
+        assert_eq!(delta.summary.total_changes, 0);
+        assert_eq!(second.alert_tier, classify_delta_tier(delta));
+
+        let memory_path = delta_memory_path(&db_path);
+        let _ = std::fs::remove_dir_all(memory_path.parent().expect("memory parent"));
+        cleanup_db(&db_path);
+    }
+
+    #[test]
     fn run_without_sqlite_path_does_not_create_file() {
         let _ = run_fixture_path(SAMPLE_FIXTURE, None).expect("run");
         // No sqlite file should be created at the default temp path
@@ -970,7 +1022,7 @@ mod tests {
         let job = state.get_job(&record.job_id).expect("job found");
         assert_eq!(job.state, "running");
 
-        state.set_job_succeeded(&record.job_id, Some(42));
+        state.set_job_succeeded(&record.job_id, Some(42), None, None);
         let job = state.get_job(&record.job_id).expect("job found");
         assert_eq!(job.state, "succeeded");
         assert_eq!(job.run_id, Some(42));
@@ -1022,13 +1074,59 @@ mod tests {
             sqlite_path: None,
         };
         let record = state.enqueue_job(request);
-        state.set_job_succeeded(&record.job_id, Some(1));
+        state.set_job_succeeded(&record.job_id, Some(1), None, None);
 
         let payload = state.get_job(&record.job_id).unwrap().to_status_payload();
         assert!(payload.get("job_id").is_some());
         assert!(payload.get("state").is_some());
         assert!(payload.get("run_id").is_some());
         assert!(payload.get("error").is_some());
+        assert!(payload.get("delta_tier").is_some());
+        assert!(payload.get("delta_summary").is_some());
+    }
+
+    #[test]
+    fn daemon_state_job_status_stores_delta_tier_and_summary() {
+        let state = daemon::DaemonState::new();
+        let request = daemon::RunJobRequest {
+            fixture_paths: vec![],
+            fetch: false,
+            source_urls: vec![],
+            fetch_policy: "always".to_string(),
+            source_fetch_details: vec![],
+            output_path: None,
+            sqlite_path: None,
+        };
+        let record = state.enqueue_job(request);
+        let delta = DeltaReport {
+            timestamp: "1970-01-01T00:00:00+00:00".to_string(),
+            previous_timestamp: Some("1969-12-31T00:00:00+00:00".to_string()),
+            numeric_deltas: Vec::new(),
+            count_deltas: Vec::new(),
+            new_signals: Vec::new(),
+            summary: DeltaSummary {
+                total_changes: 1,
+                critical_changes: 0,
+                direction: RiskDirection::Mixed,
+                signal_breakdown: delta::SignalBreakdown {
+                    new_count: 1,
+                    escalated_count: 0,
+                    deescalated_count: 0,
+                    unchanged_count: 0,
+                },
+            },
+        };
+
+        state.set_job_succeeded(
+            &record.job_id,
+            Some(1),
+            Some(delta),
+            Some(AlertTier::Routine),
+        );
+
+        let payload = state.get_job(&record.job_id).unwrap().to_status_payload();
+        assert_eq!(payload["delta_tier"], "routine");
+        assert_eq!(payload["delta_summary"]["total_changes"], 1);
     }
 
     // --- Socket protocol tests ---
@@ -1320,6 +1418,52 @@ mod tests {
             server.abort();
         });
 
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn api_delta_latest_returns_latest_hot_memory_delta() {
+        let db_path = temp_sqlite_path();
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 2");
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        rt.block_on(async {
+            let state = api::AppState {
+                sqlite_path: db_path.clone(),
+            };
+            let app = api::build_router().with_state(state);
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let addr = listener.local_addr().expect("addr");
+
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("serve");
+            });
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .get(format!("http://{addr}/api/v1/delta/latest"))
+                .send()
+                .await
+                .expect("request");
+
+            let body: serde_json::Value =
+                serde_json::from_str(&resp.text().await.expect("text")).expect("json");
+            assert_eq!(body["api_version"], "v1");
+            assert_eq!(body["data"]["run_id"], 2);
+            assert!(body["data"].get("alert_tier").is_some());
+            assert_eq!(body["data"]["delta"]["summary"]["total_changes"], 0);
+
+            server.abort();
+        });
+
+        let memory_path = delta_memory_path(&db_path);
+        let _ = std::fs::remove_dir_all(memory_path.parent().expect("memory parent"));
         cleanup_db(&db_path);
     }
 }

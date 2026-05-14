@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::delta::{DeltaReport, RiskDirection};
+use crate::utils::collect_string_array;
 use crate::TianJiError;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,9 +113,9 @@ pub struct FieldCompact {
     pub event_count: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeltaConfig {
-    pub numeric_thresholds: BTreeMap<String, u64>,
+    pub numeric_thresholds: BTreeMap<String, f64>,
     pub count_thresholds: BTreeMap<String, i64>,
     pub alert_decay: AlertDecayModel,
     pub hot_run_count: usize,
@@ -353,16 +354,6 @@ pub fn compact_run_data(run: &Value) -> CompactRunData {
     }
 }
 
-fn collect_string_array(value: &Value, key: &str, target: &mut std::collections::BTreeSet<String>) {
-    if let Some(values) = value.get(key).and_then(|v| v.as_array()) {
-        for value in values {
-            if let Some(text) = value.as_str() {
-                target.insert(text.to_string());
-            }
-        }
-    }
-}
-
 fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -522,5 +513,15 @@ mod tests {
         assert_eq!(compact.top_actor_ids, vec!["china", "usa"]);
         assert_eq!(compact.group_ids, vec!["event-1"]);
         assert_eq!(compact.field_summary["technology"].event_count, 1);
+    }
+
+    #[test]
+    fn delta_config_numeric_thresholds_accept_f64_values() {
+        let mut config = DeltaConfig::default();
+        config
+            .numeric_thresholds
+            .insert("top_impact_score".to_string(), 20.5);
+
+        assert_eq!(config.numeric_thresholds["top_impact_score"], 20.5);
     }
 }

@@ -48,6 +48,7 @@ fn api_meta_data() -> JsonValue {
             "/api/v1/runs",
             "/api/v1/runs/{run_id}",
             "/api/v1/compare?left_run_id=<id>&right_run_id=<id>",
+            "/api/v1/delta/latest",
         ],
     })
 }
@@ -118,6 +119,11 @@ pub struct RunsQuery {
 pub struct CompareQuery {
     pub left_run_id: Option<String>,
     pub right_run_id: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct DeltaLatestQuery {
+    pub sqlite_path: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +331,34 @@ async fn get_compare(
     }
 }
 
+async fn get_latest_delta(
+    State(state): State<AppState>,
+    Query(params): Query<DeltaLatestQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let sqlite_path = params.sqlite_path.unwrap_or(state.sqlite_path);
+    let memory = crate::HotMemory::load(&crate::delta_memory_path(&sqlite_path));
+    let Some(run) = memory.runs.front() else {
+        return Err(ApiError {
+            status: StatusCode::NOT_FOUND,
+            body: error_envelope("delta_not_found", "No delta memory is available."),
+        });
+    };
+    let Some(delta) = run.delta.as_ref() else {
+        return Err(ApiError {
+            status: StatusCode::NOT_FOUND,
+            body: error_envelope("delta_not_found", "No latest delta is available."),
+        });
+    };
+
+    let payload = serde_json::json!({
+        "run_id": run.run_id,
+        "timestamp": run.timestamp,
+        "alert_tier": crate::classify_delta_tier(delta),
+        "delta": delta,
+    });
+    Ok(JsonEnvelope(success_envelope(payload)))
+}
+
 // ---------------------------------------------------------------------------
 // Fallback (route_not_found)
 // ---------------------------------------------------------------------------
@@ -349,6 +383,7 @@ pub fn build_router() -> Router<AppState> {
         .route("/api/v1/runs/latest", get(get_latest_run))
         .route("/api/v1/runs/{run_id}", get(get_run_by_id))
         .route("/api/v1/compare", get(get_compare))
+        .route("/api/v1/delta/latest", get(get_latest_delta))
         .fallback(fallback)
 }
 

@@ -5,9 +5,11 @@ use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
 
+use crate::delta_memory_path;
 use crate::get_latest_run_id;
 use crate::run_fixture_path;
 use crate::TianJiError;
+use crate::{AlertDecayModel, AlertTier, DeltaReport, DeltaSummary, HotMemory, RunResult};
 
 pub const ALLOWED_JOB_STATES: [&str; 4] = ["queued", "running", "succeeded", "failed"];
 pub const LOOPBACK_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
@@ -165,6 +167,8 @@ pub struct JobRecord {
     pub request: RunJobRequest,
     pub run_id: Option<i64>,
     pub error: Option<String>,
+    pub delta_tier: Option<AlertTier>,
+    pub delta_summary: Option<DeltaSummary>,
 }
 
 impl JobRecord {
@@ -174,6 +178,8 @@ impl JobRecord {
             "state": self.state,
             "run_id": self.run_id,
             "error": self.error,
+            "delta_tier": self.delta_tier,
+            "delta_summary": self.delta_summary,
         })
     }
 }
@@ -222,6 +228,8 @@ impl DaemonState {
             request,
             run_id: None,
             error: None,
+            delta_tier: None,
+            delta_summary: None,
         };
         {
             let mut inner = self.inner.lock().unwrap();
@@ -244,11 +252,19 @@ impl DaemonState {
         }
     }
 
-    pub fn set_job_succeeded(&self, job_id: &str, run_id: Option<i64>) {
+    pub fn set_job_succeeded(
+        &self,
+        job_id: &str,
+        run_id: Option<i64>,
+        delta: Option<DeltaReport>,
+        alert_tier: Option<AlertTier>,
+    ) {
         let mut inner = self.inner.lock().unwrap();
         if let Some(record) = inner.jobs.get_mut(job_id) {
             record.state = "succeeded".to_string();
             record.run_id = run_id;
+            record.delta_summary = delta.map(|report| report.summary);
+            record.delta_tier = alert_tier;
         }
     }
 
@@ -430,13 +446,24 @@ pub fn worker_loop(state: &Arc<DaemonState>) {
         let result = run_pipeline_for_job(&record.request);
 
         match result {
-            Ok(()) => {
+            Ok(result) => {
                 let run_id = if let Some(ref sqlite_path) = record.request.sqlite_path {
                     get_latest_run_id(sqlite_path).ok().flatten()
                 } else {
                     None
                 };
-                state.set_job_succeeded(&record.job_id, run_id);
+                if let (Some(run_result), Some(sqlite_path)) =
+                    (&result, &record.request.sqlite_path)
+                {
+                    if let Err(error) = mark_delta_signals_alerted(sqlite_path, run_result) {
+                        state.set_job_failed(&record.job_id, error.to_string());
+                        continue;
+                    }
+                }
+                let (delta, alert_tier) = result
+                    .map(|run_result| (run_result.delta, run_result.alert_tier))
+                    .unwrap_or((None, None));
+                state.set_job_succeeded(&record.job_id, run_id, delta, alert_tier);
             }
             Err(e) => {
                 let error_message = e.to_string();
@@ -446,12 +473,50 @@ pub fn worker_loop(state: &Arc<DaemonState>) {
     }
 }
 
-fn run_pipeline_for_job(request: &RunJobRequest) -> Result<(), TianJiError> {
+fn run_pipeline_for_job(request: &RunJobRequest) -> Result<Option<RunResult>, TianJiError> {
     // Currently only fixture mode is supported in Rust
+    let mut latest_result = None;
     for fixture_path in &request.fixture_paths {
-        run_fixture_path(fixture_path, request.sqlite_path.as_deref())?;
+        latest_result = Some(run_fixture_path(
+            fixture_path,
+            request.sqlite_path.as_deref(),
+        )?);
+    }
+    Ok(latest_result)
+}
+
+fn mark_delta_signals_alerted(sqlite_path: &str, result: &RunResult) -> Result<(), TianJiError> {
+    let Some(delta) = result.delta.as_ref() else {
+        return Ok(());
+    };
+    if result.alert_tier.is_none() {
+        return Ok(());
+    }
+
+    let memory_path = delta_memory_path(sqlite_path);
+    let mut memory = HotMemory::load(&memory_path);
+    let decay = AlertDecayModel::default();
+    let mut marked_any = false;
+
+    for signal_key in delta_signal_keys(delta) {
+        if !memory.is_signal_suppressed(&signal_key, &decay) {
+            memory.mark_alerted(&signal_key);
+            marked_any = true;
+        }
+    }
+
+    if marked_any {
+        memory.save_atomic(&memory_path)?;
     }
     Ok(())
+}
+
+fn delta_signal_keys(delta: &DeltaReport) -> Vec<String> {
+    let mut keys = Vec::new();
+    keys.extend(delta.numeric_deltas.iter().map(|item| item.key.clone()));
+    keys.extend(delta.count_deltas.iter().map(|item| item.key.clone()));
+    keys.extend(delta.new_signals.iter().map(|item| item.key.clone()));
+    keys
 }
 
 // ---------------------------------------------------------------------------

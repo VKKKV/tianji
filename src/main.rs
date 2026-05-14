@@ -3,8 +3,9 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use tianji::{
-    artifact_json, compare_runs, compute_delta, get_latest_run_id, get_latest_run_pair,
-    get_next_run_id, get_previous_run_id, get_run_summary, list_runs, run_fixture_path,
+    artifact_json, classify_delta_tier, compare_runs, compute_delta, get_latest_run_id,
+    get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary, list_runs,
+    run_fixture_path,
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     TianJiError,
 };
@@ -688,8 +689,8 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
             fixture,
             sqlite_path,
         } => {
-            let artifact = run_fixture_path(fixture, sqlite_path.as_deref())?;
-            artifact_json(&artifact)
+            let result = run_fixture_path(fixture, sqlite_path.as_deref())?;
+            artifact_json(&result.artifact)
         }
         Cli::History {
             sqlite_path,
@@ -1098,7 +1099,12 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
             let report = compute_delta(&current, Some(&previous)).ok_or_else(|| {
                 TianJiError::Usage("A previous run is required to compute delta.".to_string())
             })?;
-            Ok(serde_json::to_string_pretty(&report).map_err(TianJiError::Json)?)
+            let alert_tier = classify_delta_tier(&report);
+            let output = serde_json::json!({
+                "alert_tier": alert_tier,
+                "delta": report,
+            });
+            Ok(serde_json::to_string_pretty(&output).map_err(TianJiError::Json)?)
         }
     }
 }

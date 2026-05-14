@@ -29,6 +29,21 @@ pub fn days_since_epoch(year: i64, month: i64, day: i64) -> i64 {
     days_from_years + month_offset + day - 719528 // offset to unix epoch (1970-01-01)
 }
 
+/// Collect string values from a JSON array field into a deterministic set.
+pub fn collect_string_array(
+    value: &serde_json::Value,
+    key: &str,
+    target: &mut std::collections::BTreeSet<String>,
+) {
+    if let Some(values) = value.get(key).and_then(|v| v.as_array()) {
+        for value in values {
+            if let Some(text) = value.as_str() {
+                target.insert(text.to_string());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,5 +75,17 @@ mod tests {
         let feb28 = days_since_epoch(2023, 2, 28);
         let mar1_nl = days_since_epoch(2023, 3, 1);
         assert_eq!(mar1_nl - feb28, 1);
+    }
+
+    #[test]
+    fn collect_string_array_inserts_only_strings() {
+        let payload = serde_json::json!({
+            "actors": ["usa", 42, "china", null, "usa"]
+        });
+        let mut values = std::collections::BTreeSet::new();
+
+        collect_string_array(&payload, "actors", &mut values);
+
+        assert_eq!(values.into_iter().collect::<Vec<_>>(), vec!["china", "usa"]);
     }
 }

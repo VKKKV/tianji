@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::utils::round2;
+use crate::utils::{collect_string_array, round2};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -474,16 +474,6 @@ fn numeric_values(items: &[Value], key: &str) -> Vec<f64> {
 
 fn average(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
-}
-
-fn collect_string_array(value: &Value, key: &str, target: &mut BTreeSet<String>) {
-    if let Some(values) = value.get(key).and_then(|v| v.as_array()) {
-        for value in values {
-            if let Some(text) = value.as_str() {
-                target.insert(text.to_string());
-            }
-        }
-    }
 }
 
 fn string_set_from_items(run: &Value, array_key: &str, item_key: &str) -> BTreeSet<String> {
