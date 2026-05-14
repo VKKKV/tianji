@@ -79,6 +79,115 @@ fixture pipeline.
 - Loopback enforcement, schedule deferred (D5) ✅
 - 52 tests pass, `cargo fmt --check` clean, `cargo clippy -- -D warnings` clean ✅
 
+### Milestone 3.5 — Cross-Run Delta Engine
+
+**Core complete.** Adds a Crucix-inspired cross-run analysis layer on top of the
+persisted SQLite read model without changing the six-table schema.
+
+#### 1. Scope / Trigger
+
+- Trigger: `tianji run --sqlite-path <path>` now updates a hot-memory JSON file
+  after successful persistence, and `tianji delta` exposes manual run-pair diffing.
+- Scope: compute structured deltas between two persisted runs, keep recent compact
+  run snapshots, and classify alert tiers.
+- Out of scope: daemon push notifications, cold archive rotation, and schema-backed
+  delta tables.
+
+#### 2. Signatures
+
+Rust CLI commands:
+
+```bash
+tianji delta --sqlite-path <path> --latest-pair
+tianji delta --sqlite-path <path> --left-run-id <id> --right-run-id <id>
+```
+
+Rust module boundaries:
+
+```rust
+pub fn compute_delta(
+    current: &serde_json::Value,
+    previous: Option<&serde_json::Value>,
+) -> Option<DeltaReport>;
+
+pub fn compact_run_data(run: &serde_json::Value) -> CompactRunData;
+
+impl HotMemory {
+    pub fn load(path: &Path) -> Self;
+    pub fn save_atomic(&self, path: &Path) -> Result<(), TianJiError>;
+    pub fn push_run(&mut self, compact: CompactRunData, delta: Option<DeltaReport>, max_runs: usize);
+    pub fn prune_stale_signals_at_timestamp(&mut self, decay: &AlertDecayModel, now_rfc3339: &str);
+}
+```
+
+Hot-memory path:
+
+```text
+<sqlite-parent>/<sqlite-file-stem>.memory/hot.json
+<sqlite-parent>/<sqlite-file-stem>.memory/hot.json.bak
+```
+
+#### 3. Contracts
+
+- `compute_delta` returns `None` when no previous run is available.
+- Numeric and count delta outputs are deterministic and sorted by stable metric definitions.
+- New-signal identity uses persisted scored-event fields from `get_run_summary`, including
+  `event_id`, `actors`, `regions`, and `keywords`.
+- The first persisted run creates fresh hot memory with one entry and no delta.
+- Later persisted runs load existing hot memory, push the newest compact run at index `0`,
+  attach the computed delta, and retain at most the requested hot-run count.
+- If a database has no previous persisted run, existing hot memory for the same path is reset
+  to avoid stale cross-test or reused-path contamination.
+- Pruning in the persistence path must use the current run's persisted `generated_at`, not
+  wall-clock time, so fixture runs stay deterministic.
+- `save_atomic` writes a temporary file, preserves the previous hot file as `.bak`, then renames
+  the temporary file into place.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+|-----------|----------|
+| `delta --latest-pair` with fewer than two runs | Return `TianJiError::Usage` |
+| `delta` mixes `--latest-pair` with explicit IDs | Return `TianJiError::Usage` |
+| `delta` omits either explicit ID without `--latest-pair` | Return `TianJiError::Usage` |
+| Explicit run ID not found | Return `TianJiError::Usage("Run not found: <id>")` |
+| Hot-memory primary JSON is corrupt but `.bak` is valid | Load `.bak` |
+| Hot-memory primary and backup are missing/corrupt | Return `HotMemory::default()` |
+| Hot-memory save fails | Propagate `TianJiError` |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: two persisted fixture runs produce a hot memory file with two entries, newest first,
+  and the newest entry has `delta: Some(...)`.
+- Base: one persisted fixture run produces a hot memory file with one entry and `delta: None`.
+- Bad: using `Utc::now()` or `SystemTime` in the run-persistence pruning path makes fixture
+  tests and replayed runs nondeterministic.
+
+#### 6. Tests Required
+
+- Unit-test numeric, count, new-signal, and risk-direction delta behavior.
+- Unit-test alert suppression and stale-signal pruning with injected timestamps.
+- Unit-test hot-memory primary/backup load fallback and atomic save behavior.
+- Integration-test two persisted runs update hot memory in newest-first order.
+- Regression-test reused temp DB names reset stale hot memory on first run.
+- Run `cargo fmt --check`, `cargo test`, and `cargo clippy -- -D warnings` after changes.
+
+#### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// Nondeterministic in fixture/replay paths.
+memory.prune_stale_signals(&AlertDecayModel::default());
+```
+
+#### Correct
+
+```rust
+// Use persisted run time as the deterministic pruning reference.
+memory.prune_stale_signals_at_timestamp(&AlertDecayModel::default(), generated_at);
+```
+
 ### Milestone 4 — TUI (ratatui + Kanagawa Dark)
 
 After deterministic core, storage, and runtime contracts are stable in Rust.

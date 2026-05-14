@@ -1,16 +1,18 @@
 # TianJi — 全量 Rust 重写计划 v3
 
-> 分支: `rust-cli` | 更新: 2026-05-13
+> 分支: `rust-cli` | 更新: 2026-05-14
 > 目标: 智库级双向推理引擎 — 推演世界线 + 反推干预路径
 > 灵感: Karpathy llm-wiki 模式 + angr 符号执行反推 + 多 Agent 博弈
 > 研究参考: Geopol-Forecaster, Centaur, hormuz-agent-sandbox, WarAgent, adk-graph
+> 外部借鉴: Crucix Delta Engine (跨 run 变化追踪 + 多级告警衰减)
 
 > Trellis alignment: this file is the authoritative architecture document for
-> the TianJi Rust rewrite. Current shipped TianJi remains the Python implementation
-> under `tianji/` with `unittest` coverage under `tests/`. The staged migration
-> gates and first implementation slice are defined in
-> `.trellis/spec/backend/development-plan.md`; do not delete Python or claim
-> Hongmeng/Nuwa architecture is shipped before those parity gates pass.
+> the TianJi Rust rewrite. The staged migration gates are defined in
+> `.trellis/spec/backend/development-plan.md`. Python code under `tianji/` and
+> `tests/` is the migration oracle — preserved until M6 retirement. Do not delete
+> Python or claim Hongmeng/Nuwa architecture is shipped before parity gates pass.
+> 当前实际状态: M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成, Crucix Delta Engine
+> 核心实现完成并已集成到 persisted fixture run 的 hot-memory 更新路径。详情见 §12。
 
 ---
 
@@ -491,14 +493,16 @@ Ctrl+d/u    — 半页滚动
 
 - ratatui `Block::bordered()` 细线边框
 - Style 硬编码 Kanagawa 色值 (不使用 ratatui 内置 Color enum)
-- 配色集中定义在 `tui/theme.rs`
+- 配色集中定义在 `src/tui.rs::KANAGAWA` (当前) / `tui/theme.rs` (目标)
 - 事件循环: `crossterm::event::poll(Duration::from_millis(100))` 非阻塞
 - 窗口 resize: `Constraint::Percentage` + `Constraint::Min`
 - 列表: `List::new()` + `highlight_style` 标记选中行
 - 状态栏: `Paragraph::new()` 右对齐快捷键
 
+**当前实现状态 (MVP)**: `src/tui.rs` (499 行) — 只读 history browser。Kanagawa Dark 硬编码，Vim 键位 (j/k/g/G/Ctrl-d/u/q)，列表+详情双面板。Dashboard/simulation/profiles 视图延后到 Phase 4 完整实现。
+
 ```rust
-// tui/theme.rs
+// src/tui.rs
 pub const KANAGAWA: Theme = Theme {
     bg:        Color::Rgb(0x1F, 0x1F, 0x28),
     panel_bg:  Color::Rgb(0x27, 0x27, 0x27),
@@ -517,7 +521,7 @@ pub const KANAGAWA: Theme = Theme {
 
 ---
 
-## 10. 测试策略 (四层)
+## 9b. 测试策略 (四层)
 
 ```
 Layer 1: aimock / llmreplay — 录制真实 LLM 响应, CI 中 replay 确定性测试
@@ -532,14 +536,33 @@ Layer 4: 管线确定性测试 — 无 LLM 路径全量单元 + 集成测试
 
 ## 10. 项目结构
 
+> **当前结构 (2026-05-14)**: 扁平 13 个 .rs 文件。M3 设计决策 D1 保留扁平结构，
+> 不在 Hongmeng/Nuwa 之前重构为子模块。以下为 **目标结构**。
+
 ```
 tianji/
-├── Cargo.toml
+├── Cargo.toml                  # 当前: 15 deps (见 §11)
 ├── src/
-│   ├── main.rs
-│   ├── lib.rs
-│   ├── models.rs               # Worldline, Event, Profile, ActionProposal...
-│   ├── error.rs
+│   ├── main.rs                 # CLI 入口 (1092 行, 8 子命令)
+│   ├── lib.rs                  # Pipeline 入口 + 68 集成测试 (1200 行)
+│   ├── models.rs               # RawItem → NormalizedEvent → ScoredEvent → RunArtifact
+│   │
+│   ├── fetch.rs                # RSS/Atom (roxmltree) + SHA-256 hash
+│   ├── normalize.rs            # regex 关键词/actor/region 提取
+│   ├── scoring.rs              # Im/Fa + divergence
+│   ├── grouping.rs             # 事件分组 + causal ordering
+│   ├── backtrack.rs            # 干预候选
+│   │
+│   ├── storage.rs              # rusqlite 6 表 + history CRUD (1468 行)
+│   ├── daemon.rs               # UNIX socket + job queue + serve (567 行)
+│   ├── api.rs                  # axum 5 路由 HTTP API (361 行)
+│   ├── webui.rs                # 静态嵌入 + 反向代理 (306 行)
+│   ├── tui.rs                  # ratatui history browser MVP (499 行)
+│   │
+│   ├── delta.rs                # Crucix Delta Engine (647 行, 新)
+│   └── delta_memory.rs         # HotMemory + AlertDecayModel (509 行, 新)
+│
+│   # ——— 以下为目标结构，当前尚未创建 ———
 │   │
 │   ├── cangjie/
 │   │   ├── mod.rs
@@ -577,10 +600,9 @@ tianji/
 │   │   ├── market.rs           # Market Agent (油价/贸易流)
 │   │   └── pruning.rs          # LLM粗筛 + 约束精剪 + 人工暂停
 │   │
-│   ├── storage.rs              # rusqlite: worldlines, runs, profiles, checkpoints
 │   ├── llm.rs                  # LLM 抽象层 (async-openai + ollama-rs + 降级)
 │   │
-│   ├── cli/                    # clap derive
+│   ├── cli/                    # clap derive (目标重构)
 │   │   ├── mod.rs
 │   │   ├── run.rs              # tianji run
 │   │   ├── watch.rs            # tianji watch
@@ -591,114 +613,109 @@ tianji/
 │   │   ├── daemon.rs           # tianji daemon start/stop/status/resume
 │   │   └── tui.rs              # tianji tui
 │   │
-│   ├── tui/                    # ratatui
+│   ├── tui/                    # ratatui (目标: 完整四视图)
 │   │   ├── mod.rs
 │   │   ├── dashboard.rs        # worldline 总览
 │   │   ├── simulation.rs       # 仿真监控 + 人工剪枝
 │   │   ├── history.rs          # run 历史
 │   │   └── profiles.rs         # profile 浏览
 │   │
-│   ├── daemon/                 # axum + UNIX socket
+│   ├── daemon/                 # axum + UNIX socket (目标: 子模块拆分)
 │   │   ├── mod.rs
 │   │   ├── server.rs           # axum HTTP (loopback)
 │   │   ├── socket.rs           # UNIX socket 控制面
 │   │   └── jobs.rs             # 后台 job 队列
 │   │
-│   ├── webui.rs                # axum serve static
 │   └── output.rs               # 终端格式化 (tabled + JSON)
 │
-├── profiles/                   # Actor profile YAML
+├── profiles/                   # Actor profile YAML (plan)
 │   ├── nations/
-│   │   ├── china.yaml
-│   │   ├── usa.yaml
-│   │   ├── russia.yaml
-│   │   └── ...
 │   ├── organizations/
-│   │   ├── nato.yaml
-│   │   └── eu.yaml
 │   └── corporations/
-│       └── tsmc.yaml
 │
-├── rules/                      # 自动触发规则
-│   └── default.yaml
-│
-├── tianji/webui/               # 静态 Web UI (保留)
+├── rules/                      # 自动触发规则 (plan)
+├── tianji/webui/               # 静态 Web UI (Python oracle)
 ├── tests/
 │   ├── fixtures/sample_feed.xml
-│   ├── test_pipeline.rs
-│   ├── test_scoring.rs
-│   ├── test_worldline.rs
-│   ├── test_nuwa_forward.rs
-│   ├── test_nuwa_backward.rs
-│   ├── test_agent_pruning.rs
-│   └── test_checkpoint.rs
-├── plan.md
+│   ├── fixtures/contracts/     # API/envelope contract fixtures
+│   ├── test_pipeline.py        # Python oracle tests
+│   └── ...
+├── plan.md                     # 本文档 (876 行)
+├── plan-crucix.md              # Crucix Delta Engine 移植设计 (823 行)
 └── README.md
 ```
 
 ---
 
-## 11. 依赖清单 (版本已对齐最新)
+## 11. 依赖清单
+
+> **当前 Cargo.toml (2026-05-14)** — 仅包含已使用的 crate。
+> 以下 `[dependencies]` 为当前实际，`[dev-dependencies]` 和 `[profile]` 为当前实际。
+> 标注 "目标" 的 crate 为后续 Phase 需要的，暂不引入。
 
 ```toml
 [package]
 name = "tianji"
 version = "0.2.0"
-edition = "2024"
+edition = "2021"              # 当前; 目标 edition = "2024"
 
 [dependencies]
-# CLI
-clap = { version = "4", features = ["derive"] }
+# CLI — 当前实际 (M2 引入)
+clap = { version = "4.6", features = ["derive"] }
 
-# 序列化
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
+# 序列化 — 当前实际
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# serde_yaml = "0.9"          # 目标: Hongmeng config.yaml
 
-# 管线
-roxmltree = "0.20"
-regex = "1"
-chrono = { version = "0.4", features = ["serde"] }
-sha2 = "0.10"
-blake3 = "1"                    # 新增: worldline snapshot hash
+# 管线 — 当前实际
+roxmltree = "0.21"
+regex = "1.12"
+sha2 = "0.11"
+# chrono = "0.4"              # 目标: 时间处理 (已有 serde feature)
+# blake3 = "1"                # 目标: worldline snapshot hash
 
-# HTTP
-reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+# HTTP — 当前实际 (M3 引入)
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
 axum = "0.8"
+uuid = { version = "1", features = ["v4"] }
 
-# 异步
+# 异步 — 当前实际 (M3 引入)
 tokio = { version = "1", features = ["full"] }
 
-# 持久化
-rusqlite = { version = "0.32", features = ["bundled"] }
+# 持久化 — 当前实际 (M2 引入)
+rusqlite = { version = "0.39", features = ["bundled"] }
 
-# TUI
-ratatui = "0.30"                # 更正: 0.29 → 0.30
+# TUI — 当前实际 (M4 MVP)
+ratatui = "0.30"
 crossterm = "0.28"
 
+# Daemon 子进程 — 当前实际 (M3 引入)
+libc = "0.2"
+
+# ——— 以下为目标 Phase 依赖，暂不引入 ———
 # 输出
-tabled = "0.18"
+# tabled = "0.18"
 
 # LLM
-async-openai = "0.34"           # 更正: 0.27 → 0.34
-ollama-rs = "0.3"               # 确认: 优于 ollama-rest
+# async-openai = "0.34"
+# ollama-rs = "0.3"
 
 # 图
-petgraph = "0.7"
+# petgraph = "0.7"
 
 # 确定性 PRNG
-rand = "0.8"
-rand_chacha = "0.3"             # 新增: 确定性仿真
+# rand = "0.8"
+# rand_chacha = "0.3"
 
 # 错误/日志
-anyhow = "1"
-thiserror = "2"
-tracing = "0.1"
-tracing-subscriber = "0.3"
+# anyhow = "1"
+# thiserror = "2"
+# tracing = "0.1"
+# tracing-subscriber = "0.3"
 
 [dev-dependencies]
-tempfile = "3"
-assert-json-diff = "2"
+# 当前实际: 无额外的 dev-dependencies (测试用 #[cfg(test)] 内联)
 
 [profile.release]
 opt-level = 3
@@ -709,24 +726,26 @@ lto = true
 
 ## 12. 开发阶段
 
+**当前状态 (2026-05-14):** M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成,
+Crucix Delta Engine 核心实现完成并已接入 persisted fixture run hot-memory 更新路径, M3C schedule 延后。
+Python oracle 保留至 M6 退役。72 个 Rust 测试通过。
+
 ### Phase 1: Worldline 核心 + 管线
 
-**状态: Milestone 1A+1B+M2+M3 完成，M4 TUI 待开发，Python oracle 保留至 M6**
-
-#### Milestone 1A — Feed + Normalization (已完成)
+#### Milestone 1A — Feed + Normalization ✅ 完成
 - RSS 2.0 / Atom 1.0 fixture 解析 (roxmltree)
 - SHA-256 canonical hashing (identity + content)
 - Deterministic normalization: keywords, actors, regions, field scores, event IDs
 - Rust test parity with Python oracle
 
-#### Milestone 1B — Scoring + Grouping + Backtrack (已完成)
+#### Milestone 1B — Scoring + Grouping + Backtrack ✅ 完成
 - Im/Fa scoring + divergence_score
 - Event grouping (shared signals + 24h time window)
 - Intervention candidate generation
 - Contract fixture parity (artifact keys, summary fields)
 - 18 项 Rust 测试对标 Python oracle 全绿
 
-#### Milestone 2 — Storage + History + CLI (已完成)
+#### Milestone 2 — Storage + History + CLI ✅ 完成
 
 设计决策 (2026-05-13):
 
@@ -751,7 +770,7 @@ lto = true
 - `tianji run --sqlite-path ...` 自动持久化
 - 验证: Rust history 输出与 Python history 输出逐字段一致
 
-#### Milestone 3 — Local Runtime Parity (已完成)
+#### Milestone 3 — Local Runtime Parity ✅ 完成
 
 设计决策 (2026-05-13):
 
@@ -773,16 +792,48 @@ lto = true
 - **Milestone 3B — Optional Web UI。** ✅ `tianji webui` 顶层子命令、编译时静态嵌入、daemon API 反向代理、`/queue-run` 重试 logic。
 - **Milestone 3C — Bounded schedule（后续）。** `tianji daemon schedule --every-seconds N --count M` 及其测试矩阵。
 
-完成内容:
-- 依赖: `tokio` (full) + `axum` (0.7) + `uuid` (v4) + `reqwest` (rustls-tls + blocking) + `libc`
-- `src/daemon.rs` (551 行): RunJobRequest 解析、DaemonState (Mutex+Condvar job queue)、UnixListener socket 控制面、worker loop、`send_daemon_request` 同步客户端
-- `src/api.rs` (360 行): axum Router、5 个 GET 路由、`JsonEnvelope` 响应包装、envelope 格式对齐 contract fixtures
+完成内容 (已更新为当前实际):
+- 依赖: `tokio` (full) + `axum` (0.8) + `uuid` (v4) + `reqwest` (0.13, rustls + blocking) + `libc`
+- `src/daemon.rs` (567 行): RunJobRequest 解析、DaemonState (Mutex+Condvar job queue)、UnixListener socket 控制面、worker loop、`send_daemon_request` 同步客户端
+- `src/api.rs` (361 行): axum Router、5 个 GET 路由、`JsonEnvelope` 响应包装、envelope 格式对齐 contract fixtures
 - `src/webui.rs` (306 行): 3 个 `include_str!` 嵌入、index/app.js/styles.css 路由、API 反向代理（reqwest async）、`/queue-run` POST handler
-- `src/main.rs` (+456 行): `DaemonCommands` enum (Start/Stop/Status/Run/Serve)、`Cli::Webui` variant、PID file 读写、`wait_for_socket`/`wait_for_api` 就绪检查
-- 新增 19 个测试（共 52 pass）: daemon state 生命周期、socket 协议、loopback 校验、RunJobRequest 解析
-- `cargo fmt --check` 通过，`cargo clippy -- -D warnings` 通过
+- `src/main.rs`: `DaemonCommands` enum (Start/Stop/Status/Run/Serve)、`Cli::Webui` variant、PID file 读写、`wait_for_socket`/`wait_for_api` 就绪检查
+- `src/tui.rs` (499 行): ratatui history browser MVP, Kanagawa Dark 硬编码调色板, Vim 键位
 
-### Phase 2: Hongmeng 编排层
+#### Milestone 3.5 — Crucix Delta Engine 🟡 核心完成, persisted fixture run 已集成 hot memory
+
+外部借鉴: Crucix (`/home/kita/code/Crucix`) — 29 源 OSINT 引擎的跨 sweep 变化追踪。
+设计文档: `plan-crucix.md` (823 行)。
+
+已完成:
+- `src/delta.rs` (647 行): `compute_delta()` — 两次 run 的结构化 diff。数值指标 (NumericMetricDef) + 计数指标 (CountMetricDef)，三级严重度 (moderate/high/critical)，风险方向推断 (RiskOff/RiskOn/Mixed)，语义去重
+- `src/delta_memory.rs` (509 行): `HotMemory` 热/冷双层存储、`AlertDecayModel` 衰减冷却模型 (0h/6h/12h/24h 阶梯)、原子 I/O (tmp → rename + .bak)、`AlertTier` 三级分级 (Flash/Priority/Routine)
+- CLI `tianji delta` 子命令 (手动指定 run pair 或 --latest-pair)
+- `run_fixture_path(..., Some(sqlite_path))` 在成功持久化后更新 `<db-stem>.memory/hot.json`
+- `lib.rs` 集成测试 (delta + hot-memory persistence 相关 test)
+
+待完成:
+- Daemon 自动通知: worker loop 在每次 run 后自动计算 delta + AlertTier 推送
+- Hot memory 剪枝策略的 cron/daemon 自动触发
+
+#### 已知问题 (2026-05-14 Code Review)
+
+| # | 问题 | 严重度 | 文件 |
+|---|------|--------|------|
+| B1 | Zombie 进程泄漏 — daemon start 子进程未 wait | CRITICAL | main.rs |
+| B2 | HashMap 违反确定性要求 (BTreeMap 未使用) | CRITICAL | backtrack.rs, daemon.rs |
+| B3 | daemon 错误信息丢失 — TianJiError→String | HIGH | daemon.rs |
+| B4 | include_str! 硬耦合到 Python 源码树 | HIGH | webui.rs |
+| B5 | daemon 子进程 stdout/stderr 丢弃 | HIGH | main.rs |
+| B6 | Regex 每次调用重新编译 | HIGH | normalize.rs, scoring.rs |
+| B7 | list_runs SQL 无 LIMIT | HIGH | storage.rs |
+| B8 | API limit 参数无上限 | HIGH | api.rs |
+| B9 | 工具函数三处重复 (round2, days_since_epoch…) | HIGH | scoring/grouping/storage |
+| B10 | Backtrack 字符串精确匹配脆弱 | HIGH | backtrack.rs |
+
+全部未修复。优先修复顺序: B1 → B2 → B6 → B7。
+
+### Phase 2: Hongmeng 编排层 (延后)
 - tokio actor 模型 + Board/Stick 消息路由
 - Agent 生命周期 + Referee 生成
 - 碰撞检测 + 收敛条件
@@ -790,7 +841,7 @@ lto = true
 - 自动触发规则引擎
 - CLI: `tianji watch`, `tianji baseline`
 
-### Phase 3: Nuwa 仿真沙盒
+### Phase 3: Nuwa 仿真沙盒 (延后)
 - sandbox: worldline fork + 隔离
 - agent: profile 加载 + LLM 推理 (三层 profile)
 - forward: 多轮 Board/Stick 博弈
@@ -798,19 +849,21 @@ lto = true
 - backward: 后向反推 + 剪枝引擎
 - CLI: `tianji predict`, `tianji backtrack`
 
-### Phase 4: TUI
-- dashboard: worldline 状态总览
+### Phase 4: TUI (MVP 完成, 完整规格延后)
+
+**当前 (MVP)**: `src/tui.rs` (499 行) — 只读 history browser。Kanagawa Dark 硬编码，Vim 键位 (j/k/g/G/Ctrl-d/u/q)，列表+详情双面板。
+
+**目标 (完整规格)**: 
+- dashboard: worldline 状态总览 + field 变化趋势
 - simulation: 仿真监控 + 人工剪枝交互
-- history: run 历史 + 分支对比
+- history: run 历史 + 分支对比 (MVP 版本已覆盖基础)
 - profiles: Actor profile 三层浏览
+- 非 Nerd Font 终端降级、搜索/过滤 (/)
 
-### Phase 5: Daemon + Web UI
-- axum HTTP API + UNIX socket
-- 后台 job 队列 + 自动恢复
-- LLM provider 配置加载
-- static Web UI serve
+### Phase 5: Daemon + Web UI ✅ 被 M3 吸收
+原计划内容 (axum HTTP API、UNIX socket、后台 job 队列、LLM provider 配置、static Web UI) 已在 Phase 1 的 Milestone 3 中完整实现。
 
-### Phase 6: 清理 + 文档
+### Phase 6: 清理 + 文档 (延后)
 - 删除所有 Python 代码
 - 删除 `.venv/` `.agents/` `.codex/` `.gemini/`
 - 更新 README
@@ -832,6 +885,7 @@ lto = true
 
 | 仓库 | 用于 | 语言 |
 |------|------|------|
+| calesthio/Crucix | Delta Engine 跨 run 变化追踪 + 多级告警衰减 | JS |
 | agiresearch/WarAgent | Board/Stick 分层信息公开 | Python |
 | danielrosehill/Geopol-Forecaster | 两阶段仿真 + Referee 模式 | Python |
 | prithwis/Centaur | ZeitWorld/Centaur/Chanakya 三组件 | Python |
@@ -866,11 +920,14 @@ lto = true
 
 ## 16. 验证标准
 
-- `cargo build --release` 零 warning
-- `cargo test` 全绿 (含四层测试策略)
+- `cargo build` / `cargo build --release` 零 error
+- `cargo test` 68 pass / 0 fail (当前)
 - `tianji run --fixture ...` 输出与 Python 版字段级一致
-- `tianji predict --field east-asia.conflict --horizon 30d` → Vec<WorldlineBranch>
-- `tianji backtrack --goal "东亚稳定" --max-interventions 5` → Vec<InterventionPath>
-- 人工剪枝: 仿真暂停 → TUI 选项 → 选择继续 → 完成
-- Checkpoint: 仿真中 kill 进程 → daemon resume → 从断点继续
-- 单二进制 < 25MB release
+- `tianji delta --latest-pair` 跨 run 变化追踪可用 (手动模式)
+- 已知问题清单见 §12 "已知问题" 表 — 修复前不阻塞现有功能
+- 目标 (远期):
+  - `tianji predict --field east-asia.conflict --horizon 30d` → Vec<WorldlineBranch>
+  - `tianji backtrack --goal "东亚稳定" --max-interventions 5` → Vec<InterventionPath>
+  - 人工剪枝: 仿真暂停 → TUI 选项 → 选择继续 → 完成
+  - Checkpoint: 仿真中 kill 进程 → daemon resume → 从断点继续
+  - 单二进制 < 25MB release
