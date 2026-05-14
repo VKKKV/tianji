@@ -173,8 +173,8 @@ fn compute_im(
 }
 
 fn compute_title_salience_bonus(event: &NormalizedEvent) -> f64 {
-    let title_actors: Vec<String> = match_patterns(&event.title, ACTOR_PATTERNS);
-    let title_regions: Vec<String> = match_patterns(&event.title, REGION_PATTERNS);
+    let title_actors: Vec<String> = match_patterns(&event.title, &ACTOR_PATTERNS);
+    let title_regions: Vec<String> = match_patterns(&event.title, &REGION_PATTERNS);
 
     let actor_bonus: f64 = event
         .actors

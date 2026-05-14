@@ -11,8 +11,9 @@ static WHITESPACE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\s+").expect("valid whitespace regex"));
 static TOKEN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z][a-zA-Z0-9_-]+").expect("valid token regex"));
-static ACTOR_REGEXES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
-    ACTOR_PATTERNS
+/// Pre-compiled actor pattern regexes. Use this (not the old string-typed constant).
+pub static ACTOR_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
+    ACTOR_PATTERNS_RAW
         .iter()
         .map(|(name, pattern)| {
             (
@@ -22,8 +23,10 @@ static ACTOR_REGEXES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
         })
         .collect()
 });
-static REGION_REGEXES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
-    REGION_PATTERNS
+
+/// Pre-compiled region pattern regexes. Use this (not the old string-typed constant).
+pub static REGION_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
+    REGION_PATTERNS_RAW
         .iter()
         .map(|(name, pattern)| {
             (
@@ -34,7 +37,7 @@ static REGION_REGEXES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
         .collect()
 });
 
-pub const REGION_PATTERNS: &[(&str, &str)] = &[
+const REGION_PATTERNS_RAW: &[(&str, &str)] = &[
     ("ukraine", r"\bukraine\b"),
     ("russia", r"\brussia\b|\bmoscow\b"),
     (
@@ -49,7 +52,7 @@ pub const REGION_PATTERNS: &[(&str, &str)] = &[
     ("europe", r"\beurope\b|\beu\b|\bnato\b|\bbrussels\b"),
 ];
 
-pub const ACTOR_PATTERNS: &[(&str, &str)] = &[
+const ACTOR_PATTERNS_RAW: &[(&str, &str)] = &[
     ("nato", r"\bnato\b"),
     ("eu", r"\beu\b|\beuropean union\b"),
     ("un", r"\bunited nations\b|\bun\b"),
@@ -136,8 +139,8 @@ pub fn normalize_item(item: &RawItem) -> NormalizedEvent {
         link: item.link.clone(),
         published_at: item.published_at.clone(),
         keywords: extract_keywords(&text, 12),
-        actors: match_patterns(&text, ACTOR_PATTERNS),
-        regions: match_patterns(&text, REGION_PATTERNS),
+        actors: match_patterns(&text, &ACTOR_PATTERNS),
+        regions: match_patterns(&text, &REGION_PATTERNS),
         field_scores: derive_field_scores(&text),
         entry_identity_hash,
         content_hash,
@@ -163,29 +166,13 @@ pub fn extract_keywords(text: &str, limit: usize) -> Vec<String> {
     seen
 }
 
-pub fn match_patterns(text: &str, patterns: &[(&str, &str)]) -> Vec<String> {
+/// Match text against pre-compiled regex patterns.
+/// Only accepts pre-compiled `Regex` slices — no runtime compilation.
+pub fn match_patterns(text: &str, patterns: &[(&'static str, Regex)]) -> Vec<String> {
     let lowered = text.to_lowercase();
-    if std::ptr::eq(patterns, ACTOR_PATTERNS) {
-        return ACTOR_REGEXES
-            .iter()
-            .filter(|(_, regex)| regex.is_match(&lowered))
-            .map(|(name, _)| (*name).to_string())
-            .collect();
-    }
-    if std::ptr::eq(patterns, REGION_PATTERNS) {
-        return REGION_REGEXES
-            .iter()
-            .filter(|(_, regex)| regex.is_match(&lowered))
-            .map(|(name, _)| (*name).to_string())
-            .collect();
-    }
     patterns
         .iter()
-        .filter(|&(_, pattern)| {
-            Regex::new(pattern)
-                .expect("valid oracle pattern")
-                .is_match(&lowered)
-        })
+        .filter(|(_, regex)| regex.is_match(&lowered))
         .map(|(name, _)| (*name).to_string())
         .collect()
 }

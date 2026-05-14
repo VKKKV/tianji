@@ -494,6 +494,12 @@ fn handle_daemon_start(
         ));
     }
 
+    // Intentionally detach from the child: the daemon must outlive the
+    // parent CLI process. Dropping Child without wait() leaves a zombie;
+    // mem::forget leaks the handle on purpose so the OS reaps the child
+    // only when it eventually exits.
+    std::mem::forget(child);
+
     let api_base_url = tianji::daemon::loopback_http_base_url(&validated_host, port);
 
     let payload = serde_json::json!({
