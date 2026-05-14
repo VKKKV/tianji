@@ -13,6 +13,8 @@ static HISTORY_TIMESTAMP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
         .expect("valid history timestamp regex")
 });
 
+const RUN_LIST_FILTER_PAGE_SIZE: usize = 100;
+
 // ---------------------------------------------------------------------------
 // Write path
 // ---------------------------------------------------------------------------
@@ -429,23 +431,53 @@ pub fn list_runs(
     limit: usize,
     filters: &RunListFilters,
 ) -> Result<Vec<serde_json::Value>, TianJiError> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+
     let connection = Connection::open(sqlite_path)?;
     connection.execute_batch("PRAGMA foreign_keys = ON")?;
 
     let has_filters = has_run_list_filters(filters);
-    let sql = if has_filters {
-        "SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json FROM runs ORDER BY id DESC"
-    } else {
-        "SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json FROM runs ORDER BY id DESC LIMIT ?1"
-    };
-    let mut stmt = connection.prepare(sql)?;
-    let mut rows = if has_filters {
-        stmt.query([])?
-    } else {
-        stmt.query(params![limit as i64])?
-    };
+    if !has_filters {
+        let run_rows = query_run_list_rows(&connection, limit, 0)?;
+        return build_run_list_items(&connection, &run_rows);
+    }
 
-    let mut run_rows: Vec<(i64, String, String, String, String, String)> = Vec::new();
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    let mut offset = 0usize;
+    while items.len() < limit {
+        let run_rows = query_run_list_rows(&connection, RUN_LIST_FILTER_PAGE_SIZE, offset)?;
+        if run_rows.is_empty() {
+            break;
+        }
+        offset += run_rows.len();
+
+        let page_items = build_run_list_items(&connection, &run_rows)?;
+        items.extend(filter_run_list_items(page_items, filters));
+
+        if run_rows.len() < RUN_LIST_FILTER_PAGE_SIZE {
+            break;
+        }
+    }
+
+    items.truncate(limit);
+    Ok(items)
+}
+
+type RunListRow = (i64, String, String, String, String, String);
+
+fn query_run_list_rows(
+    connection: &Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<RunListRow>, TianJiError> {
+    let mut stmt = connection.prepare(
+        "SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json FROM runs ORDER BY id DESC LIMIT ?1 OFFSET ?2",
+    )?;
+    let mut rows = stmt.query(params![limit as i64, offset as i64])?;
+
+    let mut run_rows: Vec<RunListRow> = Vec::new();
     while let Some(row) = rows.next()? {
         run_rows.push((
             row.get(0)?,
@@ -456,13 +488,19 @@ pub fn list_runs(
             row.get(5)?,
         ));
     }
+    Ok(run_rows)
+}
 
+fn build_run_list_items(
+    connection: &Connection,
+    run_rows: &[RunListRow],
+) -> Result<Vec<serde_json::Value>, TianJiError> {
     let run_ids: Vec<i64> = run_rows.iter().map(|r| r.0).collect();
-    let top_scored_events = get_top_scored_event_summaries(&connection, &run_ids)?;
+    let top_scored_events = get_top_scored_event_summaries(connection, &run_ids)?;
 
     let mut items: Vec<serde_json::Value> = Vec::new();
     for (run_id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json) in
-        &run_rows
+        run_rows
     {
         let input_summary: serde_json::Value =
             serde_json::from_str(input_summary_json).map_err(TianJiError::Json)?;
@@ -511,8 +549,7 @@ pub fn list_runs(
         items.push(item);
     }
 
-    let filtered = filter_run_list_items(items, filters);
-    Ok(filtered.into_iter().take(limit).collect())
+    Ok(items)
 }
 
 fn get_top_scored_event_summaries(

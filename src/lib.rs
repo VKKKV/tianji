@@ -569,6 +569,52 @@ mod tests {
     }
 
     #[test]
+    fn list_runs_filtered_query_pages_until_limit_matches() {
+        let db_path = temp_sqlite_path();
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
+
+        let conn = rusqlite::Connection::open(&db_path).expect("open db");
+        let input_summary = serde_json::json!({
+            "raw_item_count": 0,
+            "normalized_event_count": 0,
+        })
+        .to_string();
+        let scenario_summary = serde_json::json!({
+            "dominant_field": "diplomacy",
+            "risk_level": "low",
+            "headline": "synthetic non-matching run",
+            "event_groups": [],
+        })
+        .to_string();
+
+        for idx in 0..120 {
+            conn.execute(
+                "INSERT INTO runs (schema_version, mode, generated_at, input_summary_json, scenario_summary_json) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    "tianji.run-artifact.v1",
+                    "synthetic",
+                    format!("2026-05-14T00:{:02}:00Z", idx % 60),
+                    &input_summary,
+                    &scenario_summary,
+                ],
+            )
+            .expect("insert synthetic run");
+        }
+
+        let filters = RunListFilters {
+            mode: Some("fixture".to_string()),
+            ..Default::default()
+        };
+        let items = list_runs(&db_path, 1, &filters).expect("list");
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["run_id"], 1);
+        assert_eq!(items[0]["mode"], "fixture");
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
     fn list_runs_dominant_field_filter() {
         let db_path = temp_sqlite_path();
         let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run");
