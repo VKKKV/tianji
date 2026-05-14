@@ -433,3 +433,84 @@ daemon::send_daemon_request(socket_path, queue_run_payload)?;
 // The MVP reads persisted run rows through the existing storage read model.
 let rows = list_runs(sqlite_path, limit, &RunListFilters::default())?;
 ```
+
+## Rust TUI Dashboard Contract
+
+### 1. Scope / Trigger
+
+- Trigger: Phase 4 extends the Rust TUI from a history-only browser to a read-only dashboard/home view.
+- Scope: dashboard plus existing history browser, both backed by existing persisted run and hot-memory delta read models.
+- Out of scope: live simulation monitoring, profile browsing, Hongmeng/Nuwa runtime state, daemon control, run queueing, feed fetching, and any storage mutation.
+
+### 2. Signatures
+
+Rust CLI command remains unchanged:
+
+```bash
+tianji tui --sqlite-path <path> [--limit <N>]
+```
+
+Rust module boundary remains unchanged:
+
+```rust
+pub fn run_history_browser(sqlite_path: &str, limit: usize) -> Result<String, TianJiError>
+```
+
+Read dependencies:
+
+```rust
+list_runs(sqlite_path, limit, &RunListFilters::default())
+HotMemory::load(&delta_memory_path(sqlite_path))
+```
+
+### 3. Contracts
+
+- The TUI remains read-only and must not write SQLite, queue daemon jobs, call daemon IPC, fetch feeds, or start simulations.
+- The dashboard uses the newest persisted history row for latest run identity, generated time, mode, dominant field, risk level, top divergence score, and headline.
+- The dashboard uses the newest hot-memory run delta, when available, for alert tier, delta summary, and risk direction.
+- Missing run/delta/worldline data renders stable placeholder text instead of panicking or inventing future state.
+- Dashboard/worldline/baseline fields must be conservative placeholders until the proper worldline/baseline backend contracts exist.
+- Operators can switch views without leaving the TUI: dashboard keys (`d`, `D`, `1`) and history keys (`h`, `H`, `2`).
+- Existing history list navigation (`j`, `k`, Up, Down, `gg`, `G`, Home, End) applies only while the history view is active.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+|-----------|----------|
+| SQLite path does not exist | Return the existing empty-state message before launching the terminal |
+| SQLite exists but has no persisted runs | Return the existing empty-state message before launching the terminal |
+| Hot-memory file is missing/corrupt | Render dashboard delta placeholders via `HotMemory::default()` behavior |
+| User presses dashboard selector | Switch to dashboard view without changing selected history row |
+| User presses history selector | Switch to history view without resetting selected history row |
+| User presses history navigation while dashboard is active | Keep selection unchanged |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `tianji tui --sqlite-path runs/tianji.sqlite3` opens on a dashboard showing latest run triage plus recent delta information and can switch to history with `h`.
+- Base: a database with persisted runs but no hot-memory delta shows latest run fields and a stable "No recent delta available." placeholder.
+- Bad: showing fabricated baseline/worldline numbers before worldline storage exists, or adding daemon/write controls to the dashboard.
+
+### 6. Tests Required
+
+- Unit-test dashboard mapping from history rows and default hot memory.
+- Unit-test dashboard mapping from hot-memory delta summary and alert tier.
+- Unit-test dashboard formatting includes latest run, delta, and deferred-worldline placeholder sections.
+- Unit-test view switching keys and verify history navigation is inactive while dashboard is active.
+- Re-run existing history row/key handling tests to ensure history behavior remains intact.
+- Run `cargo fmt --check`, `cargo test`, and `cargo clippy -- -D warnings` after TUI changes.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// A dashboard must not fabricate future worldline state before storage exists.
+let baseline = format!("run #{}", latest_run_id - 41);
+```
+
+#### Correct
+
+```rust
+// Render a stable placeholder until the worldline/baseline backend contract exists.
+let baseline = "Baseline/worldline model unavailable in current persisted data.";
+```
