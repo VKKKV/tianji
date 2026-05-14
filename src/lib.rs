@@ -1,6 +1,8 @@
 pub mod api;
 pub mod backtrack;
 pub mod daemon;
+pub mod delta;
+pub mod delta_memory;
 pub mod fetch;
 pub mod grouping;
 pub mod models;
@@ -14,6 +16,13 @@ use std::fs;
 use std::path::Path;
 
 use backtrack::backtrack_candidates;
+pub use delta::{
+    compute_delta, DeltaReport, DeltaSummary, MetricSnapshot, RiskDirection, Severity,
+};
+pub use delta_memory::{
+    classify_delta_tier, compact_run_data, AlertDecayModel, AlertTier, AlertedSignalEntry,
+    HotMemory,
+};
 use fetch::{assign_canonical_hashes, fixture_source_name, parse_feed};
 use grouping::group_events;
 use models::{InputSummary, RunArtifact, ScenarioSummary};
@@ -131,9 +140,64 @@ pub fn run_fixture_path(
             &scored_events,
             &interventions,
         )?;
+        update_delta_memory_for_latest_run(db_path)?;
     }
 
     Ok(artifact)
+}
+
+fn update_delta_memory_for_latest_run(sqlite_path: &str) -> Result<(), TianJiError> {
+    let current_run_id = get_latest_run_id(sqlite_path)?.ok_or_else(|| {
+        TianJiError::Usage("No persisted run exists after persistence completed.".to_string())
+    })?;
+    let scored_filters = ScoredEventFilters::default();
+    let group_filters = EventGroupFilters::default();
+    let current = get_run_summary(
+        sqlite_path,
+        current_run_id,
+        &scored_filters,
+        false,
+        &group_filters,
+    )?
+    .ok_or_else(|| TianJiError::Usage(format!("Run not found: {current_run_id}")))?;
+
+    let previous = match get_previous_run_id(sqlite_path, current_run_id)? {
+        Some(previous_run_id) => get_run_summary(
+            sqlite_path,
+            previous_run_id,
+            &scored_filters,
+            false,
+            &group_filters,
+        )?,
+        None => None,
+    };
+
+    let delta = compute_delta(&current, previous.as_ref());
+    let mut memory = if previous.is_some() {
+        HotMemory::load(&delta_memory_path(sqlite_path))
+    } else {
+        HotMemory::default()
+    };
+    memory.push_run(compact_run_data(&current), delta, 3);
+    memory.prune_stale_signals_at_timestamp(
+        &AlertDecayModel::default(),
+        current
+            .get("generated_at")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+    );
+    memory.save_atomic(&delta_memory_path(sqlite_path))?;
+    Ok(())
+}
+
+fn delta_memory_path(sqlite_path: &str) -> std::path::PathBuf {
+    let db_path = Path::new(sqlite_path);
+    let parent = db_path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = db_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("tianji");
+    parent.join(format!("{stem}.memory")).join("hot.json")
 }
 
 pub fn artifact_json(artifact: &RunArtifact) -> Result<String, TianJiError> {
@@ -744,6 +808,49 @@ mod tests {
         // Same 3 items, should only be 3 rows (deduped)
         assert_eq!(count, 3);
 
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn delta_between_identical_persisted_runs_has_no_changes() {
+        let db_path = temp_sqlite_path();
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 2");
+
+        let scored_filters = ScoredEventFilters::default();
+        let group_filters = EventGroupFilters::default();
+        let previous = get_run_summary(&db_path, 1, &scored_filters, false, &group_filters)
+            .expect("previous summary")
+            .expect("previous run");
+        let current = get_run_summary(&db_path, 2, &scored_filters, false, &group_filters)
+            .expect("current summary")
+            .expect("current run");
+        let report = compute_delta(&current, Some(&previous)).expect("delta report");
+
+        assert_eq!(report.summary.total_changes, 0);
+        assert!(report.numeric_deltas.is_empty());
+        assert!(report.count_deltas.is_empty());
+        assert!(report.new_signals.is_empty());
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn persisted_run_updates_hot_delta_memory() {
+        let db_path = temp_sqlite_path();
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 2");
+
+        let memory_path = delta_memory_path(&db_path);
+        let memory = HotMemory::load(&memory_path);
+
+        assert_eq!(memory.runs.len(), 2);
+        assert_eq!(memory.runs[0].run_id, 2);
+        assert_eq!(memory.runs[1].run_id, 1);
+        assert!(memory.runs[0].delta.is_some());
+        assert!(memory.runs[1].delta.is_none());
+
+        let _ = std::fs::remove_dir_all(memory_path.parent().expect("memory parent"));
         cleanup_db(&db_path);
     }
 

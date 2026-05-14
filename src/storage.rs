@@ -628,7 +628,7 @@ pub fn get_run_summary(
 
     // Fetch scored events
     let mut stmt = connection.prepare(
-        "SELECT event_id, title, source, link, published_at, dominant_field, impact_score, field_attraction, divergence_score, rationale_json FROM scored_events WHERE run_id = ?1 ORDER BY divergence_score DESC, id ASC",
+        "SELECT event_id, title, source, link, published_at, actors_json, regions_json, keywords_json, dominant_field, impact_score, field_attraction, divergence_score, rationale_json FROM scored_events WHERE run_id = ?1 ORDER BY divergence_score DESC, id ASC",
     )?;
     let mut rows = stmt.query(params![run_id])?;
     let mut scored_events: Vec<serde_json::Value> = Vec::new();
@@ -638,11 +638,20 @@ pub fn get_run_summary(
         let source: String = row.get(2)?;
         let link: String = row.get(3)?;
         let published_at: Option<String> = row.get(4)?;
-        let dominant_field: String = row.get(5)?;
-        let impact_score: f64 = row.get(6)?;
-        let field_attraction: f64 = row.get(7)?;
-        let divergence_score: f64 = row.get(8)?;
-        let rationale_json: String = row.get(9)?;
+        let actors_json: String = row.get(5)?;
+        let regions_json: String = row.get(6)?;
+        let keywords_json: String = row.get(7)?;
+        let dominant_field: String = row.get(8)?;
+        let impact_score: f64 = row.get(9)?;
+        let field_attraction: f64 = row.get(10)?;
+        let divergence_score: f64 = row.get(11)?;
+        let rationale_json: String = row.get(12)?;
+        let actors: serde_json::Value =
+            serde_json::from_str(&actors_json).map_err(TianJiError::Json)?;
+        let regions: serde_json::Value =
+            serde_json::from_str(&regions_json).map_err(TianJiError::Json)?;
+        let keywords: serde_json::Value =
+            serde_json::from_str(&keywords_json).map_err(TianJiError::Json)?;
         let rationale: serde_json::Value =
             serde_json::from_str(&rationale_json).map_err(TianJiError::Json)?;
         scored_events.push(serde_json::json!({
@@ -651,6 +660,9 @@ pub fn get_run_summary(
             "source": source,
             "link": link,
             "published_at": published_at,
+            "actors": actors,
+            "regions": regions,
+            "keywords": keywords,
             "dominant_field": dominant_field,
             "impact_score": impact_score,
             "field_attraction": field_attraction,

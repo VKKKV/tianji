@@ -3,8 +3,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use tianji::{
-    artifact_json, compare_runs, get_latest_run_id, get_latest_run_pair, get_next_run_id,
-    get_previous_run_id, get_run_summary, list_runs, run_fixture_path,
+    artifact_json, compare_runs, compute_delta, get_latest_run_id, get_latest_run_pair,
+    get_next_run_id, get_previous_run_id, get_run_summary, list_runs, run_fixture_path,
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     TianJiError,
 };
@@ -211,6 +211,21 @@ enum Cli {
         /// Maximum number of runs to list
         #[arg(long = "limit", default_value_t = 20)]
         limit: usize,
+    },
+    /// Show delta between the latest runs or an explicit run pair
+    Delta {
+        /// SQLite database path containing persisted TianJi runs
+        #[arg(long = "sqlite-path")]
+        sqlite_path: String,
+        /// Left-side run identifier (older run for explicit pairs)
+        #[arg(long = "left-run-id")]
+        left_run_id: Option<i64>,
+        /// Right-side run identifier (newer run for explicit pairs)
+        #[arg(long = "right-run-id")]
+        right_run_id: Option<i64>,
+        /// Compare the two latest persisted runs
+        #[arg(long = "latest-pair")]
+        latest_pair: bool,
     },
 }
 
@@ -1030,5 +1045,48 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
             Ok(String::new())
         }
         Cli::Tui { sqlite_path, limit } => tianji::tui::run_history_browser(&sqlite_path, limit),
+        Cli::Delta {
+            sqlite_path,
+            left_run_id,
+            right_run_id,
+            latest_pair,
+        } => {
+            let (left, right) = if latest_pair {
+                if left_run_id.is_some() || right_run_id.is_some() {
+                    return Err(TianJiError::Usage(
+                        "Use either --latest-pair or explicit --left-run-id/--right-run-id for delta, not both."
+                            .to_string(),
+                    ));
+                }
+                get_latest_run_pair(&sqlite_path)?.ok_or_else(|| {
+                    TianJiError::Usage(
+                        "At least two persisted runs are required for --latest-pair.".to_string(),
+                    )
+                })?
+            } else {
+                match (left_run_id, right_run_id) {
+                    (Some(left), Some(right)) => (left, right),
+                    _ => {
+                        return Err(TianJiError::Usage(
+                            "delta requires --latest-pair or both --left-run-id and --right-run-id."
+                                .to_string(),
+                        ));
+                    }
+                }
+            };
+
+            let scored_filters = ScoredEventFilters::default();
+            let group_filters = EventGroupFilters::default();
+            let previous =
+                get_run_summary(&sqlite_path, left, &scored_filters, false, &group_filters)?
+                    .ok_or_else(|| TianJiError::Usage(format!("Run not found: {left}")))?;
+            let current =
+                get_run_summary(&sqlite_path, right, &scored_filters, false, &group_filters)?
+                    .ok_or_else(|| TianJiError::Usage(format!("Run not found: {right}")))?;
+            let report = compute_delta(&current, Some(&previous)).ok_or_else(|| {
+                TianJiError::Usage("A previous run is required to compute delta.".to_string())
+            })?;
+            Ok(serde_json::to_string_pretty(&report).map_err(TianJiError::Json)?)
+        }
     }
 }
