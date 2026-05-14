@@ -35,6 +35,22 @@ uv venv .venv && uv pip install -e .
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
+## Local Daemon and API
+
+The daemon keeps the CLI as the source-of-truth write path. It is read-first and loopback-only: UNIX socket commands control local background runs, while the HTTP API exposes persisted run metadata on `127.0.0.1`.
+
+```bash
+.venv/bin/python -m tianji daemon status --socket-path runs/tianji.sock
+.venv/bin/python -m tianji daemon run --socket-path runs/tianji.sock --fixture tests/fixtures/sample_feed.xml
+.venv/bin/python -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
+
+curl http://127.0.0.1:8765/api/v1/meta
+curl http://127.0.0.1:8765/api/v1/runs
+curl "http://127.0.0.1:8765/api/v1/compare?left_run_id=1&right_run_id=2"
+
+.venv/bin/python -m tianji.webui_server --api-base-url http://127.0.0.1:8765 --host 127.0.0.1 --port 8766
+```
+
 ## What the Pipeline Does
 
 1. **Fetch / Load** — Load RSS or Atom input from local fixture files

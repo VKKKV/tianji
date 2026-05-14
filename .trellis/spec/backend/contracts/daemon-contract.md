@@ -140,6 +140,74 @@ Queue a bounded repeated run set:
 python3 -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
 ```
 
+## Bounded Schedule Command Contract
+
+### 1. Scope / Trigger
+
+- Trigger: `tianji daemon schedule` submits a bounded fixed-interval set of background run jobs through the same UNIX socket `queue_run` action used by `tianji daemon run`.
+- Schedule state is CLI-local. The daemon receives ordinary queued jobs only; it does not store schedule definitions, timers, or cancellation state.
+
+### 2. Signatures
+
+- `tianji daemon schedule --socket-path <path> --fixture <path> --sqlite-path <path> --every-seconds <N> --count <M>`
+- Defaults: `--socket-path runs/tianji.sock`.
+- Rust MVP input surface: `--fixture` plus optional `--sqlite-path`. Python-only fetch/source/output flags are not part of the Rust schedule contract until the Rust `daemon run` surface supports them.
+
+### 3. Contracts
+
+- Each scheduled submission sends a `queue_run` socket request with a payload equivalent to `tianji daemon run` for the same fixture/sqlite arguments.
+- The CLI sends exactly `count` submissions.
+- The CLI sleeps for `every_seconds` only between submissions, never after the final submission.
+- Successful output is pretty JSON with:
+  - `schedule.every_seconds`: requested interval in seconds
+  - `schedule.count`: requested submission count
+  - `queued_runs`: array of daemon `queue_run` data payloads, each containing at least `job_id` and `state`
+  - `job_states`: daemon job state vocabulary (`queued`, `running`, `succeeded`, `failed`)
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+|-----------|----------|
+| `--every-seconds < 60` | Return a usage/input error before contacting the daemon |
+| `--count < 1` | Return a usage/input error before contacting the daemon |
+| Daemon socket missing/refused | Return the same daemon contact error behavior as `tianji daemon run` |
+| Any `queue_run` response is unsuccessful | Stop scheduling and return the daemon error |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `tianji daemon schedule --fixture tests/fixtures/sample_feed.xml --every-seconds 300 --count 3` queues three jobs and sleeps twice.
+- Base: `tianji daemon schedule --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3 --every-seconds 60 --count 1` queues one job and returns immediately after the first submission.
+- Bad: accepting `--every-seconds 5`, silently treating `--count 0` as no-op success, or adding daemon-side persistent schedule state.
+
+### 6. Tests Required
+
+- Unit-test validation rejects `--every-seconds < 60`.
+- Unit-test validation rejects `--count < 1`.
+- Unit-test a multi-count schedule queues exactly `count` requests, forwards optional `sqlite_path`, and records sleeps only between submissions.
+- Unit-test successful JSON includes `schedule`, `queued_runs`, and `job_states` with the daemon vocabulary.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+for _ in 0..count {
+    queue_run()?;
+    std::thread::sleep(interval);
+}
+```
+
+#### Correct
+
+```rust
+for index in 0..count {
+    queue_run()?;
+    if index < count - 1 {
+        std::thread::sleep(interval);
+    }
+}
+```
+
 Stop the daemon:
 
 ```bash

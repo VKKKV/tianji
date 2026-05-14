@@ -277,6 +277,24 @@ enum DaemonCommands {
         #[arg(long = "sqlite-path")]
         sqlite_path: Option<String>,
     },
+    /// Queue a bounded repeated run set via the daemon
+    Schedule {
+        /// UNIX socket path for daemon control
+        #[arg(long = "socket-path", default_value = "runs/tianji.sock")]
+        socket_path: String,
+        /// Path to a local RSS/Atom fixture file
+        #[arg(long = "fixture")]
+        fixture: String,
+        /// Optional SQLite database path for persisting run data
+        #[arg(long = "sqlite-path")]
+        sqlite_path: Option<String>,
+        /// Seconds to wait between queued submissions; must be at least 60
+        #[arg(long = "every-seconds")]
+        every_seconds: u64,
+        /// Number of runs to queue; must be at least 1
+        #[arg(long = "count")]
+        count: usize,
+    },
     /// Internal: run the daemon server (called by `daemon start`)
     #[command(hide = true)]
     Serve {
@@ -399,6 +417,91 @@ mod tests {
         assert!(value["alert_tier"].is_null() || value["alert_tier"].is_string());
 
         cleanup_sqlite_path(&db_path);
+    }
+
+    #[test]
+    fn daemon_schedule_rejects_every_seconds_below_minimum() {
+        let result = handle_daemon_schedule_with(
+            "tests.sock",
+            SAMPLE_FIXTURE,
+            None,
+            59,
+            1,
+            |_socket_path, _fixture, _sqlite_path| {
+                Ok(serde_json::json!({"job_id": "job-unused", "state": "queued"}))
+            },
+            |_duration| {},
+        );
+
+        assert!(
+            matches!(result, Err(TianJiError::Usage(message)) if message == "--every-seconds must be at least 60.")
+        );
+    }
+
+    #[test]
+    fn daemon_schedule_rejects_zero_count() {
+        let result = handle_daemon_schedule_with(
+            "tests.sock",
+            SAMPLE_FIXTURE,
+            None,
+            60,
+            0,
+            |_socket_path, _fixture, _sqlite_path| {
+                Ok(serde_json::json!({"job_id": "job-unused", "state": "queued"}))
+            },
+            |_duration| {},
+        );
+
+        assert!(
+            matches!(result, Err(TianJiError::Usage(message)) if message == "--count must be at least 1.")
+        );
+    }
+
+    #[test]
+    fn daemon_schedule_outputs_metadata_and_sleeps_between_submissions_only() {
+        let mut queued_calls = Vec::new();
+        let mut sleep_calls = Vec::new();
+        let output = handle_daemon_schedule_with(
+            "tests.sock",
+            SAMPLE_FIXTURE,
+            Some("runs/test.sqlite3"),
+            60,
+            2,
+            |socket_path, fixture, sqlite_path| {
+                queued_calls.push((
+                    socket_path.to_string(),
+                    fixture.to_string(),
+                    sqlite_path.map(str::to_string),
+                ));
+                Ok(serde_json::json!({
+                    "job_id": format!("job-{}", queued_calls.len()),
+                    "state": "queued"
+                }))
+            },
+            |duration| sleep_calls.push(duration),
+        )
+        .expect("schedule output");
+
+        let value: Value = serde_json::from_str(&output).expect("json output");
+        assert_eq!(value["schedule"]["every_seconds"], 60);
+        assert_eq!(value["schedule"]["count"], 2);
+        assert_eq!(
+            value["queued_runs"].as_array().expect("queued runs").len(),
+            2
+        );
+        assert_eq!(value["queued_runs"][0]["job_id"], "job-1");
+        assert_eq!(value["queued_runs"][1]["job_id"], "job-2");
+        assert_eq!(
+            value["job_states"],
+            serde_json::json!(tianji::daemon::ALLOWED_JOB_STATES)
+        );
+        assert_eq!(queued_calls.len(), 2);
+        assert!(queued_calls.iter().all(|call| call.0 == "tests.sock"));
+        assert!(queued_calls.iter().all(|call| call.1 == SAMPLE_FIXTURE));
+        assert!(queued_calls
+            .iter()
+            .all(|call| call.2.as_deref() == Some("runs/test.sqlite3")));
+        assert_eq!(sleep_calls, vec![std::time::Duration::from_secs(60)]);
     }
 }
 
@@ -741,16 +844,28 @@ fn handle_daemon_run(
     fixture: &str,
     sqlite_path: Option<&str>,
 ) -> Result<String, TianJiError> {
+    let data = queue_daemon_run(socket_path, fixture, sqlite_path)?;
+    Ok(serde_json::to_string_pretty(&data)?)
+}
+
+fn build_daemon_run_payload(fixture: &str, sqlite_path: Option<&str>) -> serde_json::Value {
     let mut run_payload = serde_json::json!({
         "fixture_paths": [fixture],
     });
     if let Some(sp) = sqlite_path {
         run_payload["sqlite_path"] = serde_json::Value::String(sp.to_string());
     }
+    run_payload
+}
 
+fn queue_daemon_run(
+    socket_path: &str,
+    fixture: &str,
+    sqlite_path: Option<&str>,
+) -> Result<serde_json::Value, TianJiError> {
     let payload = serde_json::json!({
         "action": "queue_run",
-        "payload": run_payload,
+        "payload": build_daemon_run_payload(fixture, sqlite_path),
     });
 
     let response = tianji::daemon::send_daemon_request(socket_path, &payload)?;
@@ -759,11 +874,10 @@ fn handle_daemon_run(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     if ok {
-        let data = response
+        return Ok(response
             .get("data")
             .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        return Ok(serde_json::to_string_pretty(&data)?);
+            .unwrap_or(serde_json::Value::Null));
     }
     let error_msg = response
         .get("error")
@@ -771,6 +885,68 @@ fn handle_daemon_run(
         .and_then(|m| m.as_str())
         .unwrap_or("Daemon returned an invalid error response.");
     Err(TianJiError::Usage(error_msg.to_string()))
+}
+
+fn handle_daemon_schedule(
+    socket_path: &str,
+    fixture: &str,
+    sqlite_path: Option<&str>,
+    every_seconds: u64,
+    count: usize,
+) -> Result<String, TianJiError> {
+    handle_daemon_schedule_with(
+        socket_path,
+        fixture,
+        sqlite_path,
+        every_seconds,
+        count,
+        queue_daemon_run,
+        std::thread::sleep,
+    )
+}
+
+fn handle_daemon_schedule_with<Q, S>(
+    socket_path: &str,
+    fixture: &str,
+    sqlite_path: Option<&str>,
+    every_seconds: u64,
+    count: usize,
+    mut queue_run: Q,
+    mut sleep: S,
+) -> Result<String, TianJiError>
+where
+    Q: FnMut(&str, &str, Option<&str>) -> Result<serde_json::Value, TianJiError>,
+    S: FnMut(std::time::Duration),
+{
+    if every_seconds < 60 {
+        return Err(TianJiError::Usage(
+            "--every-seconds must be at least 60.".to_string(),
+        ));
+    }
+    if count < 1 {
+        return Err(TianJiError::Usage(
+            "--count must be at least 1.".to_string(),
+        ));
+    }
+
+    let mut queued_runs = Vec::with_capacity(count);
+    for index in 0..count {
+        queued_runs.push(queue_run(socket_path, fixture, sqlite_path)?);
+        if index + 1 < count {
+            sleep(std::time::Duration::from_secs(every_seconds));
+        }
+    }
+
+    let job_states: Vec<&str> = tianji::daemon::ALLOWED_JOB_STATES.to_vec();
+    let payload = serde_json::json!({
+        "schedule": {
+            "every_seconds": every_seconds,
+            "count": count,
+        },
+        "queued_runs": queued_runs,
+        "job_states": job_states,
+    });
+    Ok(serde_json::to_string_pretty(&payload)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -1129,6 +1305,19 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
                 fixture,
                 sqlite_path,
             } => handle_daemon_run(&socket_path, &fixture, sqlite_path.as_deref()),
+            DaemonCommands::Schedule {
+                socket_path,
+                fixture,
+                sqlite_path,
+                every_seconds,
+                count,
+            } => handle_daemon_schedule(
+                &socket_path,
+                &fixture,
+                sqlite_path.as_deref(),
+                every_seconds,
+                count,
+            ),
             DaemonCommands::Serve {
                 socket_path,
                 sqlite_path,
