@@ -821,6 +821,7 @@ Python oracle 保留至 M6 退役。85 个 Rust 测试通过。
 - 外部通知投递: Telegram/Discord/webhook 等推送按需实现
 - Cold archive rotation / 冷归档策略
 - Hot memory 剪枝策略的 cron/daemon 自动触发（M3C schedule/housekeeping 延后）
+- M3C schedule/housekeeping 优化: 合并 daemon hot-memory update 与 mark-alerted 写入路径，减少额外 hot-memory I/O；这是 housekeeping 优化，不是当前 correctness bug。
 
 #### 已知问题 (2026-05-14 Code Review)
 

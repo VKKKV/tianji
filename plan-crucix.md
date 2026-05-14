@@ -804,6 +804,7 @@ Delta 计算**复用但不侵入**现有 SQLite storage。
 
 11. Telegram/Discord webhook 推送 (如果 TianJi 需要)
 12. Cold archive rotation / cron-like housekeeping（与 M3C schedule 相关，延后）
+13. M3C schedule/housekeeping 优化: 合并 daemon hot-memory update 与 mark-alerted I/O，避免重复加载/保存 hot memory；该项属于 housekeeping/performance，不是当前正确性 bug。
 
 ---
 
