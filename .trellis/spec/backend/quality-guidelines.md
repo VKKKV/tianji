@@ -301,6 +301,62 @@ must be applied in multiple places.
 **Fix**: Extract shared helpers to `src/utils.rs` as `pub fn`. Import from `crate::utils`.
 Standardize on `.expect()` for consistency.
 
+### Hardcoding `include_str!` paths to the Python oracle tree
+
+**Symptom**: Rust build breaks if the Python package directory is absent or reorganized.
+
+**Cause**: `include_str!("../tianji/webui/...")` points into the Python oracle source tree
+(`tianji/`) instead of a Rust-owned location. The Rust crate should own its own static assets.
+
+**Fix**: Move static assets to a Rust-owned directory (e.g., `src/webui/`) and update
+`include_str!` paths accordingly. Leave the Python oracle's copies intact for M6 retirement.
+
+#### Wrong
+
+```rust
+const INDEX_HTML: &str = include_str!("../tianji/webui/index.html");
+```
+
+#### Correct
+
+```rust
+const INDEX_HTML: &str = include_str!("webui/index.html");
+```
+
+### Using stringly-typed enums instead of real Rust enums
+
+**Symptom**: Code compares strings like `== " headline role=chain endpoint;"` instead of
+using enum variants. Fragile — typos or vocabulary changes silently fall through to wrong defaults.
+
+**Cause**: Quick prototyping with stringly-typed values that never got refactored to proper enums.
+
+**Fix**: Replace string comparisons with a proper `enum` + `Display` impl. The `Display` impl
+preserves the original text for artifact output parity, while the enum enforces correctness
+at compile time.
+
+#### Wrong
+
+```rust
+if headline_role_text == " headline role=chain endpoint;" { ... }
+```
+
+#### Correct
+
+```rust
+match headline_role {
+    HeadlineRole::ChainEndpoint => { ... }
+}
+// Display impl preserves the text for artifact output:
+impl Display for HeadlineRole {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            HeadlineRole::ChainEndpoint => write!(f, " headline role=chain endpoint;"),
+            ...
+        }
+    }
+}
+```
+
 ### Dropping `std::process::Child` without reaping (zombie process leak)
 
 **Symptom**: After spawning a daemon child process with `Command::spawn()`, the parent
