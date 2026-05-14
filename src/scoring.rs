@@ -5,6 +5,7 @@ use regex::Regex;
 
 use crate::models::{NormalizedEvent, ScoredEvent};
 use crate::normalize::{match_patterns, ACTOR_PATTERNS, FIELD_KEYWORDS, REGION_PATTERNS};
+use crate::utils::round2;
 
 const REGION_WEIGHTS: &[(&str, f64)] = &[
     ("ukraine", 2.5),
@@ -497,16 +498,6 @@ pub fn summarize_scenario(
         top_regions,
         top_actors,
     )
-}
-
-/// Round to 2 decimal places (matches Python `round(value, 2)`).
-///
-/// Uses format-based rounding to correctly handle edge cases like 6.175
-/// where the IEEE 754 representation is slightly below the mathematical
-/// value. Python's round() detects this and rounds down, but naive
-/// `(x * 100.0).round() / 100.0` would round up due to float multiplication.
-fn round2(value: f64) -> f64 {
-    format!("{:.2}", value).parse::<f64>().unwrap()
 }
 
 #[cfg(test)]

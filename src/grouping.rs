@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use crate::models::{EventChainLink, EventGroupSummary, ScoredEvent};
+use crate::utils::{days_since_epoch, round2};
 
 const MIN_SHARED_KEYWORDS: usize = 2;
 const MAX_GROUP_TIME_DELTA_SECS: i64 = 24 * 3600;
@@ -523,28 +524,6 @@ fn month_from_str(s: &str) -> Option<i64> {
         "Dec" => Some(12),
         _ => None,
     }
-}
-
-fn days_since_epoch(year: i64, month: i64, day: i64) -> i64 {
-    // Simplified day count for timestamp calculation
-    let y = year - 1;
-    let leap_years = y / 4 - y / 100 + y / 400;
-    let days_from_years = y * 365 + leap_years;
-
-    let cumulative_days_before_month: [i64; 12] =
-        [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let month_offset = if month >= 3 && is_leap {
-        cumulative_days_before_month[month as usize - 1] + 1
-    } else {
-        cumulative_days_before_month[month as usize - 1]
-    };
-
-    days_from_years + month_offset + day - 719528 // offset to unix epoch (1970-01-01)
-}
-
-fn round2(value: f64) -> f64 {
-    format!("{:.2}", value).parse::<f64>().unwrap()
 }
 
 #[cfg(test)]

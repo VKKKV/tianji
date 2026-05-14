@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::utils::round2;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -573,10 +574,6 @@ fn infer_risk_direction(risk_up: usize, risk_down: usize) -> RiskDirection {
     } else {
         RiskDirection::Mixed
     }
-}
-
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
 }
 
 #[cfg(test)]

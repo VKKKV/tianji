@@ -6,6 +6,7 @@ use rusqlite::{params, Connection};
 
 use crate::fetch::{derive_canonical_content_hash, derive_canonical_entry_identity_hash};
 use crate::models::{InterventionCandidate, NormalizedEvent, RawItem, RunArtifact, ScoredEvent};
+use crate::utils::{days_since_epoch, round2};
 use crate::TianJiError;
 
 static HISTORY_TIMESTAMP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -1492,26 +1493,4 @@ fn is_history_timestamp_on_or_before(value: &serde_json::Value, threshold: &i64)
         Some(ts) => ts <= *threshold,
         None => false,
     }
-}
-
-fn days_since_epoch(year: i64, month: i64, day: i64) -> i64 {
-    let y = year - 1;
-    let leap_years = y / 4 - y / 100 + y / 400;
-    let days_from_years = y * 365 + leap_years;
-    let cumulative_days_before_month: [i64; 12] =
-        [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let month_offset = if month >= 3 && is_leap {
-        cumulative_days_before_month[month as usize - 1] + 1
-    } else {
-        cumulative_days_before_month[month as usize - 1]
-    };
-    days_from_years + month_offset + day - 719528
-}
-
-/// Round to 2 decimal places (matches Python round(value, 2)).
-fn round2(value: f64) -> f64 {
-    format!("{:.2}", value)
-        .parse::<f64>()
-        .expect("round2: formatted f64 should parse")
 }

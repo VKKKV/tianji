@@ -446,11 +446,10 @@ pub fn worker_loop(state: &Arc<DaemonState>) {
     }
 }
 
-fn run_pipeline_for_job(request: &RunJobRequest) -> Result<(), String> {
+fn run_pipeline_for_job(request: &RunJobRequest) -> Result<(), TianJiError> {
     // Currently only fixture mode is supported in Rust
     for fixture_path in &request.fixture_paths {
-        run_fixture_path(fixture_path, request.sqlite_path.as_deref())
-            .map_err(|e| format!("TianJiError: {e}"))?;
+        run_fixture_path(fixture_path, request.sqlite_path.as_deref())?;
     }
     Ok(())
 }

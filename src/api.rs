@@ -111,7 +111,7 @@ impl IntoResponse for ApiError {
 
 #[derive(Deserialize, Default)]
 pub struct RunsQuery {
-    pub limit: Option<i64>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -134,7 +134,16 @@ async fn get_runs(
     Query(params): Query<RunsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let limit = match params.limit {
-        Some(l) if l > 0 => (l as usize).min(MAX_RUNS_LIMIT),
+        Some(l) if l as usize > MAX_RUNS_LIMIT => {
+            return Err(ApiError {
+                status: StatusCode::BAD_REQUEST,
+                body: error_envelope(
+                    "invalid_query",
+                    &format!("limit exceeds maximum of {MAX_RUNS_LIMIT}"),
+                ),
+            });
+        }
+        Some(l) if l > 0 => l as usize,
         _ => 20,
     };
 

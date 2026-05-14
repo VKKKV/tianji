@@ -460,9 +460,15 @@ fn handle_daemon_start(
         .arg("--host")
         .arg(&validated_host)
         .arg("--port")
-        .arg(port.to_string())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        .arg(port.to_string());
+
+    // Redirect child stdout/stderr to a log file next to the socket path
+    // so daemon crashes and panics are captured for diagnostics.
+    let log_path = format!("{socket_path}.log");
+    let log_file = std::fs::File::create(&log_path)?;
+    let log_file_err = log_file.try_clone()?;
+    cmd.stdout(std::process::Stdio::from(log_file))
+        .stderr(std::process::Stdio::from(log_file_err));
 
     // Set process group (start_new_session equivalent)
     unsafe {

@@ -10,6 +10,7 @@ pub mod normalize;
 pub mod scoring;
 pub mod storage;
 pub mod tui;
+pub mod utils;
 pub mod webui;
 
 use std::fs;
