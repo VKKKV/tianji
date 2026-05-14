@@ -67,6 +67,30 @@ fixture pipeline.
 - CLI: clap subcommands (`run`, `history`, `history-show`, `history-compare`), `--sqlite-path` optional for `run` ✅
 - 33 tests pass, `cargo fmt --check` clean, `cargo clippy -- -D warnings` clean ✅
 
+#### Storage Read-Model Paging Contract
+
+`list_runs(sqlite_path, limit, filters)` preserves the shipped history contract:
+filters are applied before final limit truncation. To avoid loading an unbounded
+SQL result set into memory, filtered reads page through `runs` in deterministic
+`ORDER BY id DESC` order using bounded `LIMIT/OFFSET` queries, apply Rust-side
+filters per page, and stop only after collecting `limit` matching rows or
+exhausting the table. Do not add a hard max scanned-row cap, because that can
+silently violate filter-before-limit semantics when a matching run exists beyond
+the cap.
+
+```rust
+// Correct: bounded SQL pages, unbounded logical scan until enough matches or EOF.
+while items.len() < limit {
+    let rows = query_run_list_rows(connection, PAGE_SIZE, offset)?;
+    if rows.is_empty() { break; }
+    items.extend(filter_run_list_items(build_run_list_items(connection, &rows)?, filters));
+    offset += rows.len();
+}
+items.truncate(limit);
+```
+
+Tests must cover a filtered match that appears beyond the first SQL page.
+
 ### Milestone 3 — Local Runtime Parity
 
 **Complete.** Port the thin local runtime with behavior parity.
