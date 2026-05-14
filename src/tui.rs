@@ -15,7 +15,8 @@ use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
 use ratatui::{Frame, Terminal};
 
 use crate::storage::{
-    get_run_summary, list_runs, EventGroupFilters, RunListFilters, ScoredEventFilters,
+    compare_runs, get_run_summary, list_runs, CompareResult, EventGroupFilters, RunListFilters,
+    ScoredEventFilters,
 };
 use crate::{classify_delta_tier, delta_memory_path, AlertTier, HotMemory, TianJiError};
 
@@ -91,6 +92,55 @@ pub struct DetailState {
     pub scored_events: Vec<String>,
     pub event_groups: Vec<String>,
     pub intervention_candidates: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompareState {
+    pub left_run_id: i64,
+    pub right_run_id: i64,
+    pub status: String,
+    pub left_summary: Vec<String>,
+    pub right_summary: Vec<String>,
+    pub diff_lines: Vec<String>,
+}
+
+impl CompareState {
+    pub fn missing(left_run_id: i64, right_run_id: i64) -> Self {
+        Self {
+            left_run_id,
+            right_run_id,
+            status: format!("Compare pair #{left_run_id} → #{right_run_id} could not be loaded."),
+            left_summary: vec!["No left run summary available.".to_string()],
+            right_summary: vec!["No right run summary available.".to_string()],
+            diff_lines: vec!["No diff available.".to_string()],
+        }
+    }
+
+    pub fn invalid(left_run_id: i64, right_run_id: i64, message: impl Into<String>) -> Self {
+        let mut state = Self::missing(left_run_id, right_run_id);
+        state.status = message.into();
+        state
+    }
+
+    pub fn error(left_run_id: i64, right_run_id: i64, message: impl Into<String>) -> Self {
+        let mut state = Self::missing(left_run_id, right_run_id);
+        state.status = format!(
+            "Compare pair #{left_run_id} → #{right_run_id} error: {}",
+            message.into()
+        );
+        state
+    }
+
+    pub fn from_result(result: &CompareResult) -> Self {
+        Self {
+            left_run_id: result.left_run_id,
+            right_run_id: result.right_run_id,
+            status: "loaded".to_string(),
+            left_summary: format_compare_side_lines(&result.left),
+            right_summary: format_compare_side_lines(&result.right),
+            diff_lines: format_compare_diff_lines(&result.diff),
+        }
+    }
 }
 
 impl DetailState {
@@ -218,6 +268,7 @@ pub enum TuiView {
     Dashboard,
     History,
     Detail,
+    Compare,
 }
 
 impl HistoryRow {
@@ -260,6 +311,8 @@ pub struct TuiState {
     pub dashboard: DashboardState,
     pub view: TuiView,
     pub detail: Option<DetailState>,
+    pub compare: Option<CompareState>,
+    pub staged_left_run_id: Option<i64>,
     sqlite_path: Option<String>,
     selected: usize,
     pending_g: bool,
@@ -272,6 +325,8 @@ impl TuiState {
             dashboard,
             view: TuiView::Dashboard,
             detail: None,
+            compare: None,
+            staged_left_run_id: None,
             sqlite_path: None,
             selected: 0,
             pending_g: false,
@@ -328,6 +383,20 @@ impl TuiState {
         self.view = TuiView::Detail;
     }
 
+    pub fn show_compare(&mut self, compare: CompareState) {
+        self.pending_g = false;
+        self.compare = Some(compare);
+        self.view = TuiView::Compare;
+    }
+
+    pub fn stage_selected_for_compare(&mut self) {
+        self.pending_g = false;
+        if self.view != TuiView::History {
+            return;
+        }
+        self.staged_left_run_id = self.rows.get(self.selected).map(|row| row.run_id);
+    }
+
     pub fn open_selected_detail(&mut self) {
         self.pending_g = false;
         if self.view != TuiView::History {
@@ -341,6 +410,26 @@ impl TuiState {
             None => DetailState::missing(row.run_id),
         };
         self.show_detail(detail);
+    }
+
+    pub fn open_selected_compare(&mut self) -> bool {
+        self.pending_g = false;
+        if self.view != TuiView::History {
+            return false;
+        }
+        let Some(left_run_id) = self.staged_left_run_id else {
+            return false;
+        };
+        let Some(right_row) = self.rows.get(self.selected) else {
+            return false;
+        };
+        let right_run_id = right_row.run_id;
+        let compare = match self.sqlite_path.as_deref() {
+            Some(sqlite_path) => load_compare_state(sqlite_path, left_run_id, right_run_id),
+            None => CompareState::missing(left_run_id, right_run_id),
+        };
+        self.show_compare(compare);
+        true
     }
 
     fn list_state(&self) -> ListState {
@@ -443,7 +532,7 @@ fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
     match code {
         KeyCode::Char('q') => false,
         KeyCode::Esc => {
-            if state.view == TuiView::Detail {
+            if matches!(state.view, TuiView::Detail | TuiView::Compare) {
                 state.show_history();
             } else {
                 state.pending_g = false;
@@ -452,7 +541,9 @@ fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
         }
         KeyCode::Enter => {
             if state.view == TuiView::History {
-                state.open_selected_detail();
+                if !state.open_selected_compare() {
+                    state.open_selected_detail();
+                }
             } else {
                 state.pending_g = false;
             }
@@ -464,6 +555,10 @@ fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
         }
         KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('2') => {
             state.show_history();
+            true
+        }
+        KeyCode::Char('c') => {
+            state.stage_selected_for_compare();
             true
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -539,6 +634,7 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
         TuiView::Dashboard => render_dashboard(frame, root[1], &state.dashboard),
         TuiView::History => render_history(frame, root[1], state),
         TuiView::Detail => render_detail(frame, root[1], state.detail.as_ref()),
+        TuiView::Compare => render_compare(frame, root[1], state.compare.as_ref()),
     }
 
     let mut spans = vec![
@@ -551,7 +647,13 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
     if state.view == TuiView::History {
         spans.extend(vec![
             Span::styled("[Enter]", Style::default().fg(KANAGAWA.key_hint)),
-            Span::raw(" detail  "),
+            Span::raw(if state.staged_left_run_id.is_some() {
+                " compare  "
+            } else {
+                " detail  "
+            }),
+            Span::styled("[c]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" stage compare  "),
             Span::styled("[j/k]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" move  "),
             Span::styled("[↑/↓]", Style::default().fg(KANAGAWA.key_hint)),
@@ -559,7 +661,7 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
             Span::styled("[gg/G]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" first/last  "),
         ]);
-    } else if state.view == TuiView::Detail {
+    } else if matches!(state.view, TuiView::Detail | TuiView::Compare) {
         spans.extend(vec![
             Span::styled("[Esc]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw("/"),
@@ -584,7 +686,7 @@ fn render_history(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: &Tu
     let list = List::new(list_items)
         .block(
             Block::bordered()
-                .title(" Run History ")
+                .title(history_title(state))
                 .border_style(Style::default().fg(KANAGAWA.border))
                 .style(base_style().bg(KANAGAWA.panel_bg)),
         )
@@ -597,6 +699,13 @@ fn render_history(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: &Tu
         .highlight_symbol("> ");
     let mut list_state = state.list_state();
     frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+fn history_title(state: &TuiState) -> String {
+    match state.staged_left_run_id {
+        Some(run_id) => format!(" Run History · staged left #{run_id} "),
+        None => " Run History ".to_string(),
+    }
 }
 
 fn render_dashboard(
@@ -623,6 +732,25 @@ fn render_detail(frame: &mut Frame<'_>, area: ratatui::layout::Rect, detail: Opt
         .block(
             Block::bordered()
                 .title(" Run Detail ")
+                .border_style(Style::default().fg(KANAGAWA.border))
+                .style(base_style().bg(KANAGAWA.panel_bg)),
+        )
+        .style(base_style());
+    frame.render_widget(paragraph, area);
+}
+
+fn render_compare(
+    frame: &mut Frame<'_>,
+    area: ratatui::layout::Rect,
+    compare: Option<&CompareState>,
+) {
+    let text = compare
+        .map(format_compare)
+        .unwrap_or_else(|| "No compare loaded.".to_string());
+    let paragraph = Paragraph::new(text)
+        .block(
+            Block::bordered()
+                .title(" Run Compare ")
                 .border_style(Style::default().fg(KANAGAWA.border))
                 .style(base_style().bg(KANAGAWA.panel_bg)),
         )
@@ -686,6 +814,18 @@ pub fn format_detail(detail: &DetailState) -> String {
     )
 }
 
+pub fn format_compare(compare: &CompareState) -> String {
+    format!(
+        "Compare #{} → #{}\n  status: {}\n\nLeft summary\n  {}\n\nRight summary\n  {}\n\nDiff\n  {}",
+        compare.left_run_id,
+        compare.right_run_id,
+        compare.status,
+        compare.left_summary.join("\n  "),
+        compare.right_summary.join("\n  "),
+        compare.diff_lines.join("\n  ")
+    )
+}
+
 fn load_detail_state(sqlite_path: &str, run_id: i64) -> DetailState {
     if !Path::new(sqlite_path).exists() {
         return DetailState::missing(run_id);
@@ -701,6 +841,201 @@ fn load_detail_state(sqlite_path: &str, run_id: i64) -> DetailState {
         Ok(Some(value)) => DetailState::from_json(&value),
         Ok(None) => DetailState::missing(run_id),
         Err(error) => DetailState::error(run_id, error.to_string()),
+    }
+}
+
+fn load_compare_state(sqlite_path: &str, left_run_id: i64, right_run_id: i64) -> CompareState {
+    if left_run_id == right_run_id {
+        return CompareState::invalid(
+            left_run_id,
+            right_run_id,
+            format!("Choose a different right run before comparing staged run #{left_run_id}."),
+        );
+    }
+    if !Path::new(sqlite_path).exists() {
+        return CompareState::missing(left_run_id, right_run_id);
+    }
+
+    match compare_runs(
+        sqlite_path,
+        left_run_id,
+        right_run_id,
+        &ScoredEventFilters::default(),
+        false,
+        &EventGroupFilters::default(),
+    ) {
+        Ok(Some(result)) => CompareState::from_result(&result),
+        Ok(None) => CompareState::missing(left_run_id, right_run_id),
+        Err(error) => CompareState::error(left_run_id, right_run_id, error.to_string()),
+    }
+}
+
+fn format_compare_side_lines(value: &serde_json::Value) -> Vec<String> {
+    let top_scored_event_id = value
+        .get("top_scored_event")
+        .and_then(|event| event.get("event_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("none");
+    let top_event_group_id = value
+        .get("top_event_group")
+        .and_then(|group| group.get("headline_event_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("none");
+    vec![
+        format!("run: #{}", numeric_field(value, "run_id")),
+        format!(
+            "schema: {}",
+            compact_json_field(value, "schema_version", "unavailable")
+        ),
+        format!("mode: {}", compact_json_field(value, "mode", "unavailable")),
+        format!(
+            "dominant field: {}",
+            compact_json_field(value, "dominant_field", "uncategorized")
+        ),
+        format!(
+            "risk: {}",
+            compact_json_field(value, "risk_level", "unknown")
+        ),
+        format!(
+            "headline: {}",
+            compact_json_field(value, "headline", "No headline available.")
+        ),
+        format!(
+            "raw/normalized: {}/{}",
+            numeric_field(value, "raw_item_count"),
+            numeric_field(value, "normalized_event_count")
+        ),
+        format!(
+            "event groups: {} (top {top_event_group_id})",
+            numeric_field(value, "event_group_count")
+        ),
+        format!("top scored event: {top_scored_event_id}"),
+    ]
+}
+
+fn format_compare_diff_lines(value: &serde_json::Value) -> Vec<String> {
+    if value
+        .as_object()
+        .map(|object| object.is_empty())
+        .unwrap_or(true)
+    {
+        return vec!["No diff available.".to_string()];
+    }
+    vec![
+        format!(
+            "raw item delta: {}",
+            signed_numeric_field(value, "raw_item_count_delta")
+        ),
+        format!(
+            "normalized event delta: {}",
+            signed_numeric_field(value, "normalized_event_count_delta")
+        ),
+        format!(
+            "event group delta: {}",
+            signed_numeric_field(value, "event_group_count_delta")
+        ),
+        format!(
+            "dominant field changed: {}",
+            bool_field(value, "dominant_field_changed")
+        ),
+        format!(
+            "risk level changed: {}",
+            bool_field(value, "risk_level_changed")
+        ),
+        format!(
+            "top event group changed: {}",
+            bool_field(value, "top_event_group_changed")
+        ),
+        format!(
+            "top scored event changed: {}",
+            bool_field(value, "top_scored_event_changed")
+        ),
+        format!(
+            "top scored event comparable: {}",
+            bool_field(value, "top_scored_event_comparable")
+        ),
+        format!(
+            "top intervention changed: {}",
+            bool_field(value, "top_intervention_changed")
+        ),
+        format!(
+            "top divergence delta: {}",
+            optional_f64_field(value, "top_divergence_score_delta")
+        ),
+        format!(
+            "left-only event groups: {}",
+            array_string_field(value, "left_only_event_group_headline_event_ids")
+        ),
+        format!(
+            "right-only event groups: {}",
+            array_string_field(value, "right_only_event_group_headline_event_ids")
+        ),
+        format!(
+            "left-only interventions: {}",
+            array_string_field(value, "left_only_intervention_event_ids")
+        ),
+        format!(
+            "right-only interventions: {}",
+            array_string_field(value, "right_only_intervention_event_ids")
+        ),
+    ]
+}
+
+fn compact_json_field(value: &serde_json::Value, key: &str, placeholder: &str) -> String {
+    value
+        .get(key)
+        .map(compact_json_value)
+        .filter(|text| !text.trim().is_empty() && text != "null")
+        .unwrap_or_else(|| placeholder.to_string())
+}
+
+fn numeric_field(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|n| n as i64)))
+        .map(|number| number.to_string())
+        .unwrap_or_else(|| "0".to_string())
+}
+
+fn signed_numeric_field(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(|v| v.as_i64())
+        .map(|number| format!("{number:+}"))
+        .unwrap_or_else(|| "unavailable".to_string())
+}
+
+fn bool_field(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(|v| v.as_bool())
+        .map(|flag| flag.to_string())
+        .unwrap_or_else(|| "unavailable".to_string())
+}
+
+fn optional_f64_field(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(|v| v.as_f64())
+        .map(|number| format!("{number:+.6}"))
+        .unwrap_or_else(|| "unavailable".to_string())
+}
+
+fn array_string_field(value: &serde_json::Value, key: &str) -> String {
+    let items: Vec<String> = value
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|array| {
+            array
+                .iter()
+                .filter_map(|item| item.as_str().map(ToString::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if items.is_empty() {
+        "none".to_string()
+    } else {
+        items.join(", ")
     }
 }
 
@@ -871,6 +1206,7 @@ fn title_line(state: &TuiState) -> Line<'static> {
         TuiView::Dashboard => "dashboard",
         TuiView::History => "history",
         TuiView::Detail => "detail",
+        TuiView::Compare => "compare",
     };
     Line::from(vec![
         Span::styled(
@@ -1246,6 +1582,194 @@ mod tests {
         assert_eq!(detail.run_id, 99);
         assert!(detail.status.contains("could not"));
         assert!(format_detail(&detail).contains("No scored events available."));
+        assert!(!Path::new(&db_path).exists());
+    }
+
+    #[test]
+    fn compare_state_maps_from_storage_compare_result() {
+        let result = CompareResult {
+            left_run_id: 1,
+            right_run_id: 2,
+            left: serde_json::json!({
+                "run_id": 1,
+                "schema_version": "1.0",
+                "mode": "fixture",
+                "raw_item_count": 3,
+                "normalized_event_count": 2,
+                "dominant_field": "technology",
+                "risk_level": "high",
+                "headline": "left headline",
+                "event_group_count": 1,
+                "top_event_group": {"headline_event_id": "evt-left"},
+                "top_scored_event": {"event_id": "scored-left"}
+            }),
+            right: serde_json::json!({
+                "run_id": 2,
+                "schema_version": "1.0",
+                "mode": "fixture",
+                "raw_item_count": 4,
+                "normalized_event_count": 3,
+                "dominant_field": "conflict",
+                "risk_level": "critical",
+                "headline": "right headline",
+                "event_group_count": 2,
+                "top_event_group": {"headline_event_id": "evt-right"},
+                "top_scored_event": {"event_id": "scored-right"}
+            }),
+            diff: serde_json::json!({
+                "raw_item_count_delta": 1,
+                "normalized_event_count_delta": 1,
+                "event_group_count_delta": 1,
+                "dominant_field_changed": true,
+                "risk_level_changed": true,
+                "top_event_group_changed": true,
+                "top_scored_event_changed": true,
+                "top_scored_event_comparable": false,
+                "top_intervention_changed": false,
+                "top_divergence_score_delta": 0.75,
+                "left_only_event_group_headline_event_ids": ["evt-left"],
+                "right_only_event_group_headline_event_ids": ["evt-right"],
+                "left_only_intervention_event_ids": [],
+                "right_only_intervention_event_ids": ["scored-right"]
+            }),
+        };
+
+        let compare = CompareState::from_result(&result);
+
+        assert_eq!(compare.left_run_id, 1);
+        assert_eq!(compare.right_run_id, 2);
+        assert_eq!(compare.status, "loaded");
+        assert!(compare
+            .left_summary
+            .iter()
+            .any(|line| line.contains("technology")));
+        assert!(compare
+            .right_summary
+            .iter()
+            .any(|line| line.contains("right headline")));
+        assert!(compare
+            .diff_lines
+            .iter()
+            .any(|line| line.contains("dominant field changed: true")));
+        assert!(compare
+            .diff_lines
+            .iter()
+            .any(|line| line.contains("right-only interventions: scored-right")));
+    }
+
+    #[test]
+    fn compare_format_includes_pair_summaries_and_diff() {
+        let compare = CompareState {
+            left_run_id: 4,
+            right_run_id: 5,
+            status: "loaded".to_string(),
+            left_summary: vec![
+                "run: #4".to_string(),
+                "dominant field: technology".to_string(),
+            ],
+            right_summary: vec![
+                "run: #5".to_string(),
+                "dominant field: conflict".to_string(),
+            ],
+            diff_lines: vec!["dominant field changed: true".to_string()],
+        };
+
+        let formatted = format_compare(&compare);
+
+        assert!(formatted.contains("Compare #4 → #5"));
+        assert!(formatted.contains("Left summary"));
+        assert!(formatted.contains("Right summary"));
+        assert!(formatted.contains("Diff"));
+        assert!(formatted.contains("dominant field changed: true"));
+    }
+
+    #[test]
+    fn key_handler_stages_left_and_enter_opens_compare_from_history() {
+        let mut state = history_state(vec![row(1), row(2)]);
+
+        assert!(handle_key_code(&mut state, KeyCode::Char('c')));
+        assert_eq!(state.staged_left_run_id, Some(1));
+        assert!(history_title(&state).contains("staged left #1"));
+
+        assert!(handle_key_code(&mut state, KeyCode::Char('j')));
+        assert_eq!(state.selected(), 1);
+        assert!(handle_key_code(&mut state, KeyCode::Enter));
+
+        assert_eq!(state.view, TuiView::Compare);
+        let compare = state.compare.as_ref().expect("compare state");
+        assert_eq!(compare.left_run_id, 1);
+        assert_eq!(compare.right_run_id, 2);
+        assert!(compare.status.contains("could not"));
+        assert_eq!(state.selected(), 1);
+    }
+
+    #[test]
+    fn enter_without_staged_left_preserves_detail_behavior() {
+        let mut state = history_state(vec![row(1), row(2)]);
+        state.select_next();
+
+        assert!(handle_key_code(&mut state, KeyCode::Enter));
+
+        assert_eq!(state.view, TuiView::Detail);
+        assert_eq!(state.detail.as_ref().map(|detail| detail.run_id), Some(2));
+        assert!(state.compare.is_none());
+    }
+
+    #[test]
+    fn compare_view_returns_to_history_and_ignores_history_navigation() {
+        let mut state = history_state(vec![row(1), row(2)]);
+        state.show_compare(CompareState::missing(1, 2));
+
+        assert!(handle_key_code(&mut state, KeyCode::Char('j')));
+        assert_eq!(state.selected(), 0);
+        assert_eq!(state.view, TuiView::Compare);
+
+        assert!(handle_key_code(&mut state, KeyCode::Esc));
+        assert_eq!(state.view, TuiView::History);
+
+        state.show_compare(CompareState::missing(1, 2));
+        assert!(handle_key_code(&mut state, KeyCode::Char('h')));
+        assert_eq!(state.view, TuiView::History);
+    }
+
+    #[test]
+    fn compare_load_uses_storage_compare_defaults() {
+        let db_path = temp_sqlite_path();
+        let _ = crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+            .expect("first run + persist");
+        let _ = crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+            .expect("second run + persist");
+
+        let compare = load_compare_state(&db_path, 1, 2);
+
+        assert_eq!(compare.status, "loaded");
+        assert_eq!(compare.left_run_id, 1);
+        assert_eq!(compare.right_run_id, 2);
+        assert!(compare
+            .left_summary
+            .iter()
+            .any(|line| line.contains("run: #1")));
+        assert!(compare
+            .right_summary
+            .iter()
+            .any(|line| line.contains("run: #2")));
+        assert!(compare
+            .diff_lines
+            .iter()
+            .any(|line| line.contains("dominant field changed")));
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn compare_missing_state_is_stable_placeholder_without_creating_db() {
+        let db_path = temp_sqlite_path();
+        let compare = load_compare_state(&db_path, 1, 2);
+
+        assert_eq!(compare.left_run_id, 1);
+        assert_eq!(compare.right_run_id, 2);
+        assert!(compare.status.contains("could not"));
+        assert!(format_compare(&compare).contains("No diff available."));
         assert!(!Path::new(&db_path).exists());
     }
 }

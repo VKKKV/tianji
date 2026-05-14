@@ -614,3 +614,108 @@ let detail = get_run_summary(
     &EventGroupFilters::default(),
 )?;
 ```
+
+## Rust TUI Compare Contract
+
+### 1. Scope / Trigger
+
+- Trigger: Phase 4 extends the Rust TUI from dashboard/history/detail browsing to a read-only run compare panel.
+- Scope: staged-pair compare MVP for two selected history rows, backed by the existing `history-compare` storage read model.
+- Out of scope: search/filter entry, projection lens controls, detail previous/next stepping, compare previous/next target stepping, live simulation monitoring, profile browsing, daemon control, run queueing, feed fetching, and any storage mutation.
+
+### 2. Signatures
+
+Rust CLI command remains unchanged:
+
+```bash
+tianji tui --sqlite-path <path> [--limit <N>]
+```
+
+Rust module boundary remains unchanged:
+
+```rust
+pub fn run_history_browser(sqlite_path: &str, limit: usize) -> Result<String, TianJiError>
+```
+
+Read dependencies:
+
+```rust
+list_runs(sqlite_path, limit, &RunListFilters::default())
+compare_runs(
+    sqlite_path,
+    staged_left_run_id,
+    selected_right_run_id,
+    &ScoredEventFilters::default(),
+    false,
+    &EventGroupFilters::default(),
+)
+```
+
+### 3. Contracts
+
+- The TUI remains read-only and must not write SQLite, queue daemon jobs, call daemon IPC, fetch feeds, or start simulations.
+- The compare flow is reachable only from the history view.
+- `c` in history stages the selected run as the left side of a compare pair.
+- `Enter` in history opens detail when no left run is staged.
+- `Enter` in history opens compare when a left run is staged, using the staged left run and the currently selected right run.
+- Compare payloads use existing `compare_runs` semantics with default scored-event filters, default event-group filters, and `only_matching_interventions=false`.
+- The history view must surface visible staged-left feedback before compare activates.
+- Compare formatting surfaces stable `history-compare` fields: `left_run_id`, `right_run_id`, side summaries (`left`, `right`), and `diff` fields.
+- Missing, invalid, or failed compare loads render stable placeholder/error text instead of panicking or fabricating state.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+|-----------|----------|
+| SQLite path does not exist before launching TUI | Return the existing empty-state message before launching the terminal |
+| SQLite path is missing while loading compare | Return a missing-compare placeholder and do not create a SQLite file |
+| `c` pressed outside history | Do not stage a compare run |
+| `Enter` pressed in history without staged left | Open selected run detail |
+| `Enter` pressed in history with staged left | Open compare for staged left vs selected right |
+| Staged left and selected right are the same run | Render a stable invalid-pair placeholder |
+| Either compare run is not found by `compare_runs` | Render a missing-compare placeholder for the pair |
+| `compare_runs` returns a storage or JSON error | Render a compare error placeholder for the pair |
+| User presses `Esc` or `h` in compare | Return to history without mutating storage |
+| User presses history navigation while compare is active | Keep history selection unchanged |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `tianji tui --sqlite-path runs/tianji.sqlite3` opens dashboard, `h` switches to history, `c` stages a left run, and `Enter` compares it against the selected right run.
+- Base: a compare payload with empty diff or missing optional side fields renders explicit placeholders rather than panicking.
+- Bad: computing compare diffs in the TUI duplicates storage/CLI logic and risks drift from `history-compare` semantics.
+
+### 6. Tests Required
+
+- Unit-test compare mapping from a `compare_runs`-shaped payload.
+- Unit-test compare formatting includes left/right run IDs, side summaries, and diff fields.
+- Unit-test `c` stages only from history.
+- Unit-test `Enter` opens detail without a staged left run and opens compare with a staged left run.
+- Unit-test invalid same-run pairs and missing paths render stable placeholders without creating SQLite files.
+- Re-run existing dashboard/history/detail selection and key-handling tests to ensure behavior remains intact.
+- Run `cargo fmt --check`, `cargo test`, and `cargo clippy -- -D warnings` after TUI compare changes.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// Duplicates history-compare logic inside the TUI and can drift from storage semantics.
+let diff = build_tui_only_diff(left_detail, right_detail);
+```
+
+#### Correct
+
+```rust
+if !Path::new(sqlite_path).exists() {
+    return CompareState::missing(left_run_id, right_run_id);
+}
+
+let result = compare_runs(
+    sqlite_path,
+    left_run_id,
+    right_run_id,
+    &ScoredEventFilters::default(),
+    false,
+    &EventGroupFilters::default(),
+)?;
+```
