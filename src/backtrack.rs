@@ -1,5 +1,62 @@
 use crate::models::{EventGroupSummary, InterventionCandidate, ScoredEvent};
 use std::collections::BTreeMap;
+use std::fmt;
+
+// ---------------------------------------------------------------------------
+// Field normalization (B10 Cat.1)
+// ---------------------------------------------------------------------------
+
+/// Normalize a dominant_field string for comparison: trim whitespace and lowercase.
+/// The field set is open-ended (future fields like "cyber" or "energy" can be added
+/// without changing an enum), so a normalization function is the minimal safe approach.
+fn normalize_field(f: &str) -> String {
+    f.trim().to_lowercase()
+}
+
+// ---------------------------------------------------------------------------
+// HeadlineRole enum (B10 Cat.2)
+// ---------------------------------------------------------------------------
+
+/// Typed replacement for stringly-typed headline role text.
+/// The `Display` impl produces identical output to the old stringly-typed text
+/// for artifact parity with the Python oracle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HeadlineRole {
+    Standalone,
+    ChainOrigin,
+    ChainEndpoint,
+    ChainPivot,
+}
+
+impl fmt::Display for HeadlineRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HeadlineRole::Standalone => write!(f, " headline role=standalone;"),
+            HeadlineRole::ChainOrigin => write!(f, " headline role=chain origin;"),
+            HeadlineRole::ChainEndpoint => write!(f, " headline role=chain endpoint;"),
+            HeadlineRole::ChainPivot => write!(f, " headline role=chain pivot;"),
+        }
+    }
+}
+
+fn infer_group_headline_role(event_group: &EventGroupSummary) -> HeadlineRole {
+    let causal_ids = &event_group.causal_ordered_event_ids;
+    let headline_id = &event_group.headline_event_id;
+    if causal_ids.is_empty() || causal_ids.len() == 1 {
+        return HeadlineRole::Standalone;
+    }
+    if headline_id == &causal_ids[0] {
+        return HeadlineRole::ChainOrigin;
+    }
+    if headline_id == &causal_ids[causal_ids.len() - 1] {
+        return HeadlineRole::ChainEndpoint;
+    }
+    HeadlineRole::ChainPivot
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const FIELD_INTERVENTION_TYPES: &[(&str, &str)] = &[
     ("conflict", "de-escalation"),
@@ -113,9 +170,8 @@ fn select_intervention_target(
     event_group: Option<&EventGroupSummary>,
 ) -> String {
     if let Some(group) = event_group {
-        let headline_role_text = infer_group_headline_role_text(group);
-        if headline_role_text == " headline role=chain endpoint;"
-            || headline_role_text == " headline role=chain pivot;"
+        let headline_role = infer_group_headline_role(group);
+        if headline_role == HeadlineRole::ChainEndpoint || headline_role == HeadlineRole::ChainPivot
         {
             if !event.actors.is_empty() {
                 return event.actors[0].clone();
@@ -152,6 +208,7 @@ fn infer_intervention_type(event: &ScoredEvent, event_group: Option<&EventGroupS
 fn infer_group_intervention_type(event_group: &EventGroupSummary) -> Option<String> {
     let member_count = event_group.member_count;
     let link_count = event_group.evidence_chain.len();
+    let norm_field = normalize_field(&event_group.dominant_field);
     if member_count >= 3
         && link_count >= 2
         && event_group
@@ -162,7 +219,7 @@ fn infer_group_intervention_type(event_group: &EventGroupSummary) -> Option<Stri
         return Some(
             STRONG_GROUP_INTERVENTION_TYPES
                 .iter()
-                .find(|(field, _)| *field == event_group.dominant_field)
+                .find(|(field, _)| *field == norm_field)
                 .map(|(_, v)| v.to_string())
                 .unwrap_or_else(|| "pattern-disruption".to_string()),
         );
@@ -171,7 +228,7 @@ fn infer_group_intervention_type(event_group: &EventGroupSummary) -> Option<Stri
         return Some(
             WEAK_GROUP_INTERVENTION_TYPES
                 .iter()
-                .find(|(field, _)| *field == event_group.dominant_field)
+                .find(|(field, _)| *field == norm_field)
                 .map(|(_, v)| v.to_string())
                 .unwrap_or_else(|| "pattern-monitoring".to_string()),
         );
@@ -180,9 +237,10 @@ fn infer_group_intervention_type(event_group: &EventGroupSummary) -> Option<Stri
 }
 
 fn infer_field_intervention_type(dominant_field: &str) -> String {
+    let norm_field = normalize_field(dominant_field);
     FIELD_INTERVENTION_TYPES
         .iter()
-        .find(|(field, _)| *field == dominant_field)
+        .find(|(field, _)| *field == norm_field)
         .map(|(_, v)| v.to_string())
         .unwrap_or_else(|| "information-gathering".to_string())
 }
@@ -191,7 +249,8 @@ fn infer_expected_effect(event: &ScoredEvent, event_group: Option<&EventGroupSum
     if let Some(group) = event_group {
         return infer_group_expected_effect(event, group);
     }
-    match event.dominant_field.as_str() {
+    let norm_field = normalize_field(&event.dominant_field);
+    match norm_field.as_str() {
         "conflict" => {
             "Reduce near-term escalation incentives around the triggering event.".to_string()
         }
@@ -225,7 +284,8 @@ fn infer_group_expected_effect(event: &ScoredEvent, event_group: &EventGroupSumm
             ("disrupt", "stabilize", "interrupt", "break")
         };
 
-    match event.dominant_field.as_str() {
+    let norm_field = normalize_field(&event.dominant_field);
+    match norm_field.as_str() {
         "conflict" => format!(
             "{urgency_prefix}{conflict_action} the {chain_type}{relationship_phrase}{role_phrase} before escalation compounds across {member_count} related events."
         ),
@@ -254,12 +314,12 @@ fn infer_group_effect_relationship_phrase(event_group: &EventGroupSummary) -> St
 }
 
 fn infer_group_effect_role_phrase(event_group: &EventGroupSummary) -> String {
-    let role_text = infer_group_headline_role_text(event_group);
-    match role_text.as_str() {
-        " headline role=chain origin;" => " at the chain origin".to_string(),
-        " headline role=chain endpoint;" => " at the chain endpoint".to_string(),
-        " headline role=chain pivot;" => " at the chain pivot".to_string(),
-        _ => String::new(),
+    let role = infer_group_headline_role(event_group);
+    match role {
+        HeadlineRole::ChainOrigin => " at the chain origin".to_string(),
+        HeadlineRole::ChainEndpoint => " at the chain endpoint".to_string(),
+        HeadlineRole::ChainPivot => " at the chain pivot".to_string(),
+        HeadlineRole::Standalone => String::new(),
     }
 }
 
@@ -342,21 +402,6 @@ fn infer_group_link_tempo_text(event_group: &EventGroupSummary) -> String {
     }
 }
 
-fn infer_group_headline_role_text(event_group: &EventGroupSummary) -> String {
-    let causal_ids = &event_group.causal_ordered_event_ids;
-    let headline_id = &event_group.headline_event_id;
-    if causal_ids.is_empty() || causal_ids.len() == 1 {
-        return " headline role=standalone;".to_string();
-    }
-    if headline_id == &causal_ids[0] {
-        return " headline role=chain origin;".to_string();
-    }
-    if headline_id == &causal_ids[causal_ids.len() - 1] {
-        return " headline role=chain endpoint;".to_string();
-    }
-    " headline role=chain pivot;".to_string()
-}
-
 fn build_reason(event: &ScoredEvent, event_group: Option<&EventGroupSummary>) -> String {
     let actor_text = if !event.actors.is_empty() {
         event.actors.join(", ")
@@ -394,10 +439,10 @@ fn build_reason(event: &ScoredEvent, event_group: Option<&EventGroupSummary>) ->
             let relationship_text = infer_group_relationship_text(group);
             let signal_support_text = infer_group_signal_support_text(group);
             let link_tempo_text = infer_group_link_tempo_text(group);
-            let headline_role_text = infer_group_headline_role_text(group);
+            let headline_role = infer_group_headline_role(group);
 
             format!(
-                "{base_reason} Grouped context: {}-event {} cluster with {} causal link(s){span_text};{corroboration_text}{relationship_text}{signal_support_text}{link_tempo_text}{headline_role_text}{shared_actor_text}{shared_region_text} Evidence chain: {} Causal cluster: {}",
+                "{base_reason} Grouped context: {}-event {} cluster with {} causal link(s){span_text};{corroboration_text}{relationship_text}{signal_support_text}{link_tempo_text}{headline_role}{shared_actor_text}{shared_region_text} Evidence chain: {} Causal cluster: {}",
                 group.member_count,
                 group.dominant_field,
                 group.evidence_chain.len(),
@@ -455,5 +500,69 @@ mod tests {
         let candidates = backtrack_candidates(&events, 5, None);
         assert_eq!(candidates[0].intervention_type, "capability-control");
         assert_eq!(candidates[0].target, "usa");
+    }
+
+    // ----- B10 Cat.1: normalize_field tests -----
+
+    #[test]
+    fn normalize_field_trims_and_lowercases() {
+        assert_eq!(normalize_field("  Conflict  "), "conflict");
+        assert_eq!(normalize_field("DIPLOMACY"), "diplomacy");
+        assert_eq!(normalize_field("  Economy  "), "economy");
+        assert_eq!(normalize_field("Technology"), "technology");
+    }
+
+    #[test]
+    fn normalize_field_idempotent_for_clean_input() {
+        assert_eq!(normalize_field("conflict"), "conflict");
+    }
+
+    #[test]
+    fn dominant_field_case_insensitive_lookup() {
+        let events = vec![ScoredEvent {
+            event_id: "e1".to_string(),
+            title: "Test".to_string(),
+            source: "test".to_string(),
+            link: "http://test".to_string(),
+            published_at: None,
+            actors: vec!["actor".to_string()],
+            regions: vec![],
+            keywords: vec![],
+            dominant_field: "  Conflict  ".to_string(),
+            impact_score: 10.0,
+            field_attraction: 5.0,
+            divergence_score: 10.0,
+            rationale: vec![],
+        }];
+        let candidates = backtrack_candidates(&events, 5, None);
+        assert_eq!(candidates[0].intervention_type, "de-escalation");
+    }
+
+    // ----- B10 Cat.2: HeadlineRole enum tests -----
+
+    #[test]
+    fn headline_role_display_matches_old_stringly_typed_text() {
+        assert_eq!(
+            format!("{}", HeadlineRole::Standalone),
+            " headline role=standalone;"
+        );
+        assert_eq!(
+            format!("{}", HeadlineRole::ChainOrigin),
+            " headline role=chain origin;"
+        );
+        assert_eq!(
+            format!("{}", HeadlineRole::ChainEndpoint),
+            " headline role=chain endpoint;"
+        );
+        assert_eq!(
+            format!("{}", HeadlineRole::ChainPivot),
+            " headline role=chain pivot;"
+        );
+    }
+
+    #[test]
+    fn headline_role_enum_comparison() {
+        assert_eq!(HeadlineRole::ChainEndpoint, HeadlineRole::ChainEndpoint);
+        assert_ne!(HeadlineRole::ChainEndpoint, HeadlineRole::ChainPivot);
     }
 }

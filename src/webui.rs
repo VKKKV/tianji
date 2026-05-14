@@ -27,9 +27,9 @@ pub struct WebUiState {
 // Static file embedding
 // ---------------------------------------------------------------------------
 
-const INDEX_HTML: &str = include_str!("../tianji/webui/index.html");
-const APP_JS: &str = include_str!("../tianji/webui/app.js");
-const STYLES_CSS: &str = include_str!("../tianji/webui/styles.css");
+const INDEX_HTML: &str = include_str!("webui/index.html");
+const APP_JS: &str = include_str!("webui/app.js");
+const STYLES_CSS: &str = include_str!("webui/styles.css");
 
 // ---------------------------------------------------------------------------
 // Route handlers
