@@ -820,18 +820,18 @@ Python oracle 保留至 M6 退役。72 个 Rust 测试通过。
 
 | # | 问题 | 严重度 | 文件 |
 |---|------|--------|------|
-| B1 | Zombie 进程泄漏 — daemon start 子进程未 wait | CRITICAL | main.rs |
-| B2 | HashMap 违反确定性要求 (BTreeMap 未使用) | CRITICAL | backtrack.rs, daemon.rs |
-| B3 | daemon 错误信息丢失 — TianJiError→String | HIGH | daemon.rs |
-| B4 | include_str! 硬耦合到 Python 源码树 | HIGH | webui.rs |
-| B5 | daemon 子进程 stdout/stderr 丢弃 | HIGH | main.rs |
-| B6 | Regex 每次调用重新编译 | HIGH | normalize.rs, scoring.rs |
-| B7 | list_runs SQL 无 LIMIT | HIGH | storage.rs |
+| B1 | Zombie 进程泄漏 — daemon start 子进程未 wait | CRITICAL | main.rs | 修复中 |
+| B2 | HashMap 违反确定性要求 (BTreeMap 未使用) | CRITICAL | backtrack.rs, daemon.rs | 已修复 |
+| B3 | daemon 错误信息丢失 — TianJiError→String | HIGH | daemon.rs | |
+| B4 | include_str! 硬耦合到 Python 源码树 | HIGH | webui.rs | |
+| B5 | daemon 子进程 stdout/stderr 丢弃 | HIGH | main.rs | |
+| B6 | Regex 每次调用重新编译 | HIGH | normalize.rs, scoring.rs | 修复中 |
+| B7 | list_runs SQL 无 LIMIT | HIGH | storage.rs | 已修复 |
 | B8 | API limit 参数无上限 | HIGH | api.rs |
 | B9 | 工具函数三处重复 (round2, days_since_epoch…) | HIGH | scoring/grouping/storage |
 | B10 | Backtrack 字符串精确匹配脆弱 | HIGH | backtrack.rs |
 
-全部未修复。优先修复顺序: B1 → B2 → B6 → B7。
+B1、B6 修复中；B2、B7 已修复。其余未修复。优先修复顺序: B1 → B2 → B6 → B7。
 
 ### Phase 2: Hongmeng 编排层 (延后)
 - tokio actor 模型 + Board/Stick 消息路由

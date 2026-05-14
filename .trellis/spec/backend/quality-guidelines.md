@@ -227,6 +227,48 @@ fn extract_tokens(text: &str) -> Vec<&str> {
 - **Don't add cloud-required dependencies** — local-only MVP
 - **Don't claim Rust parity without verifying against Python oracle output**
 
+## Common Mistakes
+
+### Dropping `std::process::Child` without reaping (zombie process leak)
+
+**Symptom**: After spawning a daemon child process with `Command::spawn()`, the parent
+CLI exits and the child becomes a zombie (visible in `ps` as `Z` state) until the
+parent process exits.
+
+**Cause**: In Rust, dropping a `Child` handle does **not** call `wait()` on the OS
+process. The OS keeps the zombie entry until someone reaps it. Error paths often
+correctly call `child.wait()`, but the success path (where the child should keep
+running) is easily missed.
+
+**Fix**: For daemon-style child processes that must outlive the parent, call
+`std::mem::forget(child)` after confirming the child started successfully. This
+intentionally leaks the handle — the OS reaps the child when it eventually exits.
+Do **not** call `child.wait()` on the success path (it blocks until the daemon exits,
+defeating the purpose of spawning a background process).
+
+#### Wrong
+
+```rust
+let mut child = cmd.spawn()?;
+let pid = child.id();
+// ... readiness checks pass ...
+// child dropped here → zombie process
+Ok(success_payload)
+```
+
+#### Correct
+
+```rust
+let mut child = cmd.spawn()?;
+let pid = child.id();
+// ... readiness checks pass ...
+// Deliberately leak the handle: the daemon child must outlive
+// this parent CLI process. std::mem::forget prevents the Drop
+// impl from running, and the OS will reap the child when it exits.
+std::mem::forget(child);
+Ok(success_payload)
+```
+
 ---
 
 ## Pre-Commit Checklist
