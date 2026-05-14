@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-0.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-05-14
 <!-- @@@/auto:current-status -->
 
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-05-14 | TUI dashboard view | `0525496`, `e4e429d` | `main` |
 | 11 | 2026-05-14 | M3C daemon schedule | `6dfb30f`, `744d882` | `main` |
 | 10 | 2026-05-14 | Crucix Phase 2 review followups | `e7bee33`, `2e7ce3e` | `main` |
 | 9 | 2026-05-14 | Sync plans after Crucix Phase 2 | `45a3be3` | `main` |
