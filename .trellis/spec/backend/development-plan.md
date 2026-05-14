@@ -105,16 +105,20 @@ Tests must cover a filtered match that appears beyond the first SQL page.
 
 ### Milestone 3.5 — Cross-Run Delta Engine
 
-**Core complete.** Adds a Crucix-inspired cross-run analysis layer on top of the
-persisted SQLite read model without changing the six-table schema.
+**Daemon auto-delta complete.** Adds a Crucix-inspired cross-run analysis layer on top
+of the persisted SQLite read model without changing the six-table schema. Persisted
+runs update hot memory, classify alert tiers, and expose delta summary through daemon
+job status and the read API.
 
 #### 1. Scope / Trigger
 
 - Trigger: `tianji run --sqlite-path <path>` now updates a hot-memory JSON file
-  after successful persistence, and `tianji delta` exposes manual run-pair diffing.
+  after successful persistence, returns a `RunResult` containing the computed delta
+  and alert tier, and `tianji delta` exposes manual run-pair diffing with tier output.
 - Scope: compute structured deltas between two persisted runs, keep recent compact
-  run snapshots, and classify alert tiers.
-- Out of scope: daemon push notifications, cold archive rotation, and schema-backed
+  run snapshots, classify alert tiers, expose latest delta via API, and attach delta
+  fields to daemon job status.
+- Out of scope: external push notifications, cold archive rotation, and schema-backed
   delta tables.
 
 #### 2. Signatures
@@ -136,12 +140,29 @@ pub fn compute_delta(
 
 pub fn compact_run_data(run: &serde_json::Value) -> CompactRunData;
 
+pub struct RunResult {
+    pub artifact: RunArtifact,
+    pub delta: Option<DeltaReport>,
+    pub alert_tier: Option<AlertTier>,
+}
+
+pub fn run_fixture_path(
+    path: impl AsRef<Path>,
+    sqlite_path: Option<&str>,
+) -> Result<RunResult, TianJiError>;
+
 impl HotMemory {
     pub fn load(path: &Path) -> Self;
     pub fn save_atomic(&self, path: &Path) -> Result<(), TianJiError>;
     pub fn push_run(&mut self, compact: CompactRunData, delta: Option<DeltaReport>, max_runs: usize);
     pub fn prune_stale_signals_at_timestamp(&mut self, decay: &AlertDecayModel, now_rfc3339: &str);
 }
+```
+
+Read API endpoint:
+
+```text
+GET /api/v1/delta/latest?sqlite_path=<path>
 ```
 
 Hot-memory path:
@@ -166,6 +187,12 @@ Hot-memory path:
   wall-clock time, so fixture runs stay deterministic.
 - `save_atomic` writes a temporary file, preserves the previous hot file as `.bak`, then renames
   the temporary file into place.
+- `run_fixture_path` returns the computed `DeltaReport` and `AlertTier` in `RunResult`.
+  CLI artifact output must serialize `RunResult.artifact`, preserving the shipped run JSON.
+- Daemon successful job status includes `delta_tier` and `delta_summary` fields.
+- `GET /api/v1/delta/latest` loads hot memory for the SQLite path, returns the newest run's
+  delta plus `classify_delta_tier(delta)`, and returns `null` fields when no delta exists.
+- `DeltaConfig.numeric_thresholds` uses `f64` values because numeric thresholds are percentages.
 
 #### 4. Validation & Error Matrix
 
@@ -178,12 +205,14 @@ Hot-memory path:
 | Hot-memory primary JSON is corrupt but `.bak` is valid | Load `.bak` |
 | Hot-memory primary and backup are missing/corrupt | Return `HotMemory::default()` |
 | Hot-memory save fails | Propagate `TianJiError` |
+| Latest delta requested with fewer than two persisted runs | Return successful envelope with `delta: null`, `alert_tier: null` |
 
 #### 5. Good/Base/Bad Cases
 
 - Good: two persisted fixture runs produce a hot memory file with two entries, newest first,
-  and the newest entry has `delta: Some(...)`.
-- Base: one persisted fixture run produces a hot memory file with one entry and `delta: None`.
+  the newest entry has `delta: Some(...)`, and `RunResult.alert_tier` matches `classify_delta_tier`.
+- Base: one persisted fixture run produces a hot memory file with one entry, `delta: None`,
+  and daemon/API delta fields are null.
 - Bad: using `Utc::now()` or `SystemTime` in the run-persistence pruning path makes fixture
   tests and replayed runs nondeterministic.
 
@@ -194,6 +223,9 @@ Hot-memory path:
 - Unit-test hot-memory primary/backup load fallback and atomic save behavior.
 - Integration-test two persisted runs update hot memory in newest-first order.
 - Regression-test reused temp DB names reset stale hot memory on first run.
+- Integration-test `RunResult` includes delta and alert tier for persisted run pairs.
+- Test daemon job status includes `delta_tier` and `delta_summary` after a successful run.
+- Test `GET /api/v1/delta/latest` returns latest delta/tier and handles no-delta cases.
 - Run `cargo fmt --check`, `cargo test`, and `cargo clippy -- -D warnings` after changes.
 
 #### 7. Wrong vs Correct
