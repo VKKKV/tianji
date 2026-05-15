@@ -53,6 +53,54 @@ pub const KANAGAWA: Theme = Theme {
     title: Color::Rgb(0xE6, 0xC3, 0x84),
 };
 
+// ── Glyph set: Nerd Font / ASCII fallback ──────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GlyphSet {
+    pub up: &'static str,
+    pub down: &'static str,
+    pub nav_hint: &'static str,
+    pub bullet: &'static str,
+    pub warning: &'static str,
+}
+
+pub static NERD_GLYPHS: GlyphSet = GlyphSet {
+    up: "\u{2191}",       // ↑
+    down: "\u{2193}",     // ↓
+    nav_hint: "[\u{2191}/\u{2193}]", // [↑/↓]
+    bullet: "\u{2022}",   // •
+    warning: "!",
+};
+
+pub static ASCII_GLYPHS: GlyphSet = GlyphSet {
+    up: "^",
+    down: "v",
+    nav_hint: "[j/k]",
+    bullet: "-",
+    warning: "!",
+};
+
+/// Detect which glyph set to use.
+///
+/// Priority:
+/// 1. `TIANJI_NERD_FONT=1` env → Nerd Font glyphs
+/// 2. `TERM_PROGRAM` matching known Nerd-Font-capable terminals → Nerd Font
+/// 3. Otherwise → ASCII fallback (safe for CI / basic terminals)
+pub fn detect_glyph_mode() -> &'static GlyphSet {
+    if std::env::var("TIANJI_NERD_FONT").as_deref() == Ok("1") {
+        return &NERD_GLYPHS;
+    }
+    if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
+        if matches!(
+            term_program.as_str(),
+            "kitty" | "ghostty" | "wezterm" | "alacritty"
+        ) {
+            return &NERD_GLYPHS;
+        }
+    }
+    &ASCII_GLYPHS
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistoryRow {
     pub run_id: i64,
@@ -410,6 +458,7 @@ pub struct TuiState {
     pub search_query: String,
     pub search_active: bool,
     all_rows: Vec<HistoryRow>,
+    pub glyphs: &'static GlyphSet,
 }
 
 impl TuiState {
@@ -428,6 +477,7 @@ impl TuiState {
             search_query: String::new(),
             search_active: false,
             all_rows,
+            glyphs: detect_glyph_mode(),
         }
     }
 
@@ -822,7 +872,7 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
             Span::raw(" stage compare  "),
             Span::styled("[j/k]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" move  "),
-            Span::styled("[↑/↓]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::styled(state.glyphs.nav_hint, Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" move  "),
             Span::styled("[gg/G]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" first/last  "),
@@ -2570,5 +2620,57 @@ mod tests {
         assert_eq!(state.all_rows.len(), 2);
         let title = history_title(&state);
         assert!(title.contains("[1/2]"));
+    }
+
+    // ── GlyphSet / detect_glyph_mode tests ──────────────────────────
+
+    #[test]
+    fn detect_glyph_mode_env_detection() {
+        // All env-dependent checks in one test to avoid parallel races.
+
+        // 1. TIANJI_NERD_FONT=1 → NERD
+        std::env::set_var("TIANJI_NERD_FONT", "1");
+        assert!(std::ptr::eq(detect_glyph_mode(), &NERD_GLYPHS));
+        std::env::remove_var("TIANJI_NERD_FONT");
+
+        // 2. No env → depends on TERM_PROGRAM; remove both → ASCII
+        std::env::remove_var("TERM_PROGRAM");
+        assert!(std::ptr::eq(detect_glyph_mode(), &ASCII_GLYPHS));
+
+        // 3. Known TERM_PROGRAM values → NERD
+        for program in &["kitty", "ghostty", "wezterm", "alacritty"] {
+            std::env::set_var("TERM_PROGRAM", program);
+            assert!(std::ptr::eq(detect_glyph_mode(), &NERD_GLYPHS),
+                "TERM_PROGRAM={program}");
+        }
+
+        // 4. Unknown TERM_PROGRAM → ASCII
+        std::env::remove_var("TIANJI_NERD_FONT");
+        std::env::set_var("TERM_PROGRAM", "xterm-256color");
+        assert!(std::ptr::eq(detect_glyph_mode(), &ASCII_GLYPHS));
+
+        // Clean up
+        std::env::remove_var("TERM_PROGRAM");
+    }
+
+    #[test]
+    fn ascii_glyph_set_contains_no_unicode() {
+        // Every ASCII glyph string must be pure ASCII
+        fn is_pure_ascii(s: &str) -> bool {
+            s.chars().all(|c| c.is_ascii())
+        }
+        assert!(is_pure_ascii(ASCII_GLYPHS.up));
+        assert!(is_pure_ascii(ASCII_GLYPHS.down));
+        assert!(is_pure_ascii(ASCII_GLYPHS.nav_hint));
+        assert!(is_pure_ascii(ASCII_GLYPHS.bullet));
+        assert!(is_pure_ascii(ASCII_GLYPHS.warning));
+    }
+
+    #[test]
+    fn nerd_glyph_set_contains_unicode_arrows() {
+        assert!(NERD_GLYPHS.up.contains('\u{2191}')); // ↑
+        assert!(NERD_GLYPHS.down.contains('\u{2193}')); // ↓
+        assert!(NERD_GLYPHS.nav_hint.contains('\u{2191}'));
+        assert!(NERD_GLYPHS.bullet.contains('\u{2022}')); // •
     }
 }
