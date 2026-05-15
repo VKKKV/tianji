@@ -89,6 +89,14 @@ pub fn run_fixture_path(
     path: impl AsRef<Path>,
     sqlite_path: Option<&str>,
 ) -> Result<RunResult, TianJiError> {
+    run_fixture_path_with_alert_marking(path, sqlite_path, false)
+}
+
+pub fn run_fixture_path_with_alert_marking(
+    path: impl AsRef<Path>,
+    sqlite_path: Option<&str>,
+    mark_alerted: bool,
+) -> Result<RunResult, TianJiError> {
     let path = path.as_ref();
     let feed_text = fs::read_to_string(path)?;
     let source = fixture_source_name(path);
@@ -148,9 +156,8 @@ pub fn run_fixture_path(
             &scored_events,
             &interventions,
         )?;
-        let delta = update_delta_memory_for_latest_run(db_path)?;
-        let alert_tier = delta.as_ref().and_then(classify_delta_tier);
-        (delta, alert_tier)
+        let update = update_delta_memory_for_latest_run(db_path, mark_alerted)?;
+        (update.delta, update.alert_tier)
     } else {
         (None, None)
     };
@@ -162,9 +169,10 @@ pub fn run_fixture_path(
     })
 }
 
-fn update_delta_memory_for_latest_run(
+pub fn update_delta_memory_for_latest_run(
     sqlite_path: &str,
-) -> Result<Option<DeltaReport>, TianJiError> {
+    mark_alerted: bool,
+) -> Result<RunDeltaUpdate, TianJiError> {
     let current_run_id = get_latest_run_id(sqlite_path)?.ok_or_else(|| {
         TianJiError::Usage("No persisted run exists after persistence completed.".to_string())
     })?;
@@ -191,6 +199,7 @@ fn update_delta_memory_for_latest_run(
     };
 
     let delta = compute_delta(&current, previous.as_ref());
+    let alert_tier = delta.as_ref().and_then(classify_delta_tier);
     let mut memory = if previous.is_some() {
         HotMemory::load(&delta_memory_path(sqlite_path))
     } else {
@@ -204,8 +213,29 @@ fn update_delta_memory_for_latest_run(
             .and_then(|value| value.as_str())
             .unwrap_or(""),
     );
+    let generated_at = current
+        .get("generated_at")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if mark_alerted && alert_tier.is_some() {
+        delta
+            .as_ref()
+            .map(|report| {
+                memory.mark_delta_signals_alerted_at_timestamp(
+                    report,
+                    &AlertDecayModel::default(),
+                    generated_at,
+                )
+            })
+            .unwrap_or(false);
+    }
     memory.save_atomic(&delta_memory_path(sqlite_path))?;
-    Ok(delta)
+    Ok(RunDeltaUpdate { delta, alert_tier })
+}
+
+pub struct RunDeltaUpdate {
+    pub delta: Option<DeltaReport>,
+    pub alert_tier: Option<AlertTier>,
 }
 
 pub fn delta_memory_path(sqlite_path: &str) -> std::path::PathBuf {
@@ -950,6 +980,74 @@ mod tests {
 
         let memory_path = delta_memory_path(&db_path);
         let _ = std::fs::remove_dir_all(memory_path.parent().expect("memory parent"));
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn run_fixture_path_can_mark_delta_alerts_during_hot_memory_update() {
+        let db_path = temp_sqlite_path();
+        let fixture_path = format!("/tmp/tianji_changed_feed_{}.xml", db_path.replace('/', "_"));
+        std::fs::write(
+            &fixture_path,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>TianJi Changed Feed</title>
+    <item>
+      <title>Iran and Israel exchange missile warnings as diplomats push for talks</title>
+      <link>https://example.com/iran-israel-warnings</link>
+      <description>Officials in Tehran and Jerusalem traded missile warnings while European diplomats sought an emergency negotiation channel.</description>
+      <pubDate>Sun, 22 Mar 2026 07:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>China expands chip controls after new AI export dispute with the United States</title>
+      <link>https://example.com/china-chip-controls</link>
+      <description>Beijing announced additional chip-related trade measures after a fresh AI and cyber dispute with Washington.</description>
+      <pubDate>Sun, 22 Mar 2026 08:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>NATO reviews troop readiness after Russia strike near Ukraine logistics corridor</title>
+      <link>https://example.com/nato-ukraine-readiness</link>
+      <description>NATO officials reviewed troop readiness after a reported strike near a logistics corridor supporting Ukraine.</description>
+      <pubDate>Sun, 22 Mar 2026 09:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>EU opens cyber negotiation channel after AI dispute</title>
+      <link>https://example.com/eu-cyber-channel</link>
+      <description>European diplomats opened a new cyber and AI negotiation channel after sanctions concerns.</description>
+      <pubDate>Sun, 22 Mar 2026 10:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
+"#,
+        )
+        .expect("write changed fixture");
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
+        let _ = run_fixture_path_with_alert_marking(&fixture_path, Some(&db_path), true)
+            .expect("run 2");
+
+        let memory_path = delta_memory_path(&db_path);
+        let memory = HotMemory::load(&memory_path);
+        let latest_delta = memory.runs[0].delta.as_ref().expect("latest delta");
+
+        assert!(latest_delta.summary.total_changes > 0);
+        assert!(!memory.alerted_signals.is_empty());
+        let marked_delta_key = latest_delta
+            .numeric_deltas
+            .iter()
+            .any(|item| memory.alerted_signals.contains_key(&item.key))
+            || latest_delta
+                .count_deltas
+                .iter()
+                .any(|item| memory.alerted_signals.contains_key(&item.key))
+            || latest_delta
+                .new_signals
+                .iter()
+                .any(|item| memory.alerted_signals.contains_key(&item.key));
+        assert!(marked_delta_key);
+
+        let _ = std::fs::remove_dir_all(memory_path.parent().expect("memory parent"));
+        let _ = std::fs::remove_file(&fixture_path);
         cleanup_db(&db_path);
     }
 

@@ -190,6 +190,12 @@ Hot-memory path:
 - `run_fixture_path` returns the computed `DeltaReport` and `AlertTier` in `RunResult`.
   CLI artifact output must serialize `RunResult.artifact`, preserving the shipped run JSON.
 - Daemon successful job status includes `delta_tier` and `delta_summary` fields.
+- Daemon persisted runs use `run_fixture_path_with_alert_marking(..., true)` so the same
+  hot-memory load/update/save cycle both pushes the latest compact run and marks emitted
+  delta signal keys as alerted. Do not reload and resave hot memory in the daemon worker
+  solely to call `mark_alerted`.
+- Alert marking in the daemon persistence path must use the persisted run `generated_at`
+  timestamp, not wall-clock time, matching stale-signal pruning determinism.
 - `GET /api/v1/delta/latest` loads hot memory for the SQLite path, returns the newest run's
   delta plus `classify_delta_tier(delta)`, and returns `null` fields when no delta exists.
 - `DeltaConfig.numeric_thresholds` uses `f64` values because numeric thresholds are percentages.
@@ -225,6 +231,8 @@ Hot-memory path:
 - Regression-test reused temp DB names reset stale hot memory on first run.
 - Integration-test `RunResult` includes delta and alert tier for persisted run pairs.
 - Test daemon job status includes `delta_tier` and `delta_summary` after a successful run.
+- Regression-test daemon-style persisted runs can mark delta signal keys as alerted during
+  the hot-memory update path without a second load/save cycle.
 - Test `GET /api/v1/delta/latest` returns latest delta/tier and handles no-delta cases.
 - Run `cargo fmt --check`, `cargo test`, and `cargo clippy -- -D warnings` after changes.
 
@@ -242,6 +250,23 @@ memory.prune_stale_signals(&AlertDecayModel::default());
 ```rust
 // Use persisted run time as the deterministic pruning reference.
 memory.prune_stale_signals_at_timestamp(&AlertDecayModel::default(), generated_at);
+```
+
+#### Wrong
+
+```rust
+// Daemon worker path: this reloads and saves the hot-memory file a second time
+// after `run_fixture_path` already updated it.
+let result = run_fixture_path(fixture_path, Some(sqlite_path))?;
+mark_delta_signals_alerted(sqlite_path, &result)?;
+```
+
+#### Correct
+
+```rust
+// Daemon worker path: update compact run data, delta, alert tier, pruning, and
+// alerted-signal markers in one hot-memory update/save cycle.
+let result = run_fixture_path_with_alert_marking(fixture_path, Some(sqlite_path), true)?;
 ```
 
 ### Milestone 4 — TUI (ratatui + Kanagawa Dark)

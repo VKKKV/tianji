@@ -194,6 +194,17 @@ impl HotMemory {
         now_unix_secs.saturating_sub(last_alerted) < cooldown_secs
     }
 
+    pub fn is_signal_suppressed_at_timestamp(
+        &self,
+        signal_key: &str,
+        decay: &AlertDecayModel,
+        timestamp: &str,
+    ) -> bool {
+        parse_rfc3339_utc_seconds(timestamp)
+            .map(|now_unix_secs| self.is_signal_suppressed_at(signal_key, decay, now_unix_secs))
+            .unwrap_or(false)
+    }
+
     pub fn mark_alerted(&mut self, signal_key: &str) {
         self.mark_alerted_at(signal_key, &unix_now().to_string());
     }
@@ -235,6 +246,30 @@ impl HotMemory {
             self.prune_stale_signals_at(decay, now_unix_secs);
         }
     }
+
+    pub fn mark_delta_signals_alerted_at_timestamp(
+        &mut self,
+        delta: &DeltaReport,
+        decay: &AlertDecayModel,
+        timestamp: &str,
+    ) -> bool {
+        let mut marked_any = false;
+        for signal_key in delta_signal_keys(delta) {
+            if !self.is_signal_suppressed_at_timestamp(&signal_key, decay, timestamp) {
+                self.mark_alerted_at(&signal_key, timestamp);
+                marked_any = true;
+            }
+        }
+        marked_any
+    }
+}
+
+fn delta_signal_keys(delta: &DeltaReport) -> Vec<String> {
+    let mut keys = Vec::new();
+    keys.extend(delta.numeric_deltas.iter().map(|item| item.key.clone()));
+    keys.extend(delta.count_deltas.iter().map(|item| item.key.clone()));
+    keys.extend(delta.new_signals.iter().map(|item| item.key.clone()));
+    keys
 }
 
 pub fn classify_delta_tier(delta: &DeltaReport) -> Option<AlertTier> {
@@ -482,6 +517,68 @@ mod tests {
         memory.prune_stale_signals_at_timestamp(&decay, "1970-01-02T01:00:00+00:00");
 
         assert!(!memory.alerted_signals.contains_key("event:old"));
+    }
+
+    #[test]
+    fn hot_memory_marks_delta_signals_with_injected_timestamp_and_suppression() {
+        let mut memory = HotMemory::default();
+        let decay = AlertDecayModel::default();
+        let delta = DeltaReport {
+            timestamp: "1970-01-01T00:00:00+00:00".to_string(),
+            previous_timestamp: None,
+            numeric_deltas: vec![crate::delta::NumericDelta {
+                key: "top_impact_score".to_string(),
+                label: "Top Impact Score".to_string(),
+                from: 1.0,
+                to: 2.0,
+                pct_change: 100.0,
+                direction: crate::delta::DeltaDirection::Escalated,
+                severity: crate::delta::Severity::Moderate,
+            }],
+            count_deltas: Vec::new(),
+            new_signals: vec![crate::delta::NewSignal {
+                key: "event:abc".to_string(),
+                label: "abc".to_string(),
+                reason: "new event".to_string(),
+                severity: crate::delta::Severity::Moderate,
+            }],
+            summary: crate::delta::DeltaSummary {
+                total_changes: 2,
+                critical_changes: 0,
+                direction: crate::delta::RiskDirection::Mixed,
+                signal_breakdown: crate::delta::SignalBreakdown {
+                    new_count: 1,
+                    escalated_count: 1,
+                    deescalated_count: 0,
+                    unchanged_count: 0,
+                },
+            },
+        };
+
+        assert!(memory.mark_delta_signals_alerted_at_timestamp(
+            &delta,
+            &decay,
+            "1970-01-01T00:00:00+00:00"
+        ));
+        assert_eq!(memory.alerted_signals["top_impact_score"].count, 1);
+        assert_eq!(
+            memory.alerted_signals["event:abc"].last_alerted,
+            "1970-01-01T00:00:00+00:00"
+        );
+
+        assert!(memory.mark_delta_signals_alerted_at_timestamp(
+            &delta,
+            &decay,
+            "1970-01-01T00:00:01+00:00"
+        ));
+        assert_eq!(memory.alerted_signals["top_impact_score"].count, 2);
+
+        assert!(!memory.mark_delta_signals_alerted_at_timestamp(
+            &delta,
+            &decay,
+            "1970-01-01T00:00:02+00:00"
+        ));
+        assert_eq!(memory.alerted_signals["top_impact_score"].count, 2);
     }
 
     #[test]

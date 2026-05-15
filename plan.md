@@ -726,9 +726,9 @@ lto = true
 
 ## 12. 开发阶段
 
-**当前状态 (2026-05-14):** M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成,
+**当前状态 (2026-05-15):** M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成,
 Crucix Delta Engine daemon auto-delta / AlertTier surfacing 完成并已接入 persisted run hot-memory 更新路径、daemon job status 与 read API, M3C schedule 完成。
-Python oracle 保留至 M6 退役。106 个 Rust 测试通过。
+M3.5 housekeeping 已合并 daemon hot-memory update 与 mark-alerted 写入路径。Python oracle 保留至 M6 退役。108 个 Rust 测试通过。
 
 ### Phase 1: Worldline 核心 + 管线
 
@@ -811,7 +811,7 @@ Python oracle 保留至 M6 退役。106 个 Rust 测试通过。
 - `RunResult { artifact, delta, alert_tier }`: persisted run 返回 delta 与 AlertTier，同时 CLI artifact 输出继续序列化原 `RunArtifact` 以保持兼容
 - CLI `tianji delta` 子命令 (手动指定 run pair 或 --latest-pair)，输出包含 `alert_tier`
 - `run_fixture_path(..., Some(sqlite_path))` 在成功持久化后更新 `<db-stem>.memory/hot.json`
-- Daemon worker loop 成功运行后自动计算 delta + AlertTier，并在 job status 中暴露 `delta_tier` 与 `delta_summary`
+- Daemon worker loop 成功运行后自动计算 delta + AlertTier，使用同一次 hot-memory update 写入标记 alerted signals，并在 job status 中暴露 `delta_tier` 与 `delta_summary`
 - Read API 新增 `GET /api/v1/delta/latest?sqlite_path=<path>`，返回 latest delta 与 `classify_delta_tier(delta)`；无 delta 时返回 null 字段
 - `DeltaConfig.numeric_thresholds` 使用 `f64`，匹配百分比阈值语义
 - 共享 `collect_string_array` utility，统一 scored-event 的 actors / regions / keywords 提取，避免重复解析逻辑
@@ -821,7 +821,6 @@ Python oracle 保留至 M6 退役。106 个 Rust 测试通过。
 - 外部通知投递: Telegram/Discord/webhook 等推送按需实现
 - Cold archive rotation / 冷归档策略
 - Hot memory 剪枝策略的 cron/daemon 自动触发（housekeeping 延后）
-- Housekeeping 优化: 合并 daemon hot-memory update 与 mark-alerted 写入路径，减少额外 hot-memory I/O；这是 housekeeping 优化，不是当前 correctness bug。
 
 #### 已知问题 (2026-05-14 Code Review)
 

@@ -5,11 +5,11 @@ use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
 
-use crate::delta_memory_path;
 use crate::get_latest_run_id;
 use crate::run_fixture_path;
+use crate::run_fixture_path_with_alert_marking;
 use crate::TianJiError;
-use crate::{AlertDecayModel, AlertTier, DeltaReport, DeltaSummary, HotMemory, RunResult};
+use crate::{AlertTier, DeltaReport, DeltaSummary, RunResult};
 
 pub const ALLOWED_JOB_STATES: [&str; 4] = ["queued", "running", "succeeded", "failed"];
 pub const LOOPBACK_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
@@ -452,14 +452,6 @@ pub fn worker_loop(state: &Arc<DaemonState>) {
                 } else {
                     None
                 };
-                if let (Some(run_result), Some(sqlite_path)) =
-                    (&result, &record.request.sqlite_path)
-                {
-                    if let Err(error) = mark_delta_signals_alerted(sqlite_path, run_result) {
-                        state.set_job_failed(&record.job_id, error.to_string());
-                        continue;
-                    }
-                }
                 let (delta, alert_tier) = result
                     .map(|run_result| (run_result.delta, run_result.alert_tier))
                     .unwrap_or((None, None));
@@ -477,46 +469,13 @@ fn run_pipeline_for_job(request: &RunJobRequest) -> Result<Option<RunResult>, Ti
     // Currently only fixture mode is supported in Rust
     let mut latest_result = None;
     for fixture_path in &request.fixture_paths {
-        latest_result = Some(run_fixture_path(
-            fixture_path,
-            request.sqlite_path.as_deref(),
-        )?);
+        latest_result = Some(if request.sqlite_path.is_some() {
+            run_fixture_path_with_alert_marking(fixture_path, request.sqlite_path.as_deref(), true)?
+        } else {
+            run_fixture_path(fixture_path, None)?
+        });
     }
     Ok(latest_result)
-}
-
-fn mark_delta_signals_alerted(sqlite_path: &str, result: &RunResult) -> Result<(), TianJiError> {
-    let Some(delta) = result.delta.as_ref() else {
-        return Ok(());
-    };
-    if result.alert_tier.is_none() {
-        return Ok(());
-    }
-
-    let memory_path = delta_memory_path(sqlite_path);
-    let mut memory = HotMemory::load(&memory_path);
-    let decay = AlertDecayModel::default();
-    let mut marked_any = false;
-
-    for signal_key in delta_signal_keys(delta) {
-        if !memory.is_signal_suppressed(&signal_key, &decay) {
-            memory.mark_alerted(&signal_key);
-            marked_any = true;
-        }
-    }
-
-    if marked_any {
-        memory.save_atomic(&memory_path)?;
-    }
-    Ok(())
-}
-
-fn delta_signal_keys(delta: &DeltaReport) -> Vec<String> {
-    let mut keys = Vec::new();
-    keys.extend(delta.numeric_deltas.iter().map(|item| item.key.clone()));
-    keys.extend(delta.count_deltas.iter().map(|item| item.key.clone()));
-    keys.extend(delta.new_signals.iter().map(|item| item.key.clone()));
-    keys
 }
 
 // ---------------------------------------------------------------------------
