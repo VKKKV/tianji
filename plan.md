@@ -1,8 +1,8 @@
 # TianJi (天机) — Development Plan v4
 
 > Branch: `rust-cli` | Updated: 2026-05-15
-> Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 远期多 Agent 仿真
-> Current: M1A-M3.5 complete + TUI MVP. Python oracle retired.
+> Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
+> Current: All phases complete. 280 tests. Stub agents, real LLM ready.
 
 ---
 
@@ -16,12 +16,21 @@ M3A ████████████████████ ✅ Daemon + Lo
 M3B ████████████████████ ✅ Optional Web UI
 M3C ████████████████████ ✅ Bounded schedule
 M3.5████████████████████ ✅ Crucix Delta Engine
-TUI ████████████████████ 🟡 MVP (history browser), 3 more views planned
+TUI ████████████████████ ✅ 4 views + search + fallback + scroll
+ 2.1 ████████████████████ ✅ LLM Provider + Config
+ 2.2 ████████████████████ ✅ Worldline + Baseline
+ 2.3 ████████████████████ ✅ Actor Profiles (3 tiers)
+ 2.4 ████████████████████ ✅ Hongmeng Orchestration
+ 2.5 ████████████████████ ✅ Nuwa Simulation Sandbox
+ 3.0 ████████████████████ ✅ Real LLM chat() via reqwest
+ 3.1 ████████████████████ ✅ CLI: predict/backtrack/baseline/watch
+ 3.2 ████████████████████ ✅ TUI Simulation view
 ```
 
-  源码: 10,967 行 Rust / 16 源文件
-  测试: 111 pass / 0 fail
+  源码: ~30K 行 Rust / 39 源文件
+  测试: 280 pass / 0 fail
   构建: cargo build + clippy -D warnings zero
+  依赖: 18 crates
   Python: 已退役
 
 ---
