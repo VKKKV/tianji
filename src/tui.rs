@@ -407,10 +407,14 @@ pub struct TuiState {
     sqlite_path: Option<String>,
     selected: usize,
     pending_g: bool,
+    pub search_query: String,
+    pub search_active: bool,
+    all_rows: Vec<HistoryRow>,
 }
 
 impl TuiState {
     pub fn new(rows: Vec<HistoryRow>, dashboard: DashboardState) -> Self {
+        let all_rows = rows.clone();
         Self {
             rows,
             dashboard,
@@ -421,6 +425,9 @@ impl TuiState {
             sqlite_path: None,
             selected: 0,
             pending_g: false,
+            search_query: String::new(),
+            search_active: false,
+            all_rows,
         }
     }
 
@@ -432,6 +439,26 @@ impl TuiState {
         let mut state = Self::new(rows, dashboard);
         state.sqlite_path = Some(sqlite_path.into());
         state
+    }
+
+    pub fn apply_search(&mut self) {
+        if self.search_query.is_empty() {
+            self.rows = self.all_rows.clone();
+        } else {
+            let q = self.search_query.to_lowercase();
+            self.rows = self
+                .all_rows
+                .iter()
+                .filter(|row| {
+                    row.dominant_field.to_lowercase().contains(&q)
+                        || row.headline.to_lowercase().contains(&q)
+                        || row.risk_level.to_lowercase().contains(&q)
+                })
+                .cloned()
+                .collect();
+        }
+        self.selected = 0;
+        self.search_active = false;
     }
 
     pub fn selected(&self) -> usize {
@@ -640,6 +667,29 @@ impl TerminalSession {
 }
 
 fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
+    // When search is active, intercept all keys for search input
+    if state.search_active {
+        match code {
+            KeyCode::Esc => {
+                state.search_active = false;
+                state.search_query.clear();
+                state.rows = state.all_rows.clone();
+                state.selected = 0;
+            }
+            KeyCode::Enter => {
+                state.apply_search();
+            }
+            KeyCode::Backspace => {
+                state.search_query.pop();
+            }
+            KeyCode::Char(c) => {
+                state.search_query.push(c);
+            }
+            _ => {}
+        }
+        return true;
+    }
+
     match code {
         KeyCode::Char('q') => false,
         KeyCode::Esc => {
@@ -711,6 +761,11 @@ fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
             }
             true
         }
+        KeyCode::Char('/') if state.view == TuiView::History => {
+            state.search_active = true;
+            state.search_query.clear();
+            true
+        }
         _ => {
             state.pending_g = false;
             true
@@ -771,6 +826,8 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
             Span::raw(" move  "),
             Span::styled("[gg/G]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" first/last  "),
+            Span::styled("[/]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" search  "),
         ]);
     } else if matches!(state.view, TuiView::Detail | TuiView::Compare) {
         spans.extend(vec![
@@ -789,6 +846,16 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
 }
 
 fn render_history(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: &TuiState) {
+    let (list_area, search_area) = if state.search_active {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(1)])
+            .split(area);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (area, None)
+    };
+
     let list_items: Vec<ListItem<'_>> = state
         .rows
         .iter()
@@ -809,13 +876,31 @@ fn render_history(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: &Tu
         )
         .highlight_symbol("> ");
     let mut list_state = state.list_state();
-    frame.render_stateful_widget(list, area, &mut list_state);
+    frame.render_stateful_widget(list, list_area, &mut list_state);
+
+    if let Some(search_area) = search_area {
+        let search_bar = Paragraph::new(Line::from(vec![
+            Span::styled("/ ", Style::default().fg(KANAGAWA.fg)),
+            Span::styled(
+                state.search_query.clone(),
+                Style::default().fg(KANAGAWA.fg),
+            ),
+            Span::styled("▊", Style::default().fg(KANAGAWA.label)),
+        ]))
+        .style(base_style().bg(KANAGAWA.panel_bg));
+        frame.render_widget(search_bar, search_area);
+    }
 }
 
 fn history_title(state: &TuiState) -> String {
+    let filter_indicator = if state.rows.len() < state.all_rows.len() {
+        format!(" [{}/{}]", state.rows.len(), state.all_rows.len())
+    } else {
+        String::new()
+    };
     match state.staged_left_run_id {
-        Some(run_id) => format!(" Run History · staged left #{run_id} "),
-        None => " Run History ".to_string(),
+        Some(run_id) => format!(" Run History · staged left #{run_id}{filter_indicator} "),
+        None => format!(" Run History{filter_indicator} "),
     }
 }
 
@@ -1507,6 +1592,15 @@ fn title_line(state: &TuiState) -> Line<'static> {
         TuiView::Detail => "detail",
         TuiView::Compare => "compare",
     };
+    let count_text = if state.rows.len() < state.all_rows.len() {
+        format!(
+            "· {}/{} persisted runs ",
+            state.rows.len(),
+            state.all_rows.len()
+        )
+    } else {
+        format!("· {} persisted runs ", state.all_rows.len())
+    };
     Line::from(vec![
         Span::styled(
             " tianji ",
@@ -1515,10 +1609,7 @@ fn title_line(state: &TuiState) -> Line<'static> {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!("· {view} "), Style::default().fg(KANAGAWA.label)),
-        Span::styled(
-            format!("· {} persisted runs ", state.rows.len()),
-            Style::default().fg(KANAGAWA.value),
-        ),
+        Span::styled(count_text, Style::default().fg(KANAGAWA.value)),
     ])
 }
 
@@ -2181,5 +2272,303 @@ mod tests {
         assert!(compare.status.contains("could not"));
         assert!(format_compare(&compare).contains("No diff available."));
         assert!(!Path::new(&db_path).exists());
+    }
+
+    #[test]
+    fn search_filter_matches_dominant_field() {
+        let rows = vec![
+            HistoryRow {
+                run_id: 1,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "conflict".to_string(),
+                risk_level: "high".to_string(),
+                top_divergence_score: None,
+                headline: "event A".to_string(),
+            },
+            HistoryRow {
+                run_id: 2,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "diplomacy".to_string(),
+                risk_level: "low".to_string(),
+                top_divergence_score: None,
+                headline: "event B".to_string(),
+            },
+            HistoryRow {
+                run_id: 3,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "technology".to_string(),
+                risk_level: "medium".to_string(),
+                top_divergence_score: None,
+                headline: "event C".to_string(),
+            },
+        ];
+        let mut state = history_state(rows);
+        state.search_query = "conflict".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 1);
+        assert_eq!(state.rows[0].run_id, 1);
+    }
+
+    #[test]
+    fn search_filter_matches_headline_case_insensitive() {
+        let rows = vec![
+            HistoryRow {
+                run_id: 1,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "conflict".to_string(),
+                risk_level: "high".to_string(),
+                top_divergence_score: None,
+                headline: "Nuclear Talks Resume".to_string(),
+            },
+            HistoryRow {
+                run_id: 2,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "diplomacy".to_string(),
+                risk_level: "low".to_string(),
+                top_divergence_score: None,
+                headline: "Trade deal signed".to_string(),
+            },
+        ];
+        let mut state = history_state(rows);
+        state.search_query = "nuclear talks".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 1);
+        assert_eq!(state.rows[0].run_id, 1);
+    }
+
+    #[test]
+    fn search_filter_matches_risk_level() {
+        let rows = vec![
+            HistoryRow {
+                run_id: 1,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "conflict".to_string(),
+                risk_level: "critical".to_string(),
+                top_divergence_score: None,
+                headline: "event A".to_string(),
+            },
+            HistoryRow {
+                run_id: 2,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "diplomacy".to_string(),
+                risk_level: "low".to_string(),
+                top_divergence_score: None,
+                headline: "event B".to_string(),
+            },
+        ];
+        let mut state = history_state(rows);
+        state.search_query = "critical".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 1);
+        assert_eq!(state.rows[0].run_id, 1);
+    }
+
+    #[test]
+    fn search_empty_query_restores_full_list() {
+        let rows = vec![row(1), row(2), row(3)];
+        let mut state = history_state(rows);
+        state.search_query = "nonexistent".to_string();
+        state.apply_search();
+        assert!(state.rows.len() < state.all_rows.len());
+
+        state.search_query.clear();
+        state.apply_search();
+        assert_eq!(state.rows.len(), state.all_rows.len());
+    }
+
+    #[test]
+    fn search_no_matches_shows_empty_list() {
+        let rows = vec![row(1), row(2)];
+        let mut state = history_state(rows);
+        state.search_query = "xyznonexistent".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 0);
+        assert_eq!(state.all_rows.len(), 2);
+    }
+
+    #[test]
+    fn search_does_not_mutate_all_rows() {
+        let rows = vec![row(1), row(2), row(3)];
+        let mut state = history_state(rows);
+        let original_count = state.all_rows.len();
+        state.search_query = "nonexistent".to_string();
+        state.apply_search();
+        assert_eq!(state.all_rows.len(), original_count);
+        // Restore by clearing search
+        state.search_query.clear();
+        state.apply_search();
+        assert_eq!(state.rows.len(), original_count);
+    }
+
+    #[test]
+    fn search_case_insensitive_matching() {
+        let rows = vec![HistoryRow {
+            run_id: 1,
+            generated_at: String::new(),
+            mode: String::new(),
+            dominant_field: "Conflict".to_string(),
+            risk_level: "HIGH".to_string(),
+            top_divergence_score: None,
+            headline: "Major Event".to_string(),
+        }];
+        let mut state = history_state(rows);
+        state.search_query = "conflict".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 1);
+
+        state.search_query = "high".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 1);
+
+        state.search_query = "major event".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 1);
+    }
+
+    #[test]
+    fn search_navigation_works_on_filtered_subset() {
+        let rows = vec![
+            HistoryRow {
+                run_id: 1,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "conflict".to_string(),
+                risk_level: "high".to_string(),
+                top_divergence_score: None,
+                headline: "event A".to_string(),
+            },
+            HistoryRow {
+                run_id: 2,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "diplomacy".to_string(),
+                risk_level: "low".to_string(),
+                top_divergence_score: None,
+                headline: "event B".to_string(),
+            },
+            HistoryRow {
+                run_id: 3,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "conflict".to_string(),
+                risk_level: "critical".to_string(),
+                top_divergence_score: None,
+                headline: "event C".to_string(),
+            },
+        ];
+        let mut state = history_state(rows);
+        state.search_query = "conflict".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 2);
+        assert_eq!(state.selected(), 0);
+
+        state.select_next();
+        assert_eq!(state.selected(), 1);
+        assert_eq!(state.rows[1].run_id, 3);
+
+        state.select_next();
+        assert_eq!(state.selected(), 1); // clamped to filtered subset
+
+        state.select_first();
+        assert_eq!(state.selected(), 0);
+        state.select_last();
+        assert_eq!(state.selected(), 1);
+    }
+
+    #[test]
+    fn key_handler_slash_activates_search_in_history() {
+        let mut state = history_state(vec![row(1), row(2)]);
+        assert!(!state.search_active);
+        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
+        assert!(state.search_active);
+        assert!(state.search_query.is_empty());
+    }
+
+    #[test]
+    fn key_handler_search_type_and_submit() {
+        let mut state = history_state(vec![row(1), row(2)]);
+        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
+        assert!(handle_key_code(&mut state, KeyCode::Char('t')));
+        assert!(handle_key_code(&mut state, KeyCode::Char('e')));
+        assert!(handle_key_code(&mut state, KeyCode::Char('c')));
+        assert!(handle_key_code(&mut state, KeyCode::Char('h')));
+        assert_eq!(state.search_query, "tech");
+        assert!(state.search_active);
+        assert!(handle_key_code(&mut state, KeyCode::Enter));
+        assert!(!state.search_active);
+        // row() has dominant_field = "technology", so "tech" should match
+        assert!(!state.rows.is_empty());
+    }
+
+    #[test]
+    fn key_handler_esc_clears_search_and_restores() {
+        let mut state = history_state(vec![row(1), row(2)]);
+        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
+        assert!(handle_key_code(&mut state, KeyCode::Char('z')));
+        assert!(handle_key_code(&mut state, KeyCode::Esc));
+        assert!(!state.search_active);
+        assert!(state.search_query.is_empty());
+        assert_eq!(state.rows.len(), state.all_rows.len());
+    }
+
+    #[test]
+    fn key_handler_backspace_in_search() {
+        let mut state = history_state(vec![row(1), row(2)]);
+        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
+        assert!(handle_key_code(&mut state, KeyCode::Char('a')));
+        assert!(handle_key_code(&mut state, KeyCode::Char('b')));
+        assert_eq!(state.search_query, "ab");
+        assert!(handle_key_code(&mut state, KeyCode::Backspace));
+        assert_eq!(state.search_query, "a");
+    }
+
+    #[test]
+    fn key_handler_search_blocks_quit_when_active() {
+        let mut state = history_state(vec![row(1)]);
+        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
+        // 'q' should add to search query, not quit
+        assert!(handle_key_code(&mut state, KeyCode::Char('q')));
+        assert_eq!(state.search_query, "q");
+        assert!(state.search_active);
+    }
+
+    #[test]
+    fn history_title_shows_filtered_count() {
+        let rows = vec![
+            HistoryRow {
+                run_id: 1,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "conflict".to_string(),
+                risk_level: "high".to_string(),
+                top_divergence_score: None,
+                headline: "event A".to_string(),
+            },
+            HistoryRow {
+                run_id: 2,
+                generated_at: String::new(),
+                mode: String::new(),
+                dominant_field: "diplomacy".to_string(),
+                risk_level: "low".to_string(),
+                top_divergence_score: None,
+                headline: "event B".to_string(),
+            },
+        ];
+        let mut state = history_state(rows);
+        assert_eq!(history_title(&state), " Run History ");
+
+        state.search_query = "conflict".to_string();
+        state.apply_search();
+        assert_eq!(state.rows.len(), 1);
+        assert_eq!(state.all_rows.len(), 2);
+        let title = history_title(&state);
+        assert!(title.contains("[1/2]"));
     }
 }
