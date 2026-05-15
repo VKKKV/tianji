@@ -9,6 +9,7 @@ pub mod hongmeng;
 pub mod llm;
 pub mod models;
 pub mod normalize;
+pub mod nuwa;
 pub mod profile;
 pub mod scoring;
 pub mod storage;
