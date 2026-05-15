@@ -461,17 +461,29 @@ Read dependencies:
 ```rust
 list_runs(sqlite_path, limit, &RunListFilters::default())
 HotMemory::load(&delta_memory_path(sqlite_path))
+get_latest_run_id(sqlite_path)
+get_run_summary(
+    sqlite_path,
+    latest_run_id,
+    &ScoredEventFilters::default(),
+    false,
+    &EventGroupFilters::default(),
+)
 ```
 
 ### 3. Contracts
 
 - The TUI remains read-only and must not write SQLite, queue daemon jobs, call daemon IPC, fetch feeds, or start simulations.
-- The dashboard uses the newest persisted history row for latest run identity, generated time, mode, dominant field, risk level, top divergence score, and headline.
-- The dashboard uses the newest hot-memory run delta, when available, for alert tier, delta summary, and risk direction.
-- Missing run/delta/worldline data renders stable placeholder text instead of panicking or inventing future state.
-- Dashboard/worldline/baseline fields must be conservative placeholders until the proper worldline/baseline backend contracts exist.
-- Operators can switch views without leaving the TUI: dashboard keys (`d`, `D`, `1`) and history keys (`h`, `H`, `2`).
-- Existing history list navigation (`j`, `k`, Up, Down, `gg`, `G`, Home, End) applies only while the history view is active.
+- The dashboard loads the latest run summary via `get_latest_run_id` + `get_run_summary` in addition to history rows and hot-memory delta.
+- `DashboardState` fields:
+  - Run metadata: `latest_run_id`, `latest_generated_at`, `latest_mode`, `headline` (from scenario_summary if run summary available, else from history row).
+  - Field breakdown: `field_summary: Vec<FieldStat>` (grouped by `dominant_field`, count + avg `impact_score`, sorted by count desc), `total_scored_events: usize`.
+  - Top events: `top_events: Vec<TopEvent>` (top 5 by `impact_score` desc, each with `title`, `impact_score`, `dominant_field`).
+  - Delta: `alert_tier`, `delta_summary`, `delta_direction` (from hot memory, unchanged).
+  - Removed fields: `dominant_field`, `risk_level`, `top_divergence_score`, `baseline_status`, `worldline_status` (field/risk shown in metadata line; baseline/worldline deferred).
+- When no run summary is available (no SQLite, no runs), `field_summary` and `top_events` are empty, `total_scored_events` is 0.
+- The dashboard renders styled `Span`s with Kanagawa colors (field labels blue, impact green>10/yellow>5, alert tier peach/yellow/default).
+- `format_dashboard` (CLI text output) mirrors the same sections in plain text for non-TUI use.
 
 ### 4. Validation & Error Matrix
 
@@ -480,22 +492,25 @@ HotMemory::load(&delta_memory_path(sqlite_path))
 | SQLite path does not exist | Return the existing empty-state message before launching the terminal |
 | SQLite exists but has no persisted runs | Return the existing empty-state message before launching the terminal |
 | Hot-memory file is missing/corrupt | Render dashboard delta placeholders via `HotMemory::default()` behavior |
+| Run summary query fails or returns None | Render dashboard with empty field_summary/top_events |
 | User presses dashboard selector | Switch to dashboard view without changing selected history row |
 | User presses history selector | Switch to history view without resetting selected history row |
 | User presses history navigation while dashboard is active | Keep selection unchanged |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `tianji tui --sqlite-path runs/tianji.sqlite3` opens on a dashboard showing latest run triage plus recent delta information and can switch to history with `h`.
-- Base: a database with persisted runs but no hot-memory delta shows latest run fields and a stable "No recent delta available." placeholder.
+- Good: `tianji tui --sqlite-path runs/tianji.sqlite3` opens on a dashboard showing latest run metadata, field breakdown with per-field counts/avg impact, top 5 scored events, and recent delta information; can switch to history with `h`.
+- Base: a database with persisted runs but no hot-memory delta shows latest run fields, field summary, top events, and a stable "No recent delta available." placeholder.
 - Bad: showing fabricated baseline/worldline numbers before worldline storage exists, or adding daemon/write controls to the dashboard.
 
 ### 6. Tests Required
 
-- Unit-test dashboard mapping from history rows and default hot memory.
+- Unit-test dashboard mapping from history rows, default hot memory, and run summary JSON.
 - Unit-test dashboard mapping from hot-memory delta summary and alert tier.
-- Unit-test dashboard formatting includes latest run, delta, and deferred-worldline placeholder sections.
+- Unit-test FieldStat and TopEvent extraction from scored_events JSON.
+- Unit-test dashboard formatting includes latest run, field summary, top events, and delta sections.
 - Unit-test view switching keys and verify history navigation is inactive while dashboard is active.
+- Unit-test empty dashboard with no run summary shows zero fields/events.
 - Re-run existing history row/key handling tests to ensure history behavior remains intact.
 - Run `cargo fmt --check`, `cargo test`, and `cargo clippy -- -D warnings` after TUI changes.
 
@@ -511,8 +526,10 @@ let baseline = format!("run #{}", latest_run_id - 41);
 #### Correct
 
 ```rust
-// Render a stable placeholder until the worldline/baseline backend contract exists.
-let baseline = "Baseline/worldline model unavailable in current persisted data.";
+// Field summary derived from actual scored_events data, not fabricated.
+let field_summary = extract_field_summary(&scored_events);
+// Top events from actual impact_score, capped at 5.
+let top_events = extract_top_events(&scored_events, 5);
 ```
 
 ## Rust TUI Detail Contract
