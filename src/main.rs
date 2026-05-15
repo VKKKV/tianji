@@ -1,12 +1,15 @@
 use std::os::unix::process::CommandExt;
 use std::process::ExitCode;
 
+use std::collections::BTreeMap;
+use std::str::FromStr;
+
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use tianji::{
-    artifact_json, classify_delta_tier, compare_runs, compute_delta, get_latest_run_id,
-    get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary, list_runs,
-    run_fixture_path,
+    artifact_json, classify_delta_tier, compare_runs, compute_delta, delta_memory_path,
+    get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary,
+    list_runs, run_fixture_path,
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     TianJiError,
 };
@@ -239,6 +242,69 @@ enum Cli {
         /// Compare the two latest persisted runs
         #[arg(long = "latest-pair")]
         latest_pair: bool,
+    },
+    /// Run forward simulation from current worldline state
+    Predict {
+        /// Target field in region.domain format (e.g. "east-asia.conflict")
+        #[arg(long)]
+        field: String,
+        /// Simulation horizon in ticks
+        #[arg(long, default_value_t = 30)]
+        horizon: u64,
+        /// Directory containing actor profile YAML files
+        #[arg(long, default_value = "profiles/")]
+        profile_dir: String,
+        /// Optional path to TianJi config YAML
+        #[arg(long)]
+        config: Option<String>,
+    },
+    /// Run backward constraint search for intervention paths
+    Backtrack {
+        /// Goal description for the backward search
+        #[arg(long)]
+        goal: String,
+        /// Field constraint in region.domain:min:max format (repeatable)
+        #[arg(long = "field-constraint", value_parser = parse_field_constraint)]
+        field_constraints: Vec<(tianji::worldline::types::FieldKey, f64, f64)>,
+        /// Maximum number of interventions per path
+        #[arg(long, default_value_t = 5)]
+        max_interventions: usize,
+        /// Directory containing actor profile YAML files
+        #[arg(long, default_value = "profiles/")]
+        profile_dir: String,
+        /// Optional path to TianJi config YAML
+        #[arg(long)]
+        config: Option<String>,
+    },
+    /// Manage worldline baseline for divergence tracking
+    Baseline {
+        /// Lock current worldline state as baseline
+        #[arg(long)]
+        set: bool,
+        /// Show current baseline info
+        #[arg(long)]
+        show: bool,
+        /// Remove the baseline
+        #[arg(long)]
+        clear: bool,
+        /// SQLite database path for locating hot-memory
+        #[arg(long)]
+        sqlite_path: Option<String>,
+    },
+    /// Daemon mode: poll feeds and run pipeline on new items
+    Watch {
+        /// RSS/Atom feed URL to watch
+        #[arg(long = "source-url")]
+        source_url: String,
+        /// Polling interval in seconds
+        #[arg(long, default_value_t = 300)]
+        interval: u64,
+        /// Optional SQLite database path for persisting run data
+        #[arg(long)]
+        sqlite_path: Option<String>,
+        /// Optional path to TianJi config YAML
+        #[arg(long)]
+        config: Option<String>,
     },
     /// Generate shell completion scripts
     Completions {
@@ -517,6 +583,248 @@ mod tests {
             .all(|call| call.2.as_deref() == Some("runs/test.sqlite3")));
         assert_eq!(sleep_calls, vec![std::time::Duration::from_secs(60)]);
     }
+
+    // -----------------------------------------------------------------------
+    // Predict / Backtrack / Baseline / Watch tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_field_constraint_valid() {
+        let result = parse_field_constraint("east-asia.conflict:0:0.5");
+        assert!(result.is_ok());
+        let (key, min, max) = result.unwrap();
+        assert_eq!(key.region, "east-asia");
+        assert_eq!(key.domain, "conflict");
+        assert!((min - 0.0).abs() < f64::EPSILON);
+        assert!((max - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_field_constraint_missing_colons() {
+        let result = parse_field_constraint("east-asia.conflict");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("region.domain:min:max"));
+    }
+
+    #[test]
+    fn parse_field_constraint_invalid_field_format() {
+        let result = parse_field_constraint("conflict:0:0.5");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("region.domain"));
+    }
+
+    #[test]
+    fn parse_field_constraint_invalid_min() {
+        let result = parse_field_constraint("east-asia.conflict:abc:0.5");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_field_constraint_min_greater_than_max() {
+        let result = parse_field_constraint("east-asia.conflict:1.0:0.5");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be greater than"));
+    }
+
+    #[test]
+    fn predict_output_is_valid_json_with_branches() {
+        let output =
+            handle_predict("global.conflict", 5, "profiles/", None).expect("predict output");
+        let value: Value = serde_json::from_str(&output).expect("json output");
+
+        assert!(value.get("mode").is_some());
+        assert!(value.get("branches").is_some());
+        let branches = value["branches"].as_array().expect("branches array");
+        assert!(!branches.is_empty());
+        assert!(value.get("tick_count").is_some());
+        assert!(value.get("convergence_reason").is_some());
+    }
+
+    #[test]
+    fn predict_rejects_invalid_field_format() {
+        let result = handle_predict("conflict", 5, "profiles/", None);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(TianJiError::Usage(msg)) if msg.contains("region.domain")));
+    }
+
+    #[test]
+    fn backtrack_output_is_valid_json_with_intervention_paths() {
+        let constraints = vec![(
+            tianji::worldline::types::FieldKey {
+                region: "global".to_string(),
+                domain: "conflict".to_string(),
+            },
+            0.0,
+            100.0,
+        )];
+        let output = handle_backtrack("keep conflict low", &constraints, 3, "profiles/", None)
+            .expect("backtrack output");
+        let value: Value = serde_json::from_str(&output).expect("json output");
+
+        assert!(value.get("mode").is_some());
+        assert!(value.get("intervention_paths").is_some());
+        let paths = value["intervention_paths"].as_array().expect("paths array");
+        assert!(!paths.is_empty());
+    }
+
+    #[test]
+    fn backtrack_rejects_empty_constraints() {
+        let result = handle_backtrack("test", &[], 3, "profiles/", None);
+        assert!(result.is_err());
+        assert!(matches!(result, Err(TianJiError::Usage(msg)) if msg.contains("field-constraint")));
+    }
+
+    #[test]
+    fn baseline_set_and_show_roundtrip() {
+        let db_path = temp_sqlite_path("baseline_set_show");
+        let _ = run(Cli::Run {
+            fixture: SAMPLE_FIXTURE.to_string(),
+            sqlite_path: Some(db_path.clone()),
+            show_delta: false,
+        })
+        .expect("seed run for baseline");
+
+        let set_output = handle_baseline(true, false, false, Some(&db_path)).expect("baseline set");
+        let set_value: Value = serde_json::from_str(&set_output).expect("set json");
+        assert_eq!(set_value["locked_by"], "cli");
+
+        let show_output =
+            handle_baseline(false, true, false, Some(&db_path)).expect("baseline show");
+        let show_value: Value = serde_json::from_str(&show_output).expect("show json");
+        assert_eq!(show_value["locked_by"], "cli");
+
+        let clear_output =
+            handle_baseline(false, false, true, Some(&db_path)).expect("baseline clear");
+        let clear_value: Value = serde_json::from_str(&clear_output).expect("clear json");
+        assert_eq!(clear_value["action"], "clear");
+
+        cleanup_sqlite_path(&db_path);
+    }
+
+    #[test]
+    fn baseline_requires_exactly_one_action() {
+        let err = handle_baseline(false, false, false, Some("unused.db"));
+        assert!(matches!(err, Err(TianJiError::Usage(msg)) if msg.contains("exactly one")));
+
+        let err = handle_baseline(true, true, false, Some("unused.db"));
+        assert!(matches!(err, Err(TianJiError::Usage(msg)) if msg.contains("only one")));
+    }
+
+    #[test]
+    fn baseline_requires_sqlite_path() {
+        let err = handle_baseline(true, false, false, None);
+        assert!(matches!(err, Err(TianJiError::Usage(msg)) if msg.contains("--sqlite-path")));
+    }
+
+    #[test]
+    fn baseline_show_without_set_returns_error() {
+        let db_path = temp_sqlite_path("baseline_no_set");
+        let _ = run(Cli::Run {
+            fixture: SAMPLE_FIXTURE.to_string(),
+            sqlite_path: Some(db_path.clone()),
+            show_delta: false,
+        })
+        .expect("seed run");
+
+        let err = handle_baseline(false, true, false, Some(&db_path));
+        assert!(matches!(err, Err(TianJiError::Usage(msg)) if msg.contains("No baseline")));
+
+        cleanup_sqlite_path(&db_path);
+    }
+
+    #[test]
+    fn watch_rejects_interval_below_minimum() {
+        let result = handle_watch("https://example.com/feed.xml", 5, None, None);
+        assert!(matches!(result, Err(TianJiError::Usage(msg)) if msg.contains("at least 10")));
+    }
+
+    #[test]
+    fn cli_parse_predict() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "predict",
+            "--field",
+            "east-asia.conflict",
+            "--horizon",
+            "10",
+        ])
+        .expect("parse predict");
+        match cli {
+            Cli::Predict { field, horizon, .. } => {
+                assert_eq!(field, "east-asia.conflict");
+                assert_eq!(horizon, 10);
+            }
+            _ => panic!("expected Predict variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_backtrack() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "backtrack",
+            "--goal",
+            "test goal",
+            "--field-constraint",
+            "global.conflict:0:0.5",
+        ])
+        .expect("parse backtrack");
+        match cli {
+            Cli::Backtrack {
+                goal,
+                field_constraints,
+                max_interventions,
+                ..
+            } => {
+                assert_eq!(goal, "test goal");
+                assert_eq!(field_constraints.len(), 1);
+                assert_eq!(field_constraints[0].0.region, "global");
+                assert_eq!(field_constraints[0].0.domain, "conflict");
+                assert_eq!(max_interventions, 5);
+            }
+            _ => panic!("expected Backtrack variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_baseline_set() {
+        let cli = Cli::try_parse_from(["tianji", "baseline", "--set", "--sqlite-path", "test.db"])
+            .expect("parse baseline set");
+        match cli {
+            Cli::Baseline {
+                set, show, clear, ..
+            } => {
+                assert!(set);
+                assert!(!show);
+                assert!(!clear);
+            }
+            _ => panic!("expected Baseline variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_watch() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "watch",
+            "--source-url",
+            "https://example.com/feed.xml",
+            "--interval",
+            "60",
+        ])
+        .expect("parse watch");
+        match cli {
+            Cli::Watch {
+                source_url,
+                interval,
+                ..
+            } => {
+                assert_eq!(source_url, "https://example.com/feed.xml");
+                assert_eq!(interval, 60);
+            }
+            _ => panic!("expected Watch variant"),
+        }
+    }
 }
 
 fn validate_score_range(
@@ -545,6 +853,38 @@ fn validate_int_range(
         ))),
         _ => Ok(()),
     }
+}
+
+fn parse_field_constraint(
+    s: &str,
+) -> Result<(tianji::worldline::types::FieldKey, f64, f64), String> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "field-constraint must be in region.domain:min:max format, got: {s}"
+        ));
+    }
+    let field_parts: Vec<&str> = parts[0].split('.').collect();
+    if field_parts.len() != 2 {
+        return Err(format!(
+            "field must be in region.domain format, got: {}",
+            parts[0]
+        ));
+    }
+    let region = field_parts[0].to_string();
+    let domain = field_parts[1].to_string();
+    let min =
+        f64::from_str(parts[1]).map_err(|e| format!("invalid min value '{}': {e}", parts[1]))?;
+    let max =
+        f64::from_str(parts[2]).map_err(|e| format!("invalid max value '{}': {e}", parts[2]))?;
+    if min > max {
+        return Err(format!("min ({min}) cannot be greater than max ({max})"));
+    }
+    Ok((
+        tianji::worldline::types::FieldKey { region, domain },
+        min,
+        max,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -990,6 +1330,322 @@ where
         },
         "queued_runs": queued_runs,
         "job_states": job_states,
+    });
+    Ok(serde_json::to_string_pretty(&payload)?)
+}
+
+// ---------------------------------------------------------------------------
+// Predict / Backtrack / Baseline / Watch handlers
+// ---------------------------------------------------------------------------
+
+fn handle_predict(
+    field: &str,
+    horizon: u64,
+    profile_dir: &str,
+    config_path: Option<&str>,
+) -> Result<String, TianJiError> {
+    use tianji::hongmeng::Agent;
+    use tianji::llm::ProviderRegistry;
+    use tianji::nuwa::forward::run_forward;
+    use tianji::nuwa::sandbox::SimulationMode;
+    use tianji::profile::ProfileRegistry;
+    use tianji::worldline::types::{FieldKey, Worldline};
+
+    // Parse target field
+    let field_parts: Vec<&str> = field.split('.').collect();
+    if field_parts.len() != 2 {
+        return Err(TianJiError::Usage(format!(
+            "--field must be in region.domain format, got: {field}"
+        )));
+    }
+    let target_field = FieldKey {
+        region: field_parts[0].to_string(),
+        domain: field_parts[1].to_string(),
+    };
+
+    // Load profiles (stub: create a default agent if no profiles found)
+    let agents = match ProfileRegistry::load_from_dir(std::path::Path::new(profile_dir)) {
+        Ok(registry) if !registry.profiles.is_empty() => registry
+            .profiles
+            .values()
+            .map(|p| Agent::from_profile(p.clone()))
+            .collect::<Vec<_>>(),
+        _ => {
+            // Fallback: one stub agent
+            let stub_profile = tianji::profile::types::ActorProfile {
+                id: "stub".to_string(),
+                name: "Stub Agent".to_string(),
+                tier: tianji::profile::types::ActorTier::Nation,
+                interests: vec![],
+                red_lines: vec![],
+                capabilities: tianji::profile::types::Capabilities::default(),
+                behavior_patterns: vec!["observe".to_string(), "diplomatic_protest".to_string()],
+                historical_analogues: vec![],
+            };
+            vec![Agent::from_profile(stub_profile)]
+        }
+    };
+
+    // Load config (or default)
+    let tianji_config = match config_path {
+        Some(path) => tianji::llm::TianJiConfig::load_from(path)
+            .map_err(|e| TianJiError::Usage(format!("Failed to load config: {e}")))?,
+        None => tianji::llm::TianJiConfig::default(),
+    };
+    let provider = ProviderRegistry::from_config(tianji_config)
+        .map_err(|e| TianJiError::Usage(format!("Failed to create provider registry: {e}")))?;
+
+    // Create stub worldline with the target field
+    let mut fields = BTreeMap::new();
+    fields.insert(target_field.clone(), 3.5);
+    let hash = Worldline::compute_snapshot_hash(&fields);
+    let worldline = Worldline {
+        id: 0,
+        fields,
+        events: vec![],
+        causal_graph: petgraph::graph::DiGraph::new(),
+        active_actors: std::collections::BTreeSet::new(),
+        divergence: 0.0,
+        parent: None,
+        diverge_tick: 0,
+        snapshot_hash: hash,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mode = SimulationMode::Forward {
+        target_field,
+        horizon_ticks: horizon,
+    };
+    let sim_config = tianji::hongmeng::HongmengConfig::default();
+
+    // Build sandbox to validate (unused directly — run_forward is standalone)
+    let _sandbox = tianji::nuwa::sandbox::NuwaSandbox::new(
+        worldline.clone(),
+        agents.clone(),
+        provider,
+        mode.clone(),
+        sim_config.clone(),
+    );
+
+    let outcome = run_forward(&worldline, &agents, &mode, &sim_config);
+    Ok(serde_json::to_string_pretty(&outcome)?)
+}
+
+fn handle_backtrack(
+    goal: &str,
+    constraints: &[(tianji::worldline::types::FieldKey, f64, f64)],
+    max_interventions: usize,
+    profile_dir: &str,
+    config_path: Option<&str>,
+) -> Result<String, TianJiError> {
+    use tianji::hongmeng::Agent;
+    use tianji::llm::ProviderRegistry;
+    use tianji::nuwa::backward::run_backward;
+    use tianji::nuwa::sandbox::SimulationMode;
+    use tianji::profile::ProfileRegistry;
+    use tianji::worldline::types::Worldline;
+
+    if constraints.is_empty() {
+        return Err(TianJiError::Usage(
+            "backtrack requires at least one --field-constraint.".to_string(),
+        ));
+    }
+
+    // Load profiles (stub: create a default agent if no profiles found)
+    let agents = match ProfileRegistry::load_from_dir(std::path::Path::new(profile_dir)) {
+        Ok(registry) if !registry.profiles.is_empty() => registry
+            .profiles
+            .values()
+            .map(|p| Agent::from_profile(p.clone()))
+            .collect::<Vec<_>>(),
+        _ => {
+            let stub_profile = tianji::profile::types::ActorProfile {
+                id: "stub".to_string(),
+                name: "Stub Agent".to_string(),
+                tier: tianji::profile::types::ActorTier::Nation,
+                interests: vec![],
+                red_lines: vec![],
+                capabilities: tianji::profile::types::Capabilities::default(),
+                behavior_patterns: vec![
+                    "observe".to_string(),
+                    "diplomatic_protest".to_string(),
+                    "negotiation".to_string(),
+                ],
+                historical_analogues: vec![],
+            };
+            vec![Agent::from_profile(stub_profile)]
+        }
+    };
+
+    // Load config (or default)
+    let tianji_config = match config_path {
+        Some(path) => tianji::llm::TianJiConfig::load_from(path)
+            .map_err(|e| TianJiError::Usage(format!("Failed to load config: {e}")))?,
+        None => tianji::llm::TianJiConfig::default(),
+    };
+    let provider = ProviderRegistry::from_config(tianji_config)
+        .map_err(|e| TianJiError::Usage(format!("Failed to create provider registry: {e}")))?;
+
+    // Build goal_field_constraints from parsed constraints
+    let mut goal_field_constraints = BTreeMap::new();
+    for (key, min, max) in constraints {
+        goal_field_constraints.insert(key.clone(), (*min, *max));
+    }
+
+    // Create stub worldline with initial field values
+    let mut fields = BTreeMap::new();
+    for (key, _min, _max) in constraints {
+        fields.insert(key.clone(), 8.0);
+    }
+    let hash = Worldline::compute_snapshot_hash(&fields);
+    let worldline = Worldline {
+        id: 0,
+        fields,
+        events: vec![],
+        causal_graph: petgraph::graph::DiGraph::new(),
+        active_actors: std::collections::BTreeSet::new(),
+        divergence: 0.0,
+        parent: None,
+        diverge_tick: 0,
+        snapshot_hash: hash,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mode = SimulationMode::Backward {
+        goal_description: goal.to_string(),
+        goal_field_constraints,
+        max_interventions,
+    };
+
+    let _sandbox = tianji::nuwa::sandbox::NuwaSandbox::new(
+        worldline.clone(),
+        agents.clone(),
+        provider,
+        mode.clone(),
+        tianji::hongmeng::HongmengConfig::default(),
+    );
+
+    let outcome = run_backward(&worldline, &agents, &mode);
+    Ok(serde_json::to_string_pretty(&outcome)?)
+}
+
+fn handle_baseline(
+    set: bool,
+    show: bool,
+    clear: bool,
+    sqlite_path: Option<&str>,
+) -> Result<String, TianJiError> {
+    let action_count = [set, show, clear].iter().filter(|&&b| b).count();
+    if action_count == 0 {
+        return Err(TianJiError::Usage(
+            "baseline requires exactly one of --set, --show, or --clear.".to_string(),
+        ));
+    }
+    if action_count > 1 {
+        return Err(TianJiError::Usage(
+            "baseline accepts only one of --set, --show, or --clear at a time.".to_string(),
+        ));
+    }
+
+    let db_path = sqlite_path.ok_or_else(|| {
+        TianJiError::Usage("--sqlite-path is required for baseline operations.".to_string())
+    })?;
+    let memory_path = delta_memory_path(db_path);
+    let baseline_path = memory_path.with_file_name("baseline.json");
+
+    if show {
+        if !baseline_path.exists() {
+            return Err(TianJiError::Usage(
+                "No baseline is currently set.".to_string(),
+            ));
+        }
+        let content = std::fs::read_to_string(&baseline_path)?;
+        // Validate it's valid JSON
+        let value: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| TianJiError::Usage(format!("Baseline file is corrupt: {e}")))?;
+        Ok(serde_json::to_string_pretty(&value)?)
+    } else if set {
+        // Write a placeholder baseline to hot-memory directory
+        // (Real worldline persistence is deferred — write a stub for now)
+        if let Some(parent) = baseline_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let baseline = serde_json::json!({
+            "worldline_id": 0,
+            "snapshot_hash": "placeholder",
+            "fields": {},
+            "locked_at": chrono::Utc::now().to_rfc3339(),
+            "locked_by": "cli",
+            "note": "stub baseline — worldline not yet persisted"
+        });
+        let json = serde_json::to_string_pretty(&baseline)?;
+        std::fs::write(&baseline_path, &json)?;
+        Ok(json)
+    } else {
+        // clear
+        if !baseline_path.exists() {
+            return Err(TianJiError::Usage(
+                "No baseline is currently set to clear.".to_string(),
+            ));
+        }
+        std::fs::remove_file(&baseline_path)?;
+        Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "action": "clear",
+            "status": "baseline_removed"
+        }))?)
+    }
+}
+
+fn handle_watch(
+    source_url: &str,
+    interval: u64,
+    sqlite_path: Option<&str>,
+    _config_path: Option<&str>,
+) -> Result<String, TianJiError> {
+    if interval < 10 {
+        return Err(TianJiError::Usage(
+            "--interval must be at least 10 seconds.".to_string(),
+        ));
+    }
+
+    // Stub: 3-iteration loop with sleep, uses fixture path for now
+    // Live feed fetching via reqwest is deferred
+    let max_iterations = 3;
+    let mut results = Vec::new();
+
+    for i in 1..=max_iterations {
+        let fixture_path = "tests/fixtures/sample_feed.xml";
+        match run_fixture_path(fixture_path, sqlite_path) {
+            Ok(run_result) => {
+                results.push(serde_json::json!({
+                    "iteration": i,
+                    "source_url": source_url,
+                    "status": "ok",
+                    "run_id": run_result.artifact.input_summary.normalized_event_count,
+                }));
+            }
+            Err(e) => {
+                results.push(serde_json::json!({
+                    "iteration": i,
+                    "source_url": source_url,
+                    "status": "error",
+                    "error": e.to_string(),
+                }));
+            }
+        }
+        if i < max_iterations {
+            std::thread::sleep(std::time::Duration::from_secs(interval));
+        }
+    }
+
+    let payload = serde_json::json!({
+        "watch": {
+            "source_url": source_url,
+            "interval": interval,
+            "iterations": max_iterations,
+            "note": "stub: using fixture path, live feed fetching deferred",
+        },
+        "results": results,
     });
     Ok(serde_json::to_string_pretty(&payload)?)
 }
@@ -1444,6 +2100,42 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
             });
             Ok(serde_json::to_string_pretty(&output).map_err(TianJiError::Json)?)
         }
+        Cli::Predict {
+            field,
+            horizon,
+            profile_dir,
+            config,
+        } => handle_predict(&field, horizon, &profile_dir, config.as_deref()),
+        Cli::Backtrack {
+            goal,
+            field_constraints,
+            max_interventions,
+            profile_dir,
+            config,
+        } => handle_backtrack(
+            &goal,
+            &field_constraints,
+            max_interventions,
+            &profile_dir,
+            config.as_deref(),
+        ),
+        Cli::Baseline {
+            set,
+            show,
+            clear,
+            sqlite_path,
+        } => handle_baseline(set, show, clear, sqlite_path.as_deref()),
+        Cli::Watch {
+            source_url,
+            interval,
+            sqlite_path,
+            config,
+        } => handle_watch(
+            &source_url,
+            interval,
+            sqlite_path.as_deref(),
+            config.as_deref(),
+        ),
         Cli::Completions { shell } => {
             let shell = match shell {
                 ShellName::Bash => Shell::Bash,

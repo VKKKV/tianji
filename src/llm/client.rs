@@ -15,6 +15,7 @@ pub struct LlmClient {
     model: String,
     base_url: Option<String>,
     api_key: Option<String>,
+    #[allow(dead_code)] // Reserved for concurrent request limiting
     max_concurrency: usize,
 }
 
@@ -95,9 +96,10 @@ impl LlmClient {
             .map_err(|e| LlmError::ChatFailed(format!("request failed: {e}")))?;
 
         let status = response.status();
-        let text = response.text().await.map_err(|e| {
-            LlmError::ChatFailed(format!("failed to read response: {e}"))
-        })?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| LlmError::ChatFailed(format!("failed to read response: {e}")))?;
 
         if !status.is_success() {
             return Err(LlmError::ChatFailed(format!(
@@ -107,10 +109,8 @@ impl LlmClient {
             )));
         }
 
-        let json: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| {
-                LlmError::ChatFailed(format!("failed to parse response: {e}"))
-            })?;
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| LlmError::ChatFailed(format!("failed to parse response: {e}")))?;
 
         Ok(json["choices"][0]["message"]["content"]
             .as_str()
@@ -123,10 +123,7 @@ impl LlmClient {
         messages: Vec<ChatMessage>,
         model: &str,
     ) -> Result<String, LlmError> {
-        let base_url = self
-            .base_url
-            .as_deref()
-            .unwrap_or("http://localhost:11434");
+        let base_url = self.base_url.as_deref().unwrap_or("http://localhost:11434");
 
         let prompt = messages
             .into_iter()
@@ -157,9 +154,10 @@ impl LlmClient {
             .map_err(|e| LlmError::ChatFailed(format!("Ollama request failed: {e}")))?;
 
         let status = response.status();
-        let text = response.text().await.map_err(|e| {
-            LlmError::ChatFailed(format!("failed to read Ollama response: {e}"))
-        })?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| LlmError::ChatFailed(format!("failed to read Ollama response: {e}")))?;
 
         if !status.is_success() {
             return Err(LlmError::ChatFailed(format!(
@@ -169,10 +167,8 @@ impl LlmClient {
             )));
         }
 
-        let json: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| {
-                LlmError::ChatFailed(format!("failed to parse Ollama response: {e}"))
-            })?;
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| LlmError::ChatFailed(format!("failed to parse Ollama response: {e}")))?;
 
         Ok(json["response"].as_str().unwrap_or("").to_string())
     }
