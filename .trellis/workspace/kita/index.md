@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-0.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-05-15
 <!-- @@@/auto:current-status -->
 
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-05-15 | Phase 6 Cleanup & Release | `30a40db`, `5a02482`, `26dfc09`, `8b40305` | `main` |
 | 15 | 2026-05-15 | Close M3C schedule plan | `24f56b8` | `main` |
 | 14 | 2026-05-14 | TUI compare view | `71c5f83` | `main` |
 | 13 | 2026-05-14 | TUI detail view | `a376d8a` | `main` |
