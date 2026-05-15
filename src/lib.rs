@@ -5,6 +5,7 @@ pub mod delta;
 pub mod delta_memory;
 pub mod fetch;
 pub mod grouping;
+pub mod hongmeng;
 pub mod llm;
 pub mod models;
 pub mod normalize;

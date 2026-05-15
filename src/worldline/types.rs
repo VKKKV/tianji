@@ -6,10 +6,35 @@ use petgraph::graph::DiGraph;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct FieldKey {
     pub region: String,
     pub domain: String,
+}
+
+impl Serialize for FieldKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&format!("{}:{}", self.region, self.domain))
+    }
+}
+
+impl<'de> Deserialize<'de> for FieldKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let (region, domain) = s
+            .rsplit_once(':')
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid FieldKey format: {s}")))?;
+        Ok(FieldKey {
+            region: region.to_string(),
+            domain: domain.to_string(),
+        })
+    }
 }
 
 pub type WorldlineId = u64;
