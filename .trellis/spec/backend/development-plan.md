@@ -6,13 +6,8 @@ Root `plan.md` is the authoritative architecture document for the TianJi Rust re
 It defines the four subsystems (Cangjie, Fuxi, Hongmeng, Nuwa), the project structure,
 the dependency list, the TUI design spec (§9), and the phased build order.
 
-**Python code under `tianji/` and `tests/` is preserved as the migration oracle.**
-It is not the product direction — it is the compatibility reference that Rust
-implementations must match gate-by-gate before replacing any Python surface.
-
-Do not delete Python code or mark any Rust layer as shipped until the relevant
-parity gate has passed. After parity is verified, Python code is retired per
-`plan.md` §13 (Deletion List).
+**Python oracle retired in Phase 6 (v0.2.0).** All Rust parity gates have passed.
+The project is now a pure Rust binary.
 
 ## Migration Alignment
 
@@ -25,12 +20,9 @@ parity gate has passed. After parity is verified, Python code is retired per
 | 3 | Local Runtime (daemon + API + webui) | Milestone 3 complete |
 | - | Hongmeng orchestration layer | Deferred |
 | 3 | Nuwa simulation sandbox | Deferred |
-| 4 | TUI (ratatui + Kanagawa Dark) | Deferred |
+| 4 | TUI (ratatui + Kanagawa Dark) | Milestone 4 complete |
 | 5 | Daemon + Web UI | Absorbed by Milestone 3 |
-| 6 | Cleanup + docs (Python retirement) | Deferred |
-
-Each phase must reach parity with the current Python behavior before moving to the next.
-Python remains the executable oracle until the relevant Rust gate is reviewed and accepted.
+| 6 | Cleanup + docs (Python retirement) | Phase 6 complete |
 
 ### Milestone 1A — Feed + Normalization Parity
 
@@ -38,20 +30,18 @@ Python remains the executable oracle until the relevant Rust gate is reviewed an
 feed parsing, canonical hashing, and normalized event emission.
 
 - RSS 2.0 and Atom 1.0 local fixture parsing ✅
-- SHA-256 entry identity and content hashes compatible with Python ✅
+- SHA-256 entry identity and content hashes ✅
 - Deterministic normalization: keywords, actors, regions, field scores, event IDs ✅
 - Normalized-event-shaped payloads emitted through the Rust artifact ✅
-- Python code and tests intact ✅
 
 ### Milestone 1B — Scoring + Grouping + Backtracking Parity
 
-**Complete.** Rust one-shot output is semantically compatible with the Python
-fixture pipeline.
+**Complete.** Rust one-shot output is deterministic and verified.
 
 - `Im` / `Fa` scoring semantics and rationale vocabulary ✅
 - Event grouping, causal/evidence summaries ✅
 - Backtrack intervention candidates ✅
-- Full `RunArtifact` field-for-field parity with Python oracle ✅
+- Full `RunArtifact` field-for-field parity verified ✅
 - 18 Rust tests pass, `cargo fmt --check` clean, `cargo clippy` clean ✅
 
 ### Milestone 2 — Storage + History Parity
@@ -309,10 +299,12 @@ After TUI is stable.
 
 ### Milestone 6 — Cleanup
 
-- Delete all Python code per `plan.md` §13
-- Delete `.venv/`, `.pytest_cache/`, `__pycache__/`
-- Update README
-- Shell completions (clap generate)
+**Complete.** Python oracle retired, shell completions added, documentation updated.
+
+- Delete all Python code per `plan.md` §13 ✅
+- Delete `.venv/`, `.pytest_cache/`, `__pycache__/` ✅
+- Update README ✅
+- Shell completions (clap_complete) ✅
 
 ## Dependency Guidance
 
@@ -320,63 +312,13 @@ The dependency list in `plan.md` §11 is the target. Each milestone should add o
 the dependencies it needs. In particular, do not add async runtimes, web frameworks,
 TUI crates, graph engines, or LLM provider crates before the milestone that uses them.
 
-## Documentation Rules During Migration
+## Documentation Rules
 
 - `plan.md` is the authority for architecture, project structure, and build phases.
-- Root docs must distinguish shipped Python reality from Rust migration target.
 - Trellis specs should be updated before claiming a Rust layer is current.
-- Compatibility changes should name the Python command, artifact field, or test
-  behavior they preserve.
-- Python code under `tianji/` and `tests/` is the oracle, not the direction.
-
-## Shipped Python Surface (Migration Oracle Reference)
-
-This section records the current Python product surface for parity verification.
-It is not the development direction — it is the compatibility contract Rust must match.
-
-### One-Shot Pipeline
-
-- `python3 -m tianji run --fixture <path>` or `--fetch --source-url <url>`
-- Stages: fetch → normalize → score → backtrack → emit
-- Output: `RunArtifact` JSON with `schema_version`, `mode`, `generated_at`,
-  `input_summary`, `scenario_summary`, `scored_events`, `intervention_candidates`
-
-### Scoring Model (Im / Fa)
-
-- `Im` inputs: actor weights, region weights, keyword density, dominant-field bonus,
-  field-diversity bonus, text-signal intensity
-- `Fa` inputs: dominant-field strength, dominance margin, coherence share,
-  near-tie penalty, diffuse-third-field penalty
-- `divergence_score = f(Im, Fa)`
-- Spec: `.trellis/spec/backend/scoring-spec.md`
-
-### Persistence + History
-
-- SQLite-backed run persistence
-- `history`: list/filter runs by mode, field, risk, score, grouped-analysis signals
-- `history-show`: single-run detail with scored-event and event-group projection lenses
-- `history-compare`: pair compare with same projection lenses, presets (latest, previous)
-
-### TUI (Rich, Read-Only)
-
-- `python3 -m tianji tui --sqlite-path <path>`
-- Read-only Rich-based browser over persisted runs
-- Split-pane list/detail layout, compare staging, Vim-style movement
-- Contract: `.trellis/spec/backend/contracts/tui-contract.md`
-
-### Daemon + Local API + Web UI
-
-- `tianji daemon start/stop/status/run/schedule`
-- Loopback HTTP API at `127.0.0.1:8765`, read-first
-- Optional web UI at `127.0.0.1:8766`
-- Contracts: `contracts/daemon-contract.md`, `contracts/local-api-contract.md`,
-  `contracts/web-ui-contract.md`
 
 ## Guardrails
 
 - Keep first-party Rust source under `src/` (per `plan.md` §10 project structure).
-- Keep Python source under `tianji/` and `tests/` until retirement milestone.
-- Prefer reimplementation over cross-importing from Python.
 - Avoid framework-first expansion — add dependencies per milestone.
 - Every new layer should preserve local-first, deterministic-first behavior.
-- Do not claim a Rust layer is shipped until parity with the Python oracle is verified.

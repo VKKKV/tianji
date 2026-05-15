@@ -6,10 +6,10 @@
 
 ## Overview
 
-TianJi is a **Rust project** migrating from Python. The Rust implementation under
-`src/` is the product direction. The Python codebase under `tianji/` and `tests/`
-is the migration oracle — it defines the compatibility contract that Rust must
-match gate-by-gate before replacing any Python surface.
+TianJi is a **pure Rust project**. The Rust implementation under `src/` is the
+product. All milestones (M1A–M4, Crucix Delta, M3.5 housekeeping, Phase 6 cleanup)
+are complete. The Python oracle was retired in Phase 6 (v0.2.0) after all parity
+gates passed.
 
 ---
 
@@ -32,11 +32,14 @@ serde_json = "1.0"
 sha2 = "0.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
 libc = "0.2"
+ratatui = "0.30"
+crossterm = "0.28"
 ```
 
 ### Rust Dependencies (Planned, per `plan.md` §11)
@@ -45,8 +48,8 @@ Add only when the milestone requires them:
 
 - Milestone 2: `rusqlite` (SQLite persistence), `clap` (CLI subcommands) — **shipped**
 - Milestone 3: `tokio` (async runtime), `axum` (HTTP API), `reqwest` (reverse proxy), `uuid` (job IDs), `libc` (setsid) — **shipped**
-- Milestone 4: `ratatui`, `crossterm` (TUI)
-- Milestone 5: `tokio`, `axum`, `reqwest` (daemon, HTTP)
+- Milestone 4: `ratatui`, `crossterm` (TUI) — **shipped**
+- Phase 6: `clap_complete` (shell completions) — **shipped**
 - Phase 2+: `blake3`, `petgraph`, `chrono` (worldline, field DAG)
 - Phase 3+: `async-openai`, `ollama-rs` (LLM providers)
 
@@ -79,17 +82,13 @@ cargo clippy -- -D warnings
 - Scoring: deterministic numeric assertions on known inputs (exact-value + factor isolation)
 - Grouping: event group structure and causal ordering
 - Backtracking: intervention candidate generation
-- Contract: top-level and nested artifact keys match Python oracle
-- Hash parity: canonical hashes match Python SHA-256 expectations
+- Contract: top-level and nested artifact keys match expected schema
+- Hash parity: canonical hashes are deterministic SHA-256
 
 ### Python Oracle Verification
 
-The Python test suite must still pass to confirm the oracle is intact:
-
-```bash
-uv venv .venv && uv pip install -e .
-.venv/bin/python -m unittest discover -s tests -v
-```
+The Python oracle was retired in Phase 6 (v0.2.0) after all parity gates passed.
+Python code is no longer present in the repository.
 
 ---
 
@@ -214,18 +213,14 @@ fn extract_tokens(text: &str) -> Vec<&str> {
 | **Tests depending on public network** | All tests use local fixtures |
 | **Asserting against incidental formatting** | Assert on artifact semantics, not whitespace |
 | **Bypassing CLI input rules** | No run without `--fixture` plus at least one resolved source |
-| **Deleting Python code before parity gates pass** | Python is the oracle |
-| **Extending Python code as product direction** | New features go in Rust |
 
 ---
 
 ## Anti-Patterns to Avoid
 
-- **Don't treat Python as the product direction** — it is the oracle
 - **Don't design for daemon/IPC/web UI before one-shot flow is correct** — CLI first
 - **Don't replace deterministic logic with opaque model-driven behavior** — deterministic first
 - **Don't add cloud-required dependencies** — local-only MVP
-- **Don't claim Rust parity without verifying against Python oracle output**
 
 ## Common Mistakes
 
@@ -301,15 +296,13 @@ must be applied in multiple places.
 **Fix**: Extract shared helpers to `src/utils.rs` as `pub fn`. Import from `crate::utils`.
 Standardize on `.expect()` for consistency.
 
-### Hardcoding `include_str!` paths to the Python oracle tree
+### Hardcoding `include_str!` paths to external directories
 
-**Symptom**: Rust build breaks if the Python package directory is absent or reorganized.
+**Symptom**: Rust build breaks if an external directory is absent or reorganized.
 
-**Cause**: `include_str!("../tianji/webui/...")` points into the Python oracle source tree
-(`tianji/`) instead of a Rust-owned location. The Rust crate should own its own static assets.
+**Cause**: `include_str!` pointing outside the Rust crate's owned directories.
 
-**Fix**: Move static assets to a Rust-owned directory (e.g., `src/webui/`) and update
-`include_str!` paths accordingly. Leave the Python oracle's copies intact for M6 retirement.
+**Fix**: Keep static assets in Rust-owned directories (e.g., `src/webui/`).
 
 #### Wrong
 
@@ -409,39 +402,6 @@ Before committing any Rust change:
 - [ ] New code follows existing patterns (look at neighboring modules)
 - [ ] No new dependencies in `Cargo.toml` without milestone justification
 - [ ] Tests don't depend on public network
-- [ ] Python oracle tests still pass (if Python venv available)
-
----
-
-## Python Oracle Reference (Migration Compatibility)
-
-The sections below describe the Python oracle codebase for parity verification.
-These are **not** coding standards for new code — they document the existing
-Python behavior that Rust must match.
-
-### Python Technology Stack
-
-| Concern | Choice | Constraint |
-|---------|--------|------------|
-| **Language** | Python 3.12+ | Oracle only |
-| **Package manager** | uv (`uv venv .venv`) | `pyproject.toml`-based |
-| **CLI framework** | Click | Oracle only |
-| **Database** | Raw `sqlite3` | No ORM |
-| **TUI** | Rich | Oracle only |
-| **Testing** | `unittest` | Oracle verification |
-
-### Python Data Model
-
-- All structured data uses `dataclasses.dataclass`
-- Serializable dataclasses implement `to_dict()` returning `dict[str, object]`
-- JSON output uses `json.dumps(data, ensure_ascii=False, indent=2)`
-
-### Python Pre-Commit Checklist
-
-- [ ] All existing `unittest` tests pass
-- [ ] No new dependencies added to `pyproject.toml` without justification
-- [ ] Database schema changes use `ensure_column()` for additive changes only
-- [ ] CLI output uses `click.echo()` with JSON format
 
 ---
 

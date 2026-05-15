@@ -6,9 +6,8 @@
 
 ## Overview
 
-TianJi is a **Rust project** with a Python oracle codebase preserved for
-compatibility verification. The authoritative project structure is defined
-in `plan.md` §10.
+TianJi is a **pure Rust project**. The authoritative project structure is defined
+in `plan.md` §10. Python oracle code was retired in Phase 6 (v0.2.0).
 
 ---
 
@@ -64,23 +63,31 @@ tianji/
 └── README.md
 ```
 
-### Current State (Milestone 1A+1B Complete)
+### Current State (All Milestones Complete)
 
-The Rust crate currently implements Cangjie/Fuxi core parity:
+The Rust crate implements all shipped milestones:
 
 ```
 src/
-├── main.rs          # CLI entry: cargo run -- run --fixture <path>
+├── main.rs          # CLI entry (9 subcommands: run, history, history-show, history-compare, delta, daemon, webui, tui, completions)
 ├── lib.rs           # Pipeline orchestration + integration tests
 ├── models.rs        # RawItem, NormalizedEvent, ScoredEvent, RunArtifact, etc.
 ├── fetch.rs         # RSS/Atom parsing + canonical hashing (Cangjie)
 ├── normalize.rs     # Keyword/actor/region extraction + field scores (Cangjie)
 ├── scoring.rs       # Im/Fa scoring + rationale (Fuxi)
 ├── grouping.rs      # Event grouping + causal ordering (Fuxi)
-└── backtrack.rs     # Intervention candidate generation (Fuxi)
+├── backtrack.rs     # Intervention candidate generation (Fuxi)
+├── storage.rs       # SQLite 6 tables + history CRUD
+├── daemon.rs        # UNIX socket + job queue + serve
+├── api.rs           # axum 6-route HTTP API
+├── webui.rs         # Embedded static files + API proxy + /queue-run
+├── tui.rs           # ratatui history browser (Kanagawa Dark)
+├── delta.rs         # Crucix Delta Engine: compute_delta, severity
+├── delta_memory.rs  # HotMemory, AlertDecayModel, AlertTier
+└── utils.rs         # round2, days_since_epoch, collect_string_array
 ```
 
-This will expand to the target structure as milestones are implemented.
+This will expand to the target structure as future phases are implemented.
 
 ---
 
@@ -117,39 +124,6 @@ Specification documents under `.trellis/spec/` use **lowercase kebab-case** file
 - **No `utils.rs` catch-all** — every file has a specific purpose and name
 - **No premature subsystem directories** — create `cangjie/` when it has 3+ files, not before
 - **No root-doc uppercase names inside `.trellis/spec/`** — use lowercase kebab-case
-
----
-
-## Python Oracle Directory Layout (Compatibility Reference)
-
-The Python codebase is preserved as the migration oracle. It is NOT the product
-direction — it is the compatibility contract that Rust must match.
-
-```
-tianji/
-├── tianji/                  # Python oracle source
-│   ├── __init__.py
-│   ├── __main__.py          # Entry: python3 -m tianji (oracle only)
-│   ├── cli.py               # Click CLI entry
-│   ├── cli_*.py             # CLI subcommand handlers
-│   ├── models.py            # Dataclasses: RawItem, NormalizedEvent, ScoredEvent...
-│   ├── fetch.py             # Feed parsing + canonical hashing
-│   ├── normalize.py         # Event extraction + field scoring
-│   ├── scoring.py           # Im/Fa scoring + rationale
-│   ├── backtrack.py         # Intervention candidates
-│   ├── pipeline.py          # Orchestration + grouping
-│   ├── storage*.py          # SQLite persistence hub + sub-modules
-│   ├── daemon.py            # UNIX-socket daemon
-│   ├── api.py               # Loopback HTTP API
-│   ├── tui*.py              # Rich TUI (oracle — target is ratatui per plan.md §9)
-│   └── webui*/              # Optional web UI
-├── tests/                   # Python oracle tests
-│   ├── support.py           # Shared imports hub
-│   ├── test_*.py            # Feature tests
-│   └── fixtures/            # Test data + contract fixtures
-├── pyproject.toml
-└── README.md
-```
 
 ---
 
