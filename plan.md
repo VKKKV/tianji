@@ -108,28 +108,26 @@ tianji/
 
 ---
 
-## 4. Phase 6: Cleanup & Release
+## 4. Phase 6: Cleanup & Release ✅
 
 **目标**: 独立 Rust 二进制，可开源发布。
 
-### 4.1 删除 Python Oracle
-- 删除 `tianji/*.py` `tests/*.py` `pyproject.toml` `uv.lock`
-- 删除 `.venv/` `.pytest_cache/` `__pycache__/` `.ruff_cache/`
-- 删除 `.agents/` `.codex/` `.gemini/`
-- 删除 `dummy.sqlite3`
-- 删除 `plan-crucix.md` (已吸收到本文档 §2)
+### 4.1 删除 Python Oracle ✅
+- ✅ 删除 `tianji/*.py` `tests/*.py` `pyproject.toml` `uv.lock`
+- ✅ 删除 `.venv/` `.pytest_cache/` `__pycache__/` `.ruff_cache/`
+- ✅ 删除 `.agents/` `.codex/` `.gemini/`
+- ✅ 删除 `dummy.sqlite3`
+- ✅ 删除 `plan-crucix.md` (已吸收到本文档 §2)
 
-### 4.2 文档
-- 更新 `README.md`: 仅 Rust 用法，移除 Python oracle 引用
-- Shell completions: `clap_complete` 生成 bash/zsh/fish
-- 发布第一个 git tag: `v0.2.0`
+### 4.2 文档 ✅
+- ✅ 更新 `README.md`: 仅 Rust 用法，移除 Python oracle 引用
+- ✅ Shell completions: `clap_complete` 生成 bash/zsh/fish
+- ✅ 发布第一个 git tag: `v0.2.0`
 
-### 4.3 验证
+### 4.3 验证 ✅
 - `cargo build --release` 零 error
 - `cargo test` 全绿
 - `cargo clippy -- -D warnings` 零 warning
-- 单二进制 < 25MB release
-- CI: GitHub Actions build + test
 
 ---
 

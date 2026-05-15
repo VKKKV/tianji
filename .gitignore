@@ -3,23 +3,6 @@ target/
 *.rs.bk
 *.pdb
 
-# Python (port to Rust ongoing)
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-.pytest_cache/
-.ruff_cache/
-*.egg-info/
-
-# Node
-node_modules/
-
-# Agent frameworks (keep .opencode/ only)
-.agents/
-.codex/
-.gemini/
-
 # Trellis backups (recursive bloat)
 .trellis/.backup-*/
 
@@ -31,7 +14,6 @@ runs/
 *.sqlite3
 *.sqlite3-journal
 *.sock
-dummy.sqlite3
 
 # IDE
 .vscode/

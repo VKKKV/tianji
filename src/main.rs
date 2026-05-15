@@ -1,7 +1,8 @@
 use std::os::unix::process::CommandExt;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{generate, Shell};
 use tianji::{
     artifact_json, classify_delta_tier, compare_runs, compute_delta, get_latest_run_id,
     get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary, list_runs,
@@ -9,6 +10,14 @@ use tianji::{
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     TianJiError,
 };
+
+/// Shell names for completion generation
+#[derive(Clone, Debug, ValueEnum)]
+enum ShellName {
+    Bash,
+    Zsh,
+    Fish,
+}
 
 #[derive(Parser)]
 #[command(name = "tianji", about = "TianJi — geopolitical intelligence engine")]
@@ -230,6 +239,11 @@ enum Cli {
         /// Compare the two latest persisted runs
         #[arg(long = "latest-pair")]
         latest_pair: bool,
+    },
+    /// Generate shell completion scripts
+    Completions {
+        /// Shell to generate completions for
+        shell: ShellName,
     },
 }
 
@@ -1429,6 +1443,17 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
                 "delta": report,
             });
             Ok(serde_json::to_string_pretty(&output).map_err(TianJiError::Json)?)
+        }
+        Cli::Completions { shell } => {
+            let shell = match shell {
+                ShellName::Bash => Shell::Bash,
+                ShellName::Zsh => Shell::Zsh,
+                ShellName::Fish => Shell::Fish,
+            };
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            generate(shell, &mut cmd, name, &mut std::io::stdout());
+            Ok(String::new())
         }
     }
 }

@@ -2,9 +2,9 @@
 
 TianJi is a geopolitical intelligence engine — ingest signals, compute divergence, generate intervention candidates, and track changes across runs. Deterministic by default. Daemon-ready. Single binary.
 
-## Current State (2026-05-14)
+## Current State (2026-05-15)
 
-Full Rust rewrite on `rust-cli` branch. 85 tests, zero failures. 9,383 lines of Rust across 16 source files.
+Pure Rust project. 111 tests, zero failures. Single binary, no Python dependencies.
 
 | Milestone | Status |
 |-----------|--------|
@@ -13,11 +13,9 @@ Full Rust rewrite on `rust-cli` branch. 85 tests, zero failures. 9,383 lines of 
 | M2 Storage + History CLI (SQLite 6 tables, history/history-show/history-compare) | ✅ |
 | M3A Daemon + Local API (UNIX socket, axum 5-route HTTP API, job queue) | ✅ |
 | M3B Web UI (embedded static files, API proxy, /queue-run) | ✅ |
+| M3C Daemon schedule (bounded repeated run queue) | ✅ |
 | M4 TUI (ratatui history browser MVP, Kanagawa Dark, Vim keybindings) | ✅ |
 | Crucix Delta Engine (cross-run change tracking, AlertTier FLASH/PRIORITY/ROUTINE, alert decay) | ✅ |
-| M3C Daemon schedule | 🔜 in progress |
-
-Python code under `tianji/` and `tests/` is preserved as the migration oracle — compatibility reference until M6 retirement. Do not extend Python; all new features go into Rust.
 
 ---
 
@@ -139,6 +137,7 @@ tianji delta            Show cross-run change tracking between two runs
 tianji daemon           Daemon lifecycle and job queue
 tianji webui            Serve the optional local web dashboard
 tianji tui              Browse persisted runs in a read-only terminal UI
+tianji completions      Generate shell completion scripts (bash/zsh/fish)
 ```
 
 ### `tianji run`
@@ -298,6 +297,26 @@ tianji tui --sqlite-path <PATH> [--limit 20]
 
 Keybindings: `j/k` navigate, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` detail view, `q` quit.
 
+### `tianji completions`
+
+Generate shell completion scripts.
+
+```
+tianji completions <bash|zsh|fish>
+```
+
+Examples:
+```bash
+# Bash
+tianji completions bash > ~/.local/share/bash-completion/completions/tianji
+
+# Zsh
+tianji completions zsh > ~/.zfunc/_tianji
+
+# Fish
+tianji completions fish > ~/.config/fish/completions/tianji.fish
+```
+
 ---
 
 ## Daemon + Web UI Quick Setup
@@ -368,10 +387,10 @@ RunArtifact JSON (stdout) + optional SQLite persistence + optional DeltaReport
 
 ```
 tianji/
-├── Cargo.toml                  # 15 deps (see plan.md §11 for current vs target)
+├── Cargo.toml                  # 16 deps (see plan.md §7 for current vs target)
 ├── src/
-│   ├── main.rs                 # CLI entry (8 subcommands)
-│   ├── lib.rs                  # Pipeline + 85 integration tests
+│   ├── main.rs                 # CLI entry (9 subcommands)
+│   ├── lib.rs                  # Pipeline + 111 integration tests
 │   ├── models.rs               # RawItem → NormalizedEvent → ScoredEvent → RunArtifact
 │   ├── fetch.rs                # RSS/Atom parsing + SHA-256 canonical hash
 │   ├── normalize.rs            # Keyword/actor/region extraction (LazyLock regexes)
@@ -386,10 +405,9 @@ tianji/
 │   ├── delta.rs                # Crucix Delta Engine: compute_delta, MetricSnapshot, severity
 │   ├── delta_memory.rs         # HotMemory, AlertDecayModel, AlertTier, atomic I/O
 │   └── utils.rs                # round2, days_since_epoch, collect_string_array
-├── tianji/                     # Python oracle (migration reference, do not extend)
-├── tests/                      # Python tests + fixtures + contract fixtures
-├── plan.md                     # Authoritative architecture document (933 lines)
-├── plan-crucix.md              # Crucix Delta Engine design document (823 lines)
+├── tests/
+│   └── fixtures/               # sample_feed.xml + contract fixtures
+├── plan.md                     # Authoritative architecture document
 └── README.md
 ```
 
@@ -401,5 +419,4 @@ tianji/
 2. **Deterministic First** — BTreeMap (not HashMap), LazyLock regex, no wall-clock in pipeline. Same input always produces same output.
 3. **CLI First** — every feature ships as a CLI subcommand before any UI or service layer.
 4. **Single Binary** — `cargo build` produces one binary. Web UI assets are `include_str!` embedded.
-5. **Python as Oracle** — Python code under `tianji/` is the compatibility reference. Rust must match it field-for-field before Python is retired.
-6. **No LLM required** — the current pipeline is 100% rule-based. LLM integration is planned for future multi-agent simulation phases only.
+5. **No LLM required** — the current pipeline is 100% rule-based. LLM integration is planned for future multi-agent simulation phases only.
