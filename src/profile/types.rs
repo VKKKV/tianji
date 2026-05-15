@@ -18,6 +18,7 @@ pub struct Interest {
 
 /// Capability scores for an actor across five domains (0.0–1.0).
 /// Organization-tier actors typically have `military: 0.0`.
+/// Corporation-tier actors additionally set `market_share` and `supply_chain`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {
     pub military: f64,
@@ -25,6 +26,10 @@ pub struct Capabilities {
     pub technological: f64,
     pub diplomatic: f64,
     pub cyber: f64,
+    #[serde(default)]
+    pub market_share: f64,
+    #[serde(default)]
+    pub supply_chain: f64,
 }
 
 /// A static actor profile loaded from YAML.
@@ -78,6 +83,7 @@ mod tests {
                 technological: 0.70,
                 diplomatic: 0.75,
                 cyber: 0.82,
+                ..Default::default()
             },
             behavior_patterns: vec!["proportional counter-sanctions".to_string()],
             historical_analogues: vec!["2016 SCS arbitration response".to_string()],
