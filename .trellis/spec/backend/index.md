@@ -60,6 +60,7 @@ Before writing Rust code:
 |------|-------------|
 | [Scoring Spec](./scoring-spec.md) | Deterministic `Im`/`Fa` scoring model: formulas, rationale, deferred work |
 | [Development Plan](./development-plan.md) | Rust migration milestones and guardrails |
+| [Phase 2.2 Worldline Model](./phase-2.2-worldline-model.md) | Worldline data model, FieldKey, Baseline, Blake3 snapshot, divergence (implemented) |
 | [Rust Rewrite Plan](../../plan.md) | Full Rust rewrite vision: Cangjie/Fuxi/Hongmeng/Nuwa architecture, TUI spec, dependency list |
 
 ---
