@@ -2,7 +2,7 @@
 
 > Branch: `rust-cli` | Updated: 2026-05-15
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: All phases complete. 280 tests. Stub agents, real LLM ready.
+> Current: All phases complete. 280 tests. Real LLM chat() ready, agents still use stub actions.
 
 ---
 
@@ -19,12 +19,16 @@ M3.5████████████████████ ✅ Crucix Delt
 TUI ████████████████████ ✅ 4 views + search + fallback + scroll
  2.1 ████████████████████ ✅ LLM Provider + Config
  2.2 ████████████████████ ✅ Worldline + Baseline
- 2.3 ████████████████████ ✅ Actor Profiles (3 tiers)
+ 2.3 ████████████████████ ✅ Actor Profiles (3 tiers, 8 YAML)
  2.4 ████████████████████ ✅ Hongmeng Orchestration
  2.5 ████████████████████ ✅ Nuwa Simulation Sandbox
  3.0 ████████████████████ ✅ Real LLM chat() via reqwest
  3.1 ████████████████████ ✅ CLI: predict/backtrack/baseline/watch
  3.2 ████████████████████ ✅ TUI Simulation view
+ 4.0 ████████████████████ ☐ Agent LLM integration (stub→real)
+ 4.1 ████████████████████ ☐ Live feed watch e2e test
+ 4.2 ████████████████████ ☐ Worldline SQLite persistence
+ 4.3 ████████████████████ ☐ Human-in-the-loop pruning (TUI ↔ Sim)
 ```
 
   源码: ~30K 行 Rust / 39 源文件
@@ -291,13 +295,15 @@ Layer 4: 管线确定性测试 — 无 LLM 路径全量单元 + 集成测试
 
 ```toml
 [dependencies]
-# — 当前 (15 crates) —
+# — 当前 (22 crates) —
 clap = { version = "4.6", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
 roxmltree = "0.21"
 regex = "1.12"
 sha2 = "0.11"
+blake3 = "1"
 rusqlite = { version = "0.39", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
 axum = "0.8"
@@ -306,24 +312,14 @@ tokio = { version = "1", features = ["full"] }
 libc = "0.2"
 ratatui = "0.30"
 crossterm = "0.28"
-
-# — Phase 4 (TUI 完整视图, 无新依赖) —
-
-# — Phase 2-3 (Hongmeng/Nuwa, 远期) —
-# serde_yaml = "0.9"
-# chrono = "0.4"
-# blake3 = "1"
-# petgraph = "0.7"
-# rand = "0.8"
-# rand_chacha = "0.3"
-# async-openai = "0.34"
-# ollama-rs = "0.3"
-# anyhow = "1"
-# thiserror = "2"
-# tracing = "0.1"
-# tracing-subscriber = "0.3"
-# tabled = "0.18"
-
+chrono = { version = "0.4", features = ["serde"] }
+petgraph = "0.7"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+clap_complete = "4"
+```
 [profile.release]
 opt-level = 3
 lto = true
