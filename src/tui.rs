@@ -1181,6 +1181,7 @@ fn compact_timestamp(value: &str) -> String {
     value
         .replace('T', " ")
         .trim_end_matches("+00:00")
+        .trim_end_matches('Z')
         .to_string()
 }
 

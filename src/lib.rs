@@ -177,8 +177,14 @@ pub fn update_delta_memory_for_latest_run(
     let current_run_id = get_latest_run_id(sqlite_path)?.ok_or_else(|| {
         TianJiError::Usage("No persisted run exists after persistence completed.".to_string())
     })?;
-    let scored_filters = ScoredEventFilters::default();
-    let group_filters = EventGroupFilters::default();
+    let scored_filters = ScoredEventFilters {
+        limit_scored_events: Some(MAX_RUN_SUMMARY_EVENT_LIMIT),
+        ..Default::default()
+    };
+    let group_filters = EventGroupFilters {
+        limit_event_groups: Some(MAX_RUN_SUMMARY_GROUP_LIMIT),
+        ..Default::default()
+    };
     let current = get_run_summary(
         sqlite_path,
         current_run_id,

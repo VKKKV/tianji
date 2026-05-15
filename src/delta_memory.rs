@@ -187,6 +187,7 @@ impl HotMemory {
         }
     }
 
+    #[deprecated(note = "use `is_signal_suppressed_at` with a persisted timestamp for deterministic behavior")]
     pub fn is_signal_suppressed(&self, signal_key: &str, decay: &AlertDecayModel) -> bool {
         self.is_signal_suppressed_at(signal_key, decay, unix_now())
     }
@@ -218,6 +219,7 @@ impl HotMemory {
             .unwrap_or(false)
     }
 
+    #[deprecated(note = "use `mark_alerted_at` with a persisted timestamp for deterministic behavior")]
     pub fn mark_alerted(&mut self, signal_key: &str) {
         self.mark_alerted_at(signal_key, &unix_now().to_string());
     }
@@ -236,6 +238,7 @@ impl HotMemory {
             });
     }
 
+    #[deprecated(note = "use `prune_stale_signals_at` with a persisted timestamp for deterministic behavior")]
     pub fn prune_stale_signals(&mut self, decay: &AlertDecayModel) {
         self.prune_stale_signals_at(decay, unix_now());
     }
