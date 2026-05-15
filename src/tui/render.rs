@@ -37,6 +37,9 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
         super::state::TuiView::Compare => {
             super::compare::render_compare(frame, root[1], state.compare.as_ref())
         }
+        super::state::TuiView::Simulation => {
+            super::simulation::render_simulation(frame, root[1], state.simulation.as_ref())
+        }
     }
 
     let mut spans = vec![
@@ -46,6 +49,12 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
         Span::styled("[h]", Style::default().fg(KANAGAWA.key_hint)),
         Span::raw(" history  "),
     ];
+    if state.simulation.is_some() {
+        spans.extend(vec![
+            Span::styled("[3]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" simulation  "),
+        ]);
+    }
     if state.view == super::state::TuiView::History {
         spans.extend(vec![
             Span::styled("[Enter]", Style::default().fg(KANAGAWA.key_hint)),
@@ -72,7 +81,9 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
         ]);
     } else if matches!(
         state.view,
-        super::state::TuiView::Detail | super::state::TuiView::Compare
+        super::state::TuiView::Detail
+            | super::state::TuiView::Compare
+            | super::state::TuiView::Simulation
     ) {
         spans.extend(vec![
             Span::styled("[Esc]", Style::default().fg(KANAGAWA.key_hint)),
@@ -95,6 +106,7 @@ fn title_line(state: &TuiState) -> Line<'static> {
         super::state::TuiView::History => "history",
         super::state::TuiView::Detail => "detail",
         super::state::TuiView::Compare => "compare",
+        super::state::TuiView::Simulation => "simulation",
     };
     let count_text = if state.rows.len() < state.all_rows.len() {
         format!(

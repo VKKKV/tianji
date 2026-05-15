@@ -113,6 +113,34 @@ pub struct DetailState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SimField {
+    pub region: String,
+    pub domain: String,
+    pub value: f64,
+    pub delta: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimAgent {
+    pub actor_id: String,
+    pub status: String,
+    pub last_action: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimulationState {
+    pub mode: String,
+    pub target: String,
+    pub horizon: u64,
+    pub tick: u64,
+    pub total_ticks: u64,
+    pub status: String,
+    pub field_values: Vec<SimField>,
+    pub agent_statuses: Vec<SimAgent>,
+    pub event_log: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompareState {
     pub left_run_id: i64,
     pub right_run_id: i64,
@@ -128,6 +156,7 @@ pub enum TuiView {
     History,
     Detail,
     Compare,
+    Simulation,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +166,7 @@ pub struct TuiState {
     pub view: TuiView,
     pub detail: Option<DetailState>,
     pub compare: Option<CompareState>,
+    pub simulation: Option<SimulationState>,
     pub staged_left_run_id: Option<i64>,
     pub sqlite_path: Option<String>,
     pub selected: usize,
@@ -156,6 +186,7 @@ impl TuiState {
             view: TuiView::Dashboard,
             detail: None,
             compare: None,
+            simulation: None,
             staged_left_run_id: None,
             sqlite_path: None,
             selected: 0,
@@ -241,6 +272,12 @@ impl TuiState {
         self.pending_g = false;
         self.compare = Some(compare);
         self.view = TuiView::Compare;
+    }
+
+    pub fn show_simulation(&mut self, sim: SimulationState) {
+        self.pending_g = false;
+        self.simulation = Some(sim);
+        self.view = TuiView::Simulation;
     }
 
     pub fn stage_selected_for_compare(&mut self) {
@@ -1454,5 +1491,92 @@ mod tests {
         assert!(NERD_GLYPHS.down.contains('\u{2193}')); // ↓
         assert!(NERD_GLYPHS.nav_hint.contains('\u{2191}'));
         assert!(NERD_GLYPHS.bullet.contains('\u{2022}')); // •
+    }
+
+    // ── SimulationState tests ──────────────────────────────────────────
+
+    #[test]
+    fn simulation_state_construction() {
+        let sim = SimulationState {
+            mode: "forward".to_string(),
+            target: "east-asia.conflict".to_string(),
+            horizon: 30,
+            tick: 5,
+            total_ticks: 30,
+            status: "running".to_string(),
+            field_values: vec![SimField {
+                region: "east-asia".to_string(),
+                domain: "conflict".to_string(),
+                value: 0.84,
+                delta: 0.12,
+            }],
+            agent_statuses: vec![SimAgent {
+                actor_id: "china".to_string(),
+                status: "thinking".to_string(),
+                last_action: "naval exercise".to_string(),
+            }],
+            event_log: vec!["tick 1: conflict increased by 0.12".to_string()],
+        };
+
+        assert_eq!(sim.mode, "forward");
+        assert_eq!(sim.target, "east-asia.conflict");
+        assert_eq!(sim.horizon, 30);
+        assert_eq!(sim.tick, 5);
+        assert_eq!(sim.total_ticks, 30);
+        assert_eq!(sim.status, "running");
+        assert_eq!(sim.field_values.len(), 1);
+        assert_eq!(sim.agent_statuses.len(), 1);
+        assert_eq!(sim.event_log.len(), 1);
+    }
+
+    #[test]
+    fn show_simulation_switches_view_and_stores_state() {
+        let mut state = TuiState::new(vec![row(1)], dashboard());
+        assert_eq!(state.view, TuiView::Dashboard);
+        assert!(state.simulation.is_none());
+
+        let sim = SimulationState {
+            mode: "forward".to_string(),
+            target: "global.conflict".to_string(),
+            horizon: 10,
+            tick: 3,
+            total_ticks: 10,
+            status: "running".to_string(),
+            field_values: vec![],
+            agent_statuses: vec![],
+            event_log: vec![],
+        };
+        state.show_simulation(sim.clone());
+
+        assert_eq!(state.view, TuiView::Simulation);
+        assert!(state.simulation.is_some());
+        assert_eq!(state.simulation.as_ref().unwrap().target, "global.conflict");
+    }
+
+    #[test]
+    fn sim_field_delta_direction() {
+        let positive = SimField {
+            region: "east-asia".to_string(),
+            domain: "conflict".to_string(),
+            value: 5.0,
+            delta: 1.5,
+        };
+        assert!(positive.delta > 0.0);
+
+        let negative = SimField {
+            region: "global".to_string(),
+            domain: "trade_volume".to_string(),
+            value: 3.0,
+            delta: -0.8,
+        };
+        assert!(negative.delta < 0.0);
+
+        let stable = SimField {
+            region: "europe".to_string(),
+            domain: "stability".to_string(),
+            value: 4.0,
+            delta: 0.0,
+        };
+        assert!(stable.delta.abs() < f64::EPSILON);
     }
 }

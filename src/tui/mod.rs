@@ -3,6 +3,7 @@ mod dashboard;
 mod detail;
 mod history;
 mod render;
+mod simulation;
 mod state;
 mod theme;
 
@@ -11,12 +12,13 @@ pub use dashboard::{format_dashboard, render_dashboard};
 pub use detail::{format_detail, render_detail};
 pub use history::{format_history_row, history_title, render_history};
 pub use render::{base_style, render};
+pub use simulation::{format_simulation, render_simulation};
 pub use state::{
     array_string_field, bool_field, capitalize_first, compact_json_field, compact_json_value,
     compact_timestamp, detect_glyph_mode, format_alert_tier, numeric_field, optional_f64_field,
     placeholder_or_value, signed_numeric_field, string_field, CompareState, DashboardState,
-    DetailState, FieldStat, GlyphSet, HistoryRow, TopEvent, TuiState, TuiView, ASCII_GLYPHS,
-    EMPTY_TUI_MESSAGE, NERD_GLYPHS,
+    DetailState, FieldStat, GlyphSet, HistoryRow, SimAgent, SimField, SimulationState, TopEvent,
+    TuiState, TuiView, ASCII_GLYPHS, EMPTY_TUI_MESSAGE, NERD_GLYPHS,
 };
 pub use theme::{Theme, KANAGAWA};
 
@@ -38,7 +40,11 @@ use crate::storage::{
 };
 use crate::{delta_memory_path, HotMemory, TianJiError};
 
-pub fn run_history_browser(sqlite_path: &str, limit: usize) -> Result<String, TianJiError> {
+pub fn run_history_browser(
+    sqlite_path: &str,
+    limit: usize,
+    simulate: Option<&str>,
+) -> Result<String, TianJiError> {
     if !Path::new(sqlite_path).exists() {
         return Ok(EMPTY_TUI_MESSAGE.to_string());
     }
@@ -75,7 +81,16 @@ pub fn run_history_browser(sqlite_path: &str, limit: usize) -> Result<String, Ti
     };
 
     let dashboard = DashboardState::from_run_summary(&rows, &memory, latest_summary);
-    run_terminal(TuiState::new_with_storage(rows, dashboard, sqlite_path))?;
+    let mut tui_state = TuiState::new_with_storage(rows, dashboard, sqlite_path);
+
+    // Optionally run a simulation if --simulate was provided
+    if let Some(sim_spec) = simulate {
+        if let Some(sim_state) = run_demo_simulation(sim_spec) {
+            tui_state.simulation = Some(sim_state);
+        }
+    }
+
+    run_terminal(tui_state)?;
     Ok(String::new())
 }
 
@@ -84,6 +99,149 @@ fn is_missing_runs_table(error: &rusqlite::Error) -> bool {
         rusqlite::Error::SqliteFailure(_, Some(message)) => message.contains("no such table: runs"),
         _ => false,
     }
+}
+
+/// Parse a `--simulate` spec like "east-asia.conflict:30" and run a forward simulation.
+/// Returns `Some(SimulationState)` on success, `None` on parse or execution failure.
+fn run_demo_simulation(spec: &str) -> Option<SimulationState> {
+    use std::collections::BTreeMap;
+
+    use crate::hongmeng::Agent;
+    use crate::hongmeng::HongmengConfig;
+    use crate::nuwa::forward::run_forward;
+    use crate::nuwa::sandbox::SimulationMode;
+    use crate::profile::types::{ActorProfile, ActorTier, Capabilities};
+    use crate::profile::ProfileRegistry;
+    use crate::worldline::types::{FieldKey, Worldline};
+
+    let parts: Vec<&str> = spec.split(':').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let field_str = parts[0];
+    let horizon: u64 = parts[1].parse().ok()?;
+    let field_parts: Vec<&str> = field_str.split('.').collect();
+    if field_parts.len() != 2 {
+        return None;
+    }
+    let target_field = FieldKey {
+        region: field_parts[0].to_string(),
+        domain: field_parts[1].to_string(),
+    };
+
+    // Load profiles or create stub agents
+    let agents = match ProfileRegistry::load_from_dir(std::path::Path::new("profiles/")) {
+        Ok(registry) if !registry.profiles.is_empty() => registry
+            .profiles
+            .values()
+            .map(|p| Agent::from_profile(p.clone()))
+            .collect::<Vec<_>>(),
+        _ => {
+            let stub_profile = ActorProfile {
+                id: "stub".to_string(),
+                name: "Stub Agent".to_string(),
+                tier: ActorTier::Nation,
+                interests: vec![],
+                red_lines: vec![],
+                capabilities: Capabilities::default(),
+                behavior_patterns: vec!["observe".to_string(), "diplomatic_protest".to_string()],
+                historical_analogues: vec![],
+            };
+            vec![Agent::from_profile(stub_profile)]
+        }
+    };
+
+    // Create stub worldline with the target field
+    let mut fields = BTreeMap::new();
+    fields.insert(target_field.clone(), 3.5);
+    let hash = Worldline::compute_snapshot_hash(&fields);
+    let worldline = Worldline {
+        id: 0,
+        fields,
+        events: vec![],
+        causal_graph: petgraph::graph::DiGraph::new(),
+        active_actors: std::collections::BTreeSet::new(),
+        divergence: 0.0,
+        parent: None,
+        diverge_tick: 0,
+        snapshot_hash: hash,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mode = SimulationMode::Forward {
+        target_field: target_field.clone(),
+        horizon_ticks: horizon,
+    };
+    let config = HongmengConfig::default();
+
+    let outcome = run_forward(&worldline, &agents, &mode, &config);
+
+    // Convert outcome → SimulationState
+    let primary_branch = outcome.branches.first();
+    let branch_worldline = primary_branch.map(|b| &b.worldline);
+
+    let tick = outcome.tick_count;
+    let total_ticks = horizon;
+    let status = match &outcome.convergence_reason {
+        crate::nuwa::outcome::ConvergenceReason::MaxTicksReached(_) => "completed",
+        crate::nuwa::outcome::ConvergenceReason::FieldTargetReached => "converged",
+        crate::nuwa::outcome::ConvergenceReason::FieldStabilized(_) => "stabilized",
+        _ => "completed",
+    };
+
+    // Build field_values from the primary branch worldline
+    let mut field_values: Vec<SimField> = Vec::new();
+    if let Some(wl) = branch_worldline {
+        for (key, value) in &wl.fields {
+            let base_value = worldline.fields.get(key).copied().unwrap_or(0.0);
+            field_values.push(SimField {
+                region: key.region.clone(),
+                domain: key.domain.clone(),
+                value: *value,
+                delta: value - base_value,
+            });
+        }
+        field_values.sort_by(|a, b| {
+            b.delta
+                .abs()
+                .partial_cmp(&a.delta.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    // Build agent_statuses from the agents used
+    let agent_statuses: Vec<SimAgent> = agents
+        .iter()
+        .map(|agent| {
+            let last_action = agent
+                .action_history
+                .last()
+                .map(|a| a.action_type.clone())
+                .unwrap_or_else(|| "none".to_string());
+            SimAgent {
+                actor_id: agent.actor_id.clone(),
+                status: "done".to_string(),
+                last_action,
+            }
+        })
+        .collect();
+
+    // Build event_log from the primary branch
+    let event_log = primary_branch
+        .map(|b| b.event_sequence.clone())
+        .unwrap_or_default();
+
+    Some(SimulationState {
+        mode: "forward".to_string(),
+        target: format!("{}.{}", target_field.region, target_field.domain),
+        horizon,
+        tick,
+        total_ticks,
+        status: status.to_string(),
+        field_values,
+        agent_statuses,
+        event_log,
+    })
 }
 
 fn run_terminal(state: TuiState) -> Result<(), TianJiError> {
@@ -201,7 +359,9 @@ fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
     match key.code {
         KeyCode::Char('q') => false,
         KeyCode::Esc => {
-            if matches!(state.view, TuiView::Detail | TuiView::Compare) {
+            if state.view == TuiView::Simulation {
+                state.show_dashboard();
+            } else if matches!(state.view, TuiView::Detail | TuiView::Compare) {
                 state.show_history();
             } else {
                 state.pending_g = false;
@@ -224,6 +384,12 @@ fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
         }
         KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('2') => {
             state.show_history();
+            true
+        }
+        KeyCode::Char('3') => {
+            if state.simulation.is_some() {
+                state.view = TuiView::Simulation;
+            }
             true
         }
         KeyCode::Char('c') => {
@@ -581,5 +747,74 @@ mod tests {
 
         assert!(handle_key(&mut state, &ctrl_key('u')));
         assert_eq!(state.selected(), 0);
+    }
+
+    #[test]
+    fn key_3_switches_to_simulation_when_available() {
+        let mut state = TuiState::new(vec![row(1)], dashboard());
+        assert_eq!(state.view, TuiView::Dashboard);
+        assert!(state.simulation.is_none());
+
+        // Key 3 without simulation state should not switch view
+        assert!(handle_key(&mut state, &key(KeyCode::Char('3'))));
+        assert_eq!(state.view, TuiView::Dashboard);
+
+        // Add simulation state
+        state.simulation = Some(SimulationState {
+            mode: "forward".to_string(),
+            target: "global.conflict".to_string(),
+            horizon: 10,
+            tick: 5,
+            total_ticks: 10,
+            status: "running".to_string(),
+            field_values: vec![],
+            agent_statuses: vec![],
+            event_log: vec![],
+        });
+
+        // Key 3 should now switch to Simulation view
+        assert!(handle_key(&mut state, &key(KeyCode::Char('3'))));
+        assert_eq!(state.view, TuiView::Simulation);
+    }
+
+    #[test]
+    fn simulation_view_esc_returns_to_dashboard() {
+        let mut state = TuiState::new(vec![row(1)], dashboard());
+        state.simulation = Some(SimulationState {
+            mode: "forward".to_string(),
+            target: "global.conflict".to_string(),
+            horizon: 10,
+            tick: 5,
+            total_ticks: 10,
+            status: "running".to_string(),
+            field_values: vec![],
+            agent_statuses: vec![],
+            event_log: vec![],
+        });
+        state.view = TuiView::Simulation;
+
+        assert!(handle_key(&mut state, &key(KeyCode::Esc)));
+        assert_eq!(state.view, TuiView::Dashboard);
+    }
+
+    #[test]
+    fn run_demo_simulation_parses_valid_spec() {
+        let sim = run_demo_simulation("global.conflict:5");
+        assert!(sim.is_some());
+        let sim = sim.unwrap();
+        assert_eq!(sim.mode, "forward");
+        assert_eq!(sim.target, "global.conflict");
+        assert_eq!(sim.horizon, 5);
+        assert_eq!(sim.total_ticks, 5);
+    }
+
+    #[test]
+    fn run_demo_simulation_rejects_invalid_spec() {
+        // Missing colon
+        assert!(run_demo_simulation("global.conflict").is_none());
+        // Missing dot in field
+        assert!(run_demo_simulation("conflict:30").is_none());
+        // Non-numeric horizon
+        assert!(run_demo_simulation("global.conflict:abc").is_none());
     }
 }

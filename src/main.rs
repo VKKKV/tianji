@@ -227,6 +227,9 @@ enum Cli {
         /// Maximum number of runs to list
         #[arg(long = "limit", default_value_t = 20)]
         limit: usize,
+        /// Optional simulation spec in "field:horizon" format (e.g. "east-asia.conflict:30")
+        #[arg(long = "simulate")]
+        simulate: Option<String>,
     },
     /// Show delta between the latest runs or an explicit run pair
     Delta {
@@ -823,6 +826,48 @@ mod tests {
                 assert_eq!(interval, 60);
             }
             _ => panic!("expected Watch variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_tui_with_simulate() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "tui",
+            "--sqlite-path",
+            "runs/tianji.sqlite3",
+            "--simulate",
+            "east-asia.conflict:30",
+        ])
+        .expect("parse tui with simulate");
+        match cli {
+            Cli::Tui {
+                sqlite_path,
+                limit,
+                simulate,
+            } => {
+                assert_eq!(sqlite_path, "runs/tianji.sqlite3");
+                assert_eq!(limit, 20);
+                assert_eq!(simulate, Some("east-asia.conflict:30".to_string()));
+            }
+            _ => panic!("expected Tui variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_tui_without_simulate() {
+        let cli = Cli::try_parse_from(["tianji", "tui", "--sqlite-path", "runs/tianji.sqlite3"])
+            .expect("parse tui without simulate");
+        match cli {
+            Cli::Tui {
+                sqlite_path,
+                simulate,
+                ..
+            } => {
+                assert_eq!(sqlite_path, "runs/tianji.sqlite3");
+                assert!(simulate.is_none());
+            }
+            _ => panic!("expected Tui variant"),
         }
     }
 }
@@ -2051,7 +2096,11 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
             })?;
             Ok(String::new())
         }
-        Cli::Tui { sqlite_path, limit } => tianji::tui::run_history_browser(&sqlite_path, limit),
+        Cli::Tui {
+            sqlite_path,
+            limit,
+            simulate,
+        } => tianji::tui::run_history_browser(&sqlite_path, limit, simulate.as_deref()),
         Cli::Delta {
             sqlite_path,
             left_run_id,
