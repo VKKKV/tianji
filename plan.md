@@ -11,7 +11,7 @@
 > `.trellis/spec/backend/development-plan.md`. Python code under `tianji/` and
 > `tests/` is the migration oracle — preserved until M6 retirement. Do not delete
 > Python or claim Hongmeng/Nuwa architecture is shipped before parity gates pass.
-> 当前实际状态: M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成, Crucix Delta Engine
+> 当前实际状态: M1A+M1B+M2+M3A+M3B+M3C 完成, M4 TUI MVP 完成, Crucix Delta Engine
 > daemon auto-delta / AlertTier surfacing 完成并已集成到 persisted run、daemon job status 与 read API。详情见 §12。
 
 ---
@@ -727,8 +727,8 @@ lto = true
 ## 12. 开发阶段
 
 **当前状态 (2026-05-14):** M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成,
-Crucix Delta Engine daemon auto-delta / AlertTier surfacing 完成并已接入 persisted run hot-memory 更新路径、daemon job status 与 read API, M3C schedule 延后。
-Python oracle 保留至 M6 退役。85 个 Rust 测试通过。
+Crucix Delta Engine daemon auto-delta / AlertTier surfacing 完成并已接入 persisted run hot-memory 更新路径、daemon job status 与 read API, M3C schedule 完成。
+Python oracle 保留至 M6 退役。106 个 Rust 测试通过。
 
 ### Phase 1: Worldline 核心 + 管线
 
@@ -782,15 +782,15 @@ Python oracle 保留至 M6 退役。85 个 Rust 测试通过。
 
 - **D4 — Web UI 子命令层级: 顶层 `tianji webui`。** 与 Python CLI 和 `web-ui-contract.md` 一致。daemon 负责控制面与 read-first API，web UI 作为可选独立 surface 单独启动。
 
-- **D5 — schedule 子命令: 延后。** `schedule` 的 timer 生命周期、重复提交语义和测试矩阵留到后续 3C。当前仅实现 `daemon start/stop/status/run/serve`。
+- **D5 — schedule 子命令: 客户端有界循环。** `daemon schedule` 复用 `queue_run` socket 请求，不在 daemon 内持久化 schedule 状态。
 
 - **D6 — Web UI 静态文件: 编译时嵌入。** 三个 `include_str!()` 嵌入 `tianji/webui/{index.html,app.js,styles.css}`，保持单二进制分发。
 
-范围切分（3A + 3B 完成，3C 后续）:
+范围切分（3A + 3B + 3C 完成）:
 
 - **Milestone 3A — Daemon + Local API 基础面。** ✅ `tianji daemon start/stop/status/run`、内部 `daemon serve`、UNIX socket JSON-lines 协议、read-first loopback HTTP API（5 个 axum 路由: meta, runs, runs/:id, runs/latest, compare）。
 - **Milestone 3B — Optional Web UI。** ✅ `tianji webui` 顶层子命令、编译时静态嵌入、daemon API 反向代理、`/queue-run` 重试 logic。
-- **Milestone 3C — Bounded schedule（后续）。** `tianji daemon schedule --every-seconds N --count M` 及其测试矩阵。
+- **Milestone 3C — Bounded schedule。** ✅ `tianji daemon schedule --every-seconds N --count M`，客户端发送 exactly `count` 次 `queue_run`，仅在提交之间 sleep，验证 `--every-seconds >= 60` 与 `--count >= 1`。
 
 完成内容 (已更新为当前实际):
 - 依赖: `tokio` (full) + `axum` (0.8) + `uuid` (v4) + `reqwest` (0.13, rustls + blocking) + `libc`
@@ -820,8 +820,8 @@ Python oracle 保留至 M6 退役。85 个 Rust 测试通过。
 待完成:
 - 外部通知投递: Telegram/Discord/webhook 等推送按需实现
 - Cold archive rotation / 冷归档策略
-- Hot memory 剪枝策略的 cron/daemon 自动触发（M3C schedule/housekeeping 延后）
-- M3C schedule/housekeeping 优化: 合并 daemon hot-memory update 与 mark-alerted 写入路径，减少额外 hot-memory I/O；这是 housekeeping 优化，不是当前 correctness bug。
+- Hot memory 剪枝策略的 cron/daemon 自动触发（housekeeping 延后）
+- Housekeeping 优化: 合并 daemon hot-memory update 与 mark-alerted 写入路径，减少额外 hot-memory I/O；这是 housekeeping 优化，不是当前 correctness bug。
 
 #### 已知问题 (2026-05-14 Code Review)
 
