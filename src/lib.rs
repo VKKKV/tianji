@@ -33,6 +33,7 @@ use serde_json::Value as JsonValue;
 pub use storage::{
     compare_runs, get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id,
     get_run_summary, list_runs, persist_run, EventGroupFilters, RunListFilters, ScoredEventFilters,
+    MAX_RUN_SUMMARY_EVENT_LIMIT, MAX_RUN_SUMMARY_GROUP_LIMIT,
 };
 
 pub const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";
@@ -111,18 +112,18 @@ pub fn run_fixture_path_with_alert_marking(
 
     let scored_events_json: Vec<JsonValue> = scored_events
         .iter()
-        .map(|e| serde_json::to_value(e).expect("scored event json"))
-        .collect();
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()?;
 
     let intervention_candidates_json: Vec<JsonValue> = interventions
         .iter()
-        .map(|c| serde_json::to_value(c).expect("intervention candidate json"))
-        .collect();
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()?;
 
     let event_groups_json: Vec<JsonValue> = event_groups
         .iter()
-        .map(|g| serde_json::to_value(g).expect("event group json"))
-        .collect();
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()?;
 
     let artifact = RunArtifact {
         schema_version: RUN_ARTIFACT_SCHEMA_VERSION.to_string(),
@@ -725,6 +726,148 @@ mod tests {
             .as_array()
             .expect("interventions array");
         assert_eq!(interventions.len(), 3);
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn history_show_preserves_unlimited_default_and_clamps_explicit_limits() {
+        let db_path = temp_sqlite_path();
+        let artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
+        let feed_text = fs::read_to_string(SAMPLE_FIXTURE).expect("fixture");
+        let source = fixture_source_name(Path::new(SAMPLE_FIXTURE));
+        let mut raw_items = parse_feed(&feed_text, &source).expect("parse");
+        assign_canonical_hashes(&mut raw_items);
+        let normalized_events = normalize_items(&raw_items);
+        let mut scored_events = score_events(&normalized_events);
+        let interventions = backtrack_candidates(&scored_events, 5, None);
+
+        let template = scored_events[0].clone();
+        for index in scored_events.len()..(MAX_RUN_SUMMARY_EVENT_LIMIT + 5) {
+            let mut event = template.clone();
+            event.event_id = format!("synthetic-{index:04}");
+            event.title = format!("Synthetic event {index:04}");
+            event.divergence_score = 10_000.0 - index as f64;
+            scored_events.push(event);
+        }
+
+        persist_run(
+            &db_path,
+            &artifact,
+            &raw_items,
+            &normalized_events,
+            &scored_events,
+            &interventions,
+        )
+        .expect("persist expanded run");
+
+        let unbounded = get_run_summary(
+            &db_path,
+            1,
+            &ScoredEventFilters::default(),
+            false,
+            &EventGroupFilters::default(),
+        )
+        .expect("summary")
+        .expect("run");
+        assert_eq!(
+            unbounded["scored_events"].as_array().expect("events").len(),
+            scored_events.len()
+        );
+
+        let capped_filters = ScoredEventFilters {
+            limit_scored_events: Some(MAX_RUN_SUMMARY_EVENT_LIMIT + 100),
+            ..Default::default()
+        };
+        let capped = get_run_summary(
+            &db_path,
+            1,
+            &capped_filters,
+            false,
+            &EventGroupFilters::default(),
+        )
+        .expect("summary")
+        .expect("run");
+        assert_eq!(
+            capped["scored_events"].as_array().expect("events").len(),
+            MAX_RUN_SUMMARY_EVENT_LIMIT
+        );
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn history_show_group_limit_clamps_only_when_explicit() {
+        let db_path = temp_sqlite_path();
+        let mut artifact = run_fixture_path(SAMPLE_FIXTURE, None)
+            .expect("fixture artifact")
+            .artifact;
+        artifact.scenario_summary.event_groups = (0..(MAX_RUN_SUMMARY_GROUP_LIMIT + 5))
+            .map(|index| {
+                serde_json::json!({
+                    "group_id": format!("group-{index:04}"),
+                    "headline_event_id": format!("event-{index:04}"),
+                    "dominant_field": "technology"
+                })
+            })
+            .collect();
+        let feed_text = fs::read_to_string(SAMPLE_FIXTURE).expect("fixture");
+        let source = fixture_source_name(Path::new(SAMPLE_FIXTURE));
+        let mut raw_items = parse_feed(&feed_text, &source).expect("parse");
+        assign_canonical_hashes(&mut raw_items);
+        let normalized_events = normalize_items(&raw_items);
+        let scored_events = score_events(&normalized_events);
+        let interventions = backtrack_candidates(&scored_events, 5, None);
+
+        persist_run(
+            &db_path,
+            &artifact,
+            &raw_items,
+            &normalized_events,
+            &scored_events,
+            &interventions,
+        )
+        .expect("persist expanded run");
+
+        let unbounded = get_run_summary(
+            &db_path,
+            1,
+            &ScoredEventFilters::default(),
+            false,
+            &EventGroupFilters::default(),
+        )
+        .expect("summary")
+        .expect("run");
+        assert_eq!(
+            unbounded["scenario_summary"]["event_groups"]
+                .as_array()
+                .expect("groups")
+                .len(),
+            MAX_RUN_SUMMARY_GROUP_LIMIT + 5
+        );
+
+        let capped_group_filters = EventGroupFilters {
+            limit_event_groups: Some(MAX_RUN_SUMMARY_GROUP_LIMIT + 100),
+            ..Default::default()
+        };
+        let capped = get_run_summary(
+            &db_path,
+            1,
+            &ScoredEventFilters::default(),
+            false,
+            &capped_group_filters,
+        )
+        .expect("summary")
+        .expect("run");
+        assert_eq!(
+            capped["scenario_summary"]["event_groups"]
+                .as_array()
+                .expect("groups")
+                .len(),
+            MAX_RUN_SUMMARY_GROUP_LIMIT
+        );
 
         cleanup_db(&db_path);
     }

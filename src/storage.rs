@@ -9,6 +9,11 @@ use crate::models::{InterventionCandidate, NormalizedEvent, RawItem, RunArtifact
 use crate::utils::{days_since_epoch, round2};
 use crate::TianJiError;
 
+pub const DEFAULT_RUN_SUMMARY_EVENT_LIMIT: usize = 200;
+pub const MAX_RUN_SUMMARY_EVENT_LIMIT: usize = 500;
+pub const DEFAULT_RUN_SUMMARY_GROUP_LIMIT: usize = 200;
+pub const MAX_RUN_SUMMARY_GROUP_LIMIT: usize = 500;
+
 static HISTORY_TIMESTAMP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})")
         .expect("valid history timestamp regex")
@@ -649,6 +654,8 @@ pub fn get_run_summary(
         serde_json::from_str(&input_summary_json).map_err(TianJiError::Json)?;
     let mut scenario_summary: serde_json::Value =
         serde_json::from_str(&scenario_summary_json).map_err(TianJiError::Json)?;
+    let scored_filters = bounded_scored_filters(scored_filters);
+    let group_filters = bounded_group_filters(group_filters);
 
     // Filter event groups
     if let Some(groups) = scenario_summary
@@ -665,10 +672,20 @@ pub fn get_run_summary(
     }
 
     // Fetch scored events
-    let mut stmt = connection.prepare(
-        "SELECT event_id, title, source, link, published_at, actors_json, regions_json, keywords_json, dominant_field, impact_score, field_attraction, divergence_score, rationale_json FROM scored_events WHERE run_id = ?1 ORDER BY divergence_score DESC, id ASC",
-    )?;
-    let mut rows = stmt.query(params![run_id])?;
+    let event_query_limit = if scored_filters_have_predicates(&scored_filters) {
+        None
+    } else {
+        scored_filters.limit_scored_events
+    };
+    let sql = match event_query_limit {
+        Some(_) => "SELECT event_id, title, source, link, published_at, actors_json, regions_json, keywords_json, dominant_field, impact_score, field_attraction, divergence_score, rationale_json FROM scored_events WHERE run_id = ?1 ORDER BY divergence_score DESC, id ASC LIMIT ?2",
+        None => "SELECT event_id, title, source, link, published_at, actors_json, regions_json, keywords_json, dominant_field, impact_score, field_attraction, divergence_score, rationale_json FROM scored_events WHERE run_id = ?1 ORDER BY divergence_score DESC, id ASC",
+    };
+    let mut stmt = connection.prepare(sql)?;
+    let mut rows = match event_query_limit {
+        Some(limit) => stmt.query(params![run_id, limit as i64])?,
+        None => stmt.query(params![run_id])?,
+    };
     let mut scored_events: Vec<serde_json::Value> = Vec::new();
     while let Some(row) = rows.next()? {
         let event_id: String = row.get(0)?;
@@ -710,7 +727,7 @@ pub fn get_run_summary(
     }
 
     // Apply scored event filters
-    scored_events = filter_scored_event_details(scored_events, scored_filters);
+    scored_events = filter_scored_event_details(scored_events, &scored_filters);
 
     // Fetch intervention candidates
     let mut stmt = connection.prepare(
@@ -1387,6 +1404,40 @@ fn filter_scored_event_details(
         filtered.truncate(limit);
     }
     filtered
+}
+
+fn bounded_scored_filters(filters: &ScoredEventFilters) -> ScoredEventFilters {
+    ScoredEventFilters {
+        dominant_field: filters.dominant_field.clone(),
+        min_impact_score: filters.min_impact_score,
+        max_impact_score: filters.max_impact_score,
+        min_field_attraction: filters.min_field_attraction,
+        max_field_attraction: filters.max_field_attraction,
+        min_divergence_score: filters.min_divergence_score,
+        max_divergence_score: filters.max_divergence_score,
+        limit_scored_events: filters
+            .limit_scored_events
+            .map(|limit| limit.min(MAX_RUN_SUMMARY_EVENT_LIMIT)),
+    }
+}
+
+fn scored_filters_have_predicates(filters: &ScoredEventFilters) -> bool {
+    filters.dominant_field.is_some()
+        || filters.min_impact_score.is_some()
+        || filters.max_impact_score.is_some()
+        || filters.min_field_attraction.is_some()
+        || filters.max_field_attraction.is_some()
+        || filters.min_divergence_score.is_some()
+        || filters.max_divergence_score.is_some()
+}
+
+fn bounded_group_filters(filters: &EventGroupFilters) -> EventGroupFilters {
+    EventGroupFilters {
+        dominant_field: filters.dominant_field.clone(),
+        limit_event_groups: filters
+            .limit_event_groups
+            .map(|limit| limit.min(MAX_RUN_SUMMARY_GROUP_LIMIT)),
+    }
 }
 
 fn filter_run_list_items(

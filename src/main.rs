@@ -537,6 +537,7 @@ fn validate_int_range(
 // PID file management (for daemon start/stop)
 // ---------------------------------------------------------------------------
 
+use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 
 fn pid_file_for_socket(socket_path: &str) -> PathBuf {
@@ -549,6 +550,31 @@ fn pid_file_for_socket(socket_path: &str) -> PathBuf {
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
     dir.join(format!("{file_name}.pid"))
+}
+
+fn pid_lock_file_for_socket(socket_path: &str) -> PathBuf {
+    let mut path = pid_file_for_socket(socket_path);
+    path.set_extension("pid.lock");
+    path
+}
+
+fn acquire_pid_lock(socket_path: &str) -> Result<std::fs::File, TianJiError> {
+    let lock_path = pid_lock_file_for_socket(socket_path);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    let rc = unsafe { libc::flock(lock_file.as_raw_fd(), libc::LOCK_EX) };
+    if rc == 0 {
+        Ok(lock_file)
+    } else {
+        Err(TianJiError::Io(std::io::Error::last_os_error()))
+    }
 }
 
 fn read_pid_file(socket_path: &str) -> Result<Option<u32>, TianJiError> {
@@ -583,7 +609,10 @@ fn remove_pid_file(socket_path: &str) {
 
 fn is_pid_running(pid: u32) -> bool {
     // Send signal 0 to check if process exists
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    if unsafe { libc::kill(pid as i32, 0) == 0 } {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 fn wait_for_socket(socket_path: &str, timeout_secs: f64) -> bool {
@@ -631,6 +660,7 @@ fn handle_daemon_start(
     let validated_host = tianji::daemon::validate_loopback_host(host)?;
 
     let start_timeout_secs = 2.0;
+    let _pid_lock = acquire_pid_lock(socket_path)?;
 
     // Check existing PID
     if let Some(existing_pid) = read_pid_file(socket_path)? {
@@ -737,6 +767,7 @@ fn terminate_child(child: &mut std::process::Child, timeout_secs: f64) {
 fn handle_daemon_stop(socket_path: &str) -> Result<String, TianJiError> {
     let stop_timeout_secs = 2.0;
     let poll_interval = std::time::Duration::from_millis(100);
+    let _pid_lock = acquire_pid_lock(socket_path)?;
 
     let pid = read_pid_file(socket_path)?.ok_or_else(|| {
         TianJiError::Usage(format!(

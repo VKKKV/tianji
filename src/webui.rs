@@ -21,6 +21,7 @@ pub struct WebUiState {
     pub api_base_url: String,
     pub socket_path: String,
     pub sqlite_path: Option<String>,
+    pub http_client: reqwest::Client,
 }
 
 // ---------------------------------------------------------------------------
@@ -78,8 +79,8 @@ async fn proxy_api(
         path_and_query
     );
 
-    let client = reqwest::Client::new();
-    match client
+    match state
+        .http_client
         .get(&upstream_url)
         .timeout(std::time::Duration::from_secs(5))
         .header("Accept", "application/json")
@@ -173,7 +174,22 @@ async fn handle_queue_run(
     let mut last_error: Option<String>;
 
     loop {
-        match crate::daemon::send_daemon_request(&state.socket_path, &daemon_request) {
+        let socket_path = state.socket_path.clone();
+        let request_for_daemon = daemon_request.clone();
+        let response_result = tokio::task::spawn_blocking(move || {
+            crate::daemon::send_daemon_request(&socket_path, &request_for_daemon)
+        })
+        .await
+        .map_err(|e| QueueRunError {
+            status: StatusCode::BAD_REQUEST,
+            body: serde_json::json!({
+                "ok": false,
+                "data": null,
+                "error": { "message": format!("queue-run task failed: {e}") },
+            }),
+        })?;
+
+        match response_result {
             Ok(response) => {
                 let ok = response
                     .get("ok")
@@ -283,6 +299,7 @@ pub async fn serve_webui(
         api_base_url: api_base_url.to_string(),
         socket_path: socket_path.to_string(),
         sqlite_path: sqlite_path.map(String::from),
+        http_client: reqwest::Client::new(),
     };
 
     let app = Router::new()

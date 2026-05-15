@@ -28,6 +28,8 @@ impl IntoResponse for JsonEnvelope {
 const API_VERSION: &str = "v1";
 const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";
 const MAX_RUNS_LIMIT: usize = 200;
+const API_RUN_SUMMARY_EVENT_LIMIT: usize = 200;
+const API_RUN_SUMMARY_GROUP_LIMIT: usize = 200;
 
 fn api_meta_data() -> JsonValue {
     serde_json::json!({
@@ -179,8 +181,8 @@ async fn get_run_by_id(
         });
     }
 
-    let scored_filters = crate::storage::ScoredEventFilters::default();
-    let group_filters = crate::storage::EventGroupFilters::default();
+    let scored_filters = api_scored_event_filters();
+    let group_filters = api_event_group_filters();
     let payload = crate::get_run_summary(
         &state.sqlite_path,
         run_id,
@@ -218,8 +220,8 @@ async fn get_latest_run(State(state): State<AppState>) -> Result<impl IntoRespon
         }
     };
 
-    let scored_filters = crate::storage::ScoredEventFilters::default();
-    let group_filters = crate::storage::EventGroupFilters::default();
+    let scored_filters = api_scored_event_filters();
+    let group_filters = api_event_group_filters();
     let payload = crate::get_run_summary(
         &state.sqlite_path,
         run_id,
@@ -293,8 +295,8 @@ async fn get_compare(
         }
     };
 
-    let scored_filters = crate::storage::ScoredEventFilters::default();
-    let group_filters = crate::storage::EventGroupFilters::default();
+    let scored_filters = api_scored_event_filters();
+    let group_filters = api_event_group_filters();
     let result = crate::compare_runs(
         &state.sqlite_path,
         left_run_id,
@@ -338,16 +340,22 @@ async fn get_latest_delta(
     let sqlite_path = params.sqlite_path.unwrap_or(state.sqlite_path);
     let memory = crate::HotMemory::load(&crate::delta_memory_path(&sqlite_path));
     let Some(run) = memory.runs.front() else {
-        return Err(ApiError {
-            status: StatusCode::NOT_FOUND,
-            body: error_envelope("delta_not_found", "No delta memory is available."),
+        let payload = serde_json::json!({
+            "run_id": null,
+            "timestamp": null,
+            "alert_tier": null,
+            "delta": null,
         });
+        return Ok(JsonEnvelope(success_envelope(payload)));
     };
     let Some(delta) = run.delta.as_ref() else {
-        return Err(ApiError {
-            status: StatusCode::NOT_FOUND,
-            body: error_envelope("delta_not_found", "No latest delta is available."),
+        let payload = serde_json::json!({
+            "run_id": run.run_id,
+            "timestamp": run.timestamp,
+            "alert_tier": null,
+            "delta": null,
         });
+        return Ok(JsonEnvelope(success_envelope(payload)));
     };
 
     let payload = serde_json::json!({
@@ -357,6 +365,20 @@ async fn get_latest_delta(
         "delta": delta,
     });
     Ok(JsonEnvelope(success_envelope(payload)))
+}
+
+fn api_scored_event_filters() -> crate::storage::ScoredEventFilters {
+    crate::storage::ScoredEventFilters {
+        limit_scored_events: Some(API_RUN_SUMMARY_EVENT_LIMIT),
+        ..Default::default()
+    }
+}
+
+fn api_event_group_filters() -> crate::storage::EventGroupFilters {
+    crate::storage::EventGroupFilters {
+        limit_event_groups: Some(API_RUN_SUMMARY_GROUP_LIMIT),
+        ..Default::default()
+    }
 }
 
 // ---------------------------------------------------------------------------

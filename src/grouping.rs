@@ -69,7 +69,7 @@ fn select_best_group_match(
     for (index, group) in groups.iter().enumerate() {
         if let Some((signal_count, time_delta, parent_id)) = best_group_link(event, group) {
             let score = (signal_count, -time_delta);
-            if best_score.is_none() || score > best_score.unwrap() {
+            if best_score.as_ref().is_none_or(|current| score > *current) {
                 best_score = Some(score);
                 best_index = Some(index);
                 best_parent_event_id = Some(parent_id);
@@ -89,10 +89,9 @@ fn best_group_link(event: &ScoredEvent, group: &[&ScoredEvent]) -> Option<(usize
     for member in group {
         if let Some((signal_count, time_delta)) = link_score_between_events(event, member) {
             let score = (signal_count, -time_delta, member.event_id.clone());
-            if best.is_none()
-                || score.0 > best.as_ref().unwrap().0
-                || (score.0 == best.as_ref().unwrap().0 && score.1 > best.as_ref().unwrap().1)
-            {
+            if best.as_ref().is_none_or(|current| {
+                score.0 > current.0 || (score.0 == current.0 && score.1 > current.1)
+            }) {
                 best = Some(score);
             }
         }
@@ -448,9 +447,10 @@ fn compute_group_causal_span_hours(group: &[&ScoredEvent]) -> Option<f64> {
     if times.len() < 2 {
         return None;
     }
-    let min_time = *times.iter().min().unwrap();
-    let max_time = *times.iter().max().unwrap();
-    Some(round2((max_time - min_time) as f64 / 3600.0))
+    let (Some(min_time), Some(max_time)) = (times.iter().min(), times.iter().max()) else {
+        return None;
+    };
+    Some(round2((*max_time - *min_time) as f64 / 3600.0))
 }
 
 fn is_within_group_time_window(event: &ScoredEvent, anchor: &ScoredEvent) -> bool {

@@ -552,7 +552,19 @@ async fn listen_socket(socket_path: &str, state: &Arc<DaemonState>) -> Result<()
         .map_err(|e| TianJiError::Usage(format!("Failed to bind socket: {e}")))?;
 
     loop {
-        let (stream, _) = listener.accept().await.map_err(TianJiError::Io)?;
+        let (stream, _) = match listener.accept().await {
+            Ok(accepted) => accepted,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
+                ) =>
+            {
+                eprintln!("Transient socket accept error: {error}");
+                continue;
+            }
+            Err(error) => return Err(TianJiError::Io(error)),
+        };
         let state = state.clone();
 
         tokio::spawn(async move {

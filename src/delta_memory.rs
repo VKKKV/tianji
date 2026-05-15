@@ -139,8 +139,12 @@ impl HotMemory {
         let bak_path = path.with_extension("json.bak");
         for candidate in [path, bak_path.as_path()] {
             if let Ok(raw) = std::fs::read_to_string(candidate) {
-                if let Ok(memory) = serde_json::from_str::<Self>(&raw) {
-                    return memory;
+                match serde_json::from_str::<Self>(&raw) {
+                    Ok(memory) => return memory,
+                    Err(error) => eprintln!(
+                        "warning: failed to parse hot memory {}: {error}",
+                        candidate.display()
+                    ),
                 }
             }
         }
@@ -154,11 +158,20 @@ impl HotMemory {
         let tmp_path = path.with_extension("json.tmp");
         let bak_path = path.with_extension("json.bak");
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&tmp_path, json)?;
+        {
+            use std::io::Write;
+            let mut tmp_file = std::fs::File::create(&tmp_path)?;
+            tmp_file.write_all(json.as_bytes())?;
+            tmp_file.sync_all()?;
+        }
         if path.exists() {
-            let _ = std::fs::rename(path, &bak_path);
+            std::fs::copy(path, &bak_path)?;
+            std::fs::File::open(&bak_path)?.sync_all()?;
         }
         std::fs::rename(&tmp_path, path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
         Ok(())
     }
 
@@ -230,7 +243,7 @@ impl HotMemory {
     pub fn prune_stale_signals_at(&mut self, decay: &AlertDecayModel, now_unix_secs: i64) {
         self.alerted_signals.retain(|_, entry| {
             let Some(last_alerted) = parse_rfc3339_utc_seconds(&entry.last_alerted) else {
-                return false;
+                return true;
             };
             let max_age_hours = if entry.count >= 2 {
                 decay.prune_repeat_hours
@@ -500,12 +513,39 @@ mod tests {
         let decay = AlertDecayModel::default();
         memory.mark_alerted_at("event:1", "1970-01-01T00:00:00+00:00");
         memory.mark_alerted_at("event:1", "1970-01-01T00:00:00+00:00");
+        memory.mark_alerted_at("event:bad-time", "not-a-timestamp");
 
         assert!(memory.is_signal_suppressed_at("event:1", &decay, 60));
         assert!(!memory.is_signal_suppressed_at("event:1", &decay, 7 * 3600));
 
         memory.prune_stale_signals_at(&decay, 49 * 3600);
         assert!(!memory.alerted_signals.contains_key("event:1"));
+        assert!(memory.alerted_signals.contains_key("event:bad-time"));
+    }
+
+    #[test]
+    fn hot_memory_save_keeps_primary_when_backup_write_fails() {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("tianji_delta_memory_bak_fail_{id}"));
+        std::fs::create_dir_all(&dir).expect("create dir");
+        let path = dir.join("hot.json");
+        let bak_path = path.with_extension("json.bak");
+
+        let mut initial = HotMemory::default();
+        initial.push_run(compact(1), None, 3);
+        initial.save_atomic(&path).expect("initial save");
+        std::fs::create_dir_all(&bak_path).expect("backup path as directory");
+
+        let mut updated = HotMemory::default();
+        updated.push_run(compact(2), None, 3);
+        let result = updated.save_atomic(&path);
+
+        assert!(result.is_err());
+        let loaded = HotMemory::load(&path);
+        assert_eq!(loaded.runs[0].run_id, 1);
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
