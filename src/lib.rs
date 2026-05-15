@@ -13,6 +13,7 @@ pub mod storage;
 pub mod tui;
 pub mod utils;
 pub mod webui;
+pub mod worldline;
 
 use std::fs;
 use std::path::Path;
