@@ -185,8 +185,17 @@ Hot-memory path:
   to avoid stale cross-test or reused-path contamination.
 - Pruning in the persistence path must use the current run's persisted `generated_at`, not
   wall-clock time, so fixture runs stay deterministic.
-- `save_atomic` writes a temporary file, preserves the previous hot file as `.bak`, then renames
-  the temporary file into place.
+- Alert pruning must retain entries with malformed `last_alerted` timestamps rather than
+  deleting them silently. This matches suppression behavior (`malformed timestamp` means
+  "not suppressed") and avoids losing alert history during cleanup.
+- `save_atomic` writes a temporary file, calls `sync_all()` on that temporary file, copies the
+  previous hot file to `.bak` when present, calls `sync_all()` on the backup, renames the
+  temporary file into place, and syncs the parent directory. A backup-write failure must leave
+  the primary hot file untouched.
+- API run-summary routes (`/api/v1/runs/:id`, `/api/v1/runs/latest`, and compare endpoints)
+  must pass explicit bounded scored-event and event-group limits. CLI/history-show defaults
+  remain unbounded unless the caller provides an explicit limit, and explicit limits are clamped
+  to the storage maximum.
 - `run_fixture_path` returns the computed `DeltaReport` and `AlertTier` in `RunResult`.
   CLI artifact output must serialize `RunResult.artifact`, preserving the shipped run JSON.
 - Daemon successful job status includes `delta_tier` and `delta_summary` fields.
@@ -211,6 +220,11 @@ Hot-memory path:
 | Hot-memory primary JSON is corrupt but `.bak` is valid | Load `.bak` |
 | Hot-memory primary and backup are missing/corrupt | Return `HotMemory::default()` |
 | Hot-memory save fails | Propagate `TianJiError` |
+| Hot-memory backup write fails during save | Propagate `TianJiError`; keep primary intact |
+| Alert entry has malformed `last_alerted` during pruning | Retain the entry |
+| API run summary omits item limits | Apply API defaults |
+| CLI/history run summary omits item limits | Return unbounded detail |
+| Explicit run-summary limit exceeds storage max | Clamp to max |
 | Latest delta requested with fewer than two persisted runs | Return successful envelope with `delta: null`, `alert_tier: null` |
 
 #### 5. Good/Base/Bad Cases
@@ -221,13 +235,19 @@ Hot-memory path:
   and daemon/API delta fields are null.
 - Bad: using `Utc::now()` or `SystemTime` in the run-persistence pruning path makes fixture
   tests and replayed runs nondeterministic.
+- Bad: applying API default run-summary limits inside the storage layer would truncate CLI
+  `history-show` output and break the explicit-detail contract.
 
 #### 6. Tests Required
 
 - Unit-test numeric, count, new-signal, and risk-direction delta behavior.
 - Unit-test alert suppression and stale-signal pruning with injected timestamps.
 - Unit-test hot-memory primary/backup load fallback and atomic save behavior.
+- Regression-test backup-write failure leaves the primary hot-memory file readable.
+- Unit-test malformed alert timestamps survive stale-signal pruning.
 - Integration-test two persisted runs update hot memory in newest-first order.
+- Unit-test run-summary limit behavior: omitted CLI limits stay unbounded, explicit limits clamp,
+  and filtered scored-event queries do not pre-limit before applying predicates.
 - Regression-test reused temp DB names reset stale hot memory on first run.
 - Integration-test `RunResult` includes delta and alert tier for persisted run pairs.
 - Test daemon job status includes `delta_tier` and `delta_summary` after a successful run.

@@ -728,7 +728,7 @@ lto = true
 
 **当前状态 (2026-05-15):** M1A+M1B+M2+M3A+M3B 完成, M4 TUI MVP 完成,
 Crucix Delta Engine daemon auto-delta / AlertTier surfacing 完成并已接入 persisted run hot-memory 更新路径、daemon job status 与 read API, M3C schedule 完成。
-M3.5 housekeeping 已合并 daemon hot-memory update 与 mark-alerted 写入路径。Python oracle 保留至 M6 退役。108 个 Rust 测试通过。
+M3.5 housekeeping 已合并 daemon hot-memory update 与 mark-alerted 写入路径，并补强 hot-memory fsync/backup 原子保存与确定性 alert timestamp 路径。Python oracle 保留至 M6 退役。111 个 Rust 测试通过。
 
 ### Phase 1: Worldline 核心 + 管线
 
