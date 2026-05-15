@@ -8,6 +8,7 @@ pub mod grouping;
 pub mod llm;
 pub mod models;
 pub mod normalize;
+pub mod profile;
 pub mod scoring;
 pub mod storage;
 pub mod tui;
@@ -46,6 +47,7 @@ pub enum TianJiError {
     Input(String),
     Io(std::io::Error),
     Json(serde_json::Error),
+    Yaml(serde_yaml::Error, String),
     Storage(rusqlite::Error),
 }
 
@@ -56,6 +58,7 @@ impl std::fmt::Display for TianJiError {
             Self::Input(message) => write!(formatter, "{message}"),
             Self::Io(error) => write!(formatter, "{error}"),
             Self::Json(error) => write!(formatter, "{error}"),
+            Self::Yaml(error, path) => write!(formatter, "{error} (in {path})"),
             Self::Storage(error) => write!(formatter, "{error}"),
         }
     }
@@ -78,6 +81,12 @@ impl From<serde_json::Error> for TianJiError {
 impl From<rusqlite::Error> for TianJiError {
     fn from(error: rusqlite::Error) -> Self {
         Self::Storage(error)
+    }
+}
+
+impl From<serde_yaml::Error> for TianJiError {
+    fn from(error: serde_yaml::Error) -> Self {
+        Self::Yaml(error, "<unknown>".to_string())
     }
 }
 
