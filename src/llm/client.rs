@@ -1,5 +1,6 @@
 use super::config::{ProviderConfig, ProviderType};
 use super::error::LlmError;
+use serde_json::json;
 
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
@@ -47,16 +48,133 @@ impl LlmClient {
         messages: Vec<ChatMessage>,
         model: Option<&str>,
     ) -> Result<String, LlmError> {
-        let _ = (
-            &messages,
-            model,
-            &self.base_url,
-            &self.api_key,
-            self.max_concurrency,
-            &self.provider_type,
-        );
-        // Stub implementation — real async-openai / ollama-rs integration in Phase 3+
-        Ok("stub".to_string())
+        let model = model.unwrap_or(&self.model);
+        match &self.provider_type {
+            ProviderType::OpenAI => self.chat_openai_compatible(messages, model).await,
+            ProviderType::Ollama => self.chat_ollama(messages, model).await,
+        }
+    }
+
+    async fn chat_openai_compatible(
+        &self,
+        messages: Vec<ChatMessage>,
+        model: &str,
+    ) -> Result<String, LlmError> {
+        let base_url = self
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
+        let api_key = self
+            .api_key
+            .as_deref()
+            .ok_or_else(|| LlmError::Config("no API key configured for OpenAI provider".into()))?;
+
+        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+        let msgs: Vec<serde_json::Value> = messages
+            .into_iter()
+            .map(|m| json!({"role": m.role, "content": m.content}))
+            .collect();
+
+        let body = json!({
+            "model": model,
+            "messages": msgs,
+        });
+
+        let body_str = serde_json::to_string(&body)
+            .map_err(|e| LlmError::ChatFailed(format!("serialize error: {e}")))?;
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .body(body_str)
+            .send()
+            .await
+            .map_err(|e| LlmError::ChatFailed(format!("request failed: {e}")))?;
+
+        let status = response.status();
+        let text = response.text().await.map_err(|e| {
+            LlmError::ChatFailed(format!("failed to read response: {e}"))
+        })?;
+
+        if !status.is_success() {
+            return Err(LlmError::ChatFailed(format!(
+                "API error {}: {}",
+                status.as_u16(),
+                text
+            )));
+        }
+
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| {
+                LlmError::ChatFailed(format!("failed to parse response: {e}"))
+            })?;
+
+        Ok(json["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("")
+            .to_string())
+    }
+
+    async fn chat_ollama(
+        &self,
+        messages: Vec<ChatMessage>,
+        model: &str,
+    ) -> Result<String, LlmError> {
+        let base_url = self
+            .base_url
+            .as_deref()
+            .unwrap_or("http://localhost:11434");
+
+        let prompt = messages
+            .into_iter()
+            .map(|m| match m.role.as_str() {
+                "system" => format!("[System]: {}", m.content),
+                "assistant" => format!("[Assistant]: {}", m.content),
+                _ => m.content,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+        let body = json!({
+            "model": model,
+            "prompt": prompt,
+            "stream": false,
+        });
+
+        let body_str = serde_json::to_string(&body)
+            .map_err(|e| LlmError::ChatFailed(format!("serialize error: {e}")))?;
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .body(body_str)
+            .send()
+            .await
+            .map_err(|e| LlmError::ChatFailed(format!("Ollama request failed: {e}")))?;
+
+        let status = response.status();
+        let text = response.text().await.map_err(|e| {
+            LlmError::ChatFailed(format!("failed to read Ollama response: {e}"))
+        })?;
+
+        if !status.is_success() {
+            return Err(LlmError::ChatFailed(format!(
+                "Ollama error {}: {}",
+                status.as_u16(),
+                text
+            )));
+        }
+
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| {
+                LlmError::ChatFailed(format!("failed to parse Ollama response: {e}"))
+            })?;
+
+        Ok(json["response"].as_str().unwrap_or("").to_string())
     }
 }
 
@@ -104,14 +222,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chat_stub_returns_stub_response() {
-        let config = ollama_config();
+    async fn chat_openai_invalid_key_returns_error() {
+        let mut config = openai_config();
+        config.api_key = Some("invalid-key".to_string());
+        let client = LlmClient::new("openai_remote", &config).expect("create client");
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "Hello".to_string(),
+        }];
+        let result = client.chat(messages, None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn chat_ollama_unreachable_returns_error() {
+        let mut config = ollama_config();
+        config.base_url = Some("http://127.0.0.1:19999".to_string());
         let client = LlmClient::new("ollama_local", &config).expect("create client");
         let messages = vec![ChatMessage {
             role: "user".to_string(),
             content: "Hello".to_string(),
         }];
-        let response = client.chat(messages, None).await.expect("chat response");
-        assert_eq!(response, "stub");
+        let result = client.chat(messages, None).await;
+        assert!(result.is_err());
     }
 }

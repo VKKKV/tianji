@@ -9,6 +9,7 @@ regex = "1.12"
 roxmltree = "0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
 sha2 = "0.11"
 rusqlite = { version = "0.39", features = ["bundled"] }
 clap = { version = "4.6", features = ["derive"] }
@@ -20,13 +21,14 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "b
 libc = "0.2"
 ratatui = "0.30"
 crossterm = "0.28"
-serde_yaml = "0.9"
-async-openai = "0.34"
-ollama-rs = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-chrono = { version = "0.4", features = ["serde"] }
 blake3 = "1"
 petgraph = "0.7"
+
+[profile.release]
+opt-level = 3
+lto = true
