@@ -2,7 +2,7 @@ use std::io::{self, Stdout};
 use std::path::Path;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -65,10 +65,10 @@ pub struct GlyphSet {
 }
 
 pub static NERD_GLYPHS: GlyphSet = GlyphSet {
-    up: "\u{2191}",       // ↑
-    down: "\u{2193}",     // ↓
+    up: "\u{2191}",                  // ↑
+    down: "\u{2193}",                // ↓
     nav_hint: "[\u{2191}/\u{2193}]", // [↑/↓]
-    bullet: "\u{2022}",   // •
+    bullet: "\u{2022}",              // •
     warning: "!",
 };
 
@@ -280,93 +280,93 @@ impl DashboardState {
             .map(|row| placeholder_or_value(&row.mode, "unavailable"))
             .unwrap_or_else(|| "unavailable".to_string());
 
-        let (headline, field_summary, total_scored_events, top_events) =
-            if let Some(ref summary) = run_summary {
-                let hl = summary
-                    .get("scenario_summary")
-                    .and_then(|v| v.get("headline"))
+        let (headline, field_summary, total_scored_events, top_events) = if let Some(ref summary) =
+            run_summary
+        {
+            let hl = summary
+                .get("scenario_summary")
+                .and_then(|v| v.get("headline"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    latest.map(|row| placeholder_or_value(&row.headline, "No headline available."))
+                })
+                .unwrap_or_else(|| "No headline available.".to_string());
+
+            let scored_events = summary
+                .get("scored_events")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            let total = scored_events.len();
+
+            // Group by dominant_field → count + avg impact_score
+            let mut field_map: std::collections::HashMap<String, Vec<f64>> =
+                std::collections::HashMap::new();
+            for event in &scored_events {
+                let field = event
+                    .get("dominant_field")
                     .and_then(|v| v.as_str())
-                    .filter(|s| !s.trim().is_empty())
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        latest
-                            .map(|row| placeholder_or_value(&row.headline, "No headline available."))
-                    })
-                    .unwrap_or_else(|| "No headline available.".to_string());
+                    .unwrap_or("uncategorized")
+                    .to_string();
+                let impact = event
+                    .get("impact_score")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                field_map.entry(field).or_default().push(impact);
+            }
+            let mut fs: Vec<FieldStat> = field_map
+                .into_iter()
+                .map(|(field, impacts)| {
+                    let count = impacts.len();
+                    let avg_impact = impacts.iter().sum::<f64>() / count as f64;
+                    FieldStat {
+                        field,
+                        count,
+                        avg_impact,
+                    }
+                })
+                .collect();
+            fs.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.field.cmp(&b.field)));
 
-                let scored_events = summary
-                    .get("scored_events")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-
-                let total = scored_events.len();
-
-                // Group by dominant_field → count + avg impact_score
-                let mut field_map: std::collections::HashMap<String, Vec<f64>> =
-                    std::collections::HashMap::new();
-                for event in &scored_events {
-                    let field = event
+            // Top 5 by impact_score desc
+            let mut events_for_top: Vec<TopEvent> = scored_events
+                .iter()
+                .filter_map(|event| {
+                    let title = event
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Untitled event")
+                        .to_string();
+                    let impact_score = event.get("impact_score")?.as_f64()?;
+                    let dominant_field = event
                         .get("dominant_field")
                         .and_then(|v| v.as_str())
                         .unwrap_or("uncategorized")
                         .to_string();
-                    let impact = event
-                        .get("impact_score")
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.0);
-                    field_map.entry(field).or_default().push(impact);
-                }
-                let mut fs: Vec<FieldStat> = field_map
-                    .into_iter()
-                    .map(|(field, impacts)| {
-                        let count = impacts.len();
-                        let avg_impact = impacts.iter().sum::<f64>() / count as f64;
-                        FieldStat {
-                            field,
-                            count,
-                            avg_impact,
-                        }
+                    Some(TopEvent {
+                        title,
+                        impact_score,
+                        dominant_field,
                     })
-                    .collect();
-                fs.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.field.cmp(&b.field)));
+                })
+                .collect();
+            events_for_top.sort_by(|a, b| {
+                b.impact_score
+                    .partial_cmp(&a.impact_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            events_for_top.truncate(5);
 
-                // Top 5 by impact_score desc
-                let mut events_for_top: Vec<TopEvent> = scored_events
-                    .iter()
-                    .filter_map(|event| {
-                        let title = event
-                            .get("title")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("Untitled event")
-                            .to_string();
-                        let impact_score = event.get("impact_score")?.as_f64()?;
-                        let dominant_field = event
-                            .get("dominant_field")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("uncategorized")
-                            .to_string();
-                        Some(TopEvent {
-                            title,
-                            impact_score,
-                            dominant_field,
-                        })
-                    })
-                    .collect();
-                events_for_top.sort_by(|a, b| {
-                    b.impact_score
-                        .partial_cmp(&a.impact_score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-                events_for_top.truncate(5);
-
-                (hl, fs, total, events_for_top)
-            } else {
-                let hl = latest
-                    .map(|row| placeholder_or_value(&row.headline, "No headline available."))
-                    .unwrap_or_else(|| "No headline available.".to_string());
-                (hl, Vec::new(), 0, Vec::new())
-            };
+            (hl, fs, total, events_for_top)
+        } else {
+            let hl = latest
+                .map(|row| placeholder_or_value(&row.headline, "No headline available."))
+                .unwrap_or_else(|| "No headline available.".to_string());
+            (hl, Vec::new(), 0, Vec::new())
+        };
 
         let newest_delta = memory.runs.front().and_then(|entry| entry.delta.as_ref());
         let alert_tier = newest_delta
@@ -707,7 +707,7 @@ impl TerminalSession {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                if !handle_key_code(&mut state, key.code) {
+                if !handle_key(&mut state, &key) {
                     break;
                 }
             }
@@ -716,10 +716,10 @@ impl TerminalSession {
     }
 }
 
-fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
+fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
     // When search is active, intercept all keys for search input
     if state.search_active {
-        match code {
+        match key.code {
             KeyCode::Esc => {
                 state.search_active = false;
                 state.search_query.clear();
@@ -740,7 +740,29 @@ fn handle_key_code(state: &mut TuiState, code: KeyCode) -> bool {
         return true;
     }
 
-    match code {
+    // Ctrl+d / Ctrl+u — half-page scroll in History view
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('d') => {
+                if state.view == TuiView::History {
+                    let page = state.rows.len().max(1) / 2;
+                    state.selected =
+                        (state.selected + page).min(state.rows.len().saturating_sub(1));
+                }
+                return true;
+            }
+            KeyCode::Char('u') => {
+                if state.view == TuiView::History {
+                    let page = state.rows.len().max(1) / 2;
+                    state.selected = state.selected.saturating_sub(page);
+                }
+                return true;
+            }
+            _ => {}
+        }
+    }
+
+    match key.code {
         KeyCode::Char('q') => false,
         KeyCode::Esc => {
             if matches!(state.view, TuiView::Detail | TuiView::Compare) {
@@ -872,10 +894,15 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
             Span::raw(" stage compare  "),
             Span::styled("[j/k]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" move  "),
-            Span::styled(state.glyphs.nav_hint, Style::default().fg(KANAGAWA.key_hint)),
+            Span::styled(
+                state.glyphs.nav_hint,
+                Style::default().fg(KANAGAWA.key_hint),
+            ),
             Span::raw(" move  "),
             Span::styled("[gg/G]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" first/last  "),
+            Span::styled("[Ctrl+d/u]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" half-page  "),
             Span::styled("[/]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" search  "),
         ]);
@@ -931,10 +958,7 @@ fn render_history(frame: &mut Frame<'_>, area: ratatui::layout::Rect, state: &Tu
     if let Some(search_area) = search_area {
         let search_bar = Paragraph::new(Line::from(vec![
             Span::styled("/ ", Style::default().fg(KANAGAWA.fg)),
-            Span::styled(
-                state.search_query.clone(),
-                Style::default().fg(KANAGAWA.fg),
-            ),
+            Span::styled(state.search_query.clone(), Style::default().fg(KANAGAWA.fg)),
             Span::styled("▊", Style::default().fg(KANAGAWA.label)),
         ]))
         .style(base_style().bg(KANAGAWA.panel_bg));
@@ -981,10 +1005,7 @@ fn render_dashboard(
     ]));
     lines.push(Line::from(vec![
         Span::styled("  Headline: ", Style::default().fg(KANAGAWA.label)),
-        Span::styled(
-            dashboard.headline.clone(),
-            Style::default().fg(KANAGAWA.fg),
-        ),
+        Span::styled(dashboard.headline.clone(), Style::default().fg(KANAGAWA.fg)),
     ]));
 
     // Blank line
@@ -999,11 +1020,7 @@ fn render_dashboard(
     )]));
 
     for stat in &dashboard.field_summary {
-        let event_word = if stat.count == 1 {
-            "event "
-        } else {
-            "events"
-        };
+        let event_word = if stat.count == 1 { "event " } else { "events" };
         let impact_color = if stat.avg_impact > 10.0 {
             KANAGAWA.up
         } else if stat.avg_impact > 5.0 {
@@ -1183,11 +1200,7 @@ pub fn format_dashboard(dashboard: &DashboardState) -> String {
         output.push_str("  No field data available.\n");
     } else {
         for stat in &dashboard.field_summary {
-            let event_word = if stat.count == 1 {
-                "event "
-            } else {
-                "events"
-            };
+            let event_word = if stat.count == 1 { "event " } else { "events" };
             output.push_str(&format!(
                 "  {:<12} {:>2} {} avg impact {:.1}\n",
                 stat.field, stat.count, event_word, stat.avg_impact,
@@ -1671,6 +1684,16 @@ mod tests {
     use crate::delta::{DeltaReport, DeltaSummary, RiskDirection, SignalBreakdown};
     use crate::delta_memory::HotRunEntry;
 
+    /// Helper: construct a KeyEvent with no modifiers (plain key).
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// Helper: construct a Ctrl+<char> KeyEvent.
+    fn ctrl_key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
     fn row(run_id: i64) -> HistoryRow {
         HistoryRow {
             run_id,
@@ -1795,26 +1818,26 @@ mod tests {
     fn key_handler_maps_navigation_and_quit() {
         let mut state = history_state(vec![row(1), row(2)]);
 
-        assert!(handle_key_code(&mut state, KeyCode::Char('j')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('j'))));
         assert_eq!(state.selected(), 1);
-        assert!(handle_key_code(&mut state, KeyCode::Up));
+        assert!(handle_key(&mut state, &key(KeyCode::Up)));
         assert_eq!(state.selected(), 0);
-        assert!(handle_key_code(&mut state, KeyCode::Down));
+        assert!(handle_key(&mut state, &key(KeyCode::Down)));
         assert_eq!(state.selected(), 1);
-        assert!(handle_key_code(&mut state, KeyCode::Char('k')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('k'))));
         assert_eq!(state.selected(), 0);
-        assert!(!handle_key_code(&mut state, KeyCode::Char('q')));
+        assert!(!handle_key(&mut state, &key(KeyCode::Char('q'))));
     }
 
     #[test]
     fn key_handler_maps_vim_first_and_last_navigation() {
         let mut state = history_state(vec![row(1), row(2), row(3)]);
 
-        assert!(handle_key_code(&mut state, KeyCode::Char('G')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('G'))));
         assert_eq!(state.selected(), 2);
-        assert!(handle_key_code(&mut state, KeyCode::Char('g')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('g'))));
         assert_eq!(state.selected(), 2);
-        assert!(handle_key_code(&mut state, KeyCode::Char('g')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('g'))));
         assert_eq!(state.selected(), 0);
     }
 
@@ -1822,9 +1845,9 @@ mod tests {
     fn key_handler_maps_home_and_end_aliases() {
         let mut state = history_state(vec![row(1), row(2), row(3)]);
 
-        assert!(handle_key_code(&mut state, KeyCode::End));
+        assert!(handle_key(&mut state, &key(KeyCode::End)));
         assert_eq!(state.selected(), 2);
-        assert!(handle_key_code(&mut state, KeyCode::Home));
+        assert!(handle_key(&mut state, &key(KeyCode::Home)));
         assert_eq!(state.selected(), 0);
     }
 
@@ -1833,11 +1856,11 @@ mod tests {
         let mut state = history_state(vec![row(1), row(2), row(3)]);
         state.select_last();
 
-        assert!(handle_key_code(&mut state, KeyCode::Char('g')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('g'))));
         assert_eq!(state.selected(), 2);
-        assert!(handle_key_code(&mut state, KeyCode::Char('x')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('x'))));
         assert_eq!(state.selected(), 2);
-        assert!(handle_key_code(&mut state, KeyCode::Char('g')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('g'))));
         assert_eq!(state.selected(), 2);
     }
 
@@ -2003,15 +2026,15 @@ mod tests {
         let mut state = TuiState::new(vec![row(1), row(2)], dashboard());
 
         assert_eq!(state.view, TuiView::Dashboard);
-        assert!(handle_key_code(&mut state, KeyCode::Char('j')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('j'))));
         assert_eq!(state.selected(), 0);
 
-        assert!(handle_key_code(&mut state, KeyCode::Char('h')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('h'))));
         assert_eq!(state.view, TuiView::History);
-        assert!(handle_key_code(&mut state, KeyCode::Char('j')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('j'))));
         assert_eq!(state.selected(), 1);
 
-        assert!(handle_key_code(&mut state, KeyCode::Char('d')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('d'))));
         assert_eq!(state.view, TuiView::Dashboard);
     }
 
@@ -2089,18 +2112,18 @@ mod tests {
         let mut state = history_state(vec![row(1), row(2)]);
         state.select_next();
 
-        assert!(handle_key_code(&mut state, KeyCode::Enter));
+        assert!(handle_key(&mut state, &key(KeyCode::Enter)));
         assert_eq!(state.view, TuiView::Detail);
         assert_eq!(state.detail.as_ref().map(|detail| detail.run_id), Some(2));
         assert_eq!(state.selected(), 1);
 
-        assert!(handle_key_code(&mut state, KeyCode::Esc));
+        assert!(handle_key(&mut state, &key(KeyCode::Esc)));
         assert_eq!(state.view, TuiView::History);
         assert_eq!(state.selected(), 1);
 
-        assert!(handle_key_code(&mut state, KeyCode::Enter));
+        assert!(handle_key(&mut state, &key(KeyCode::Enter)));
         assert_eq!(state.view, TuiView::Detail);
-        assert!(handle_key_code(&mut state, KeyCode::Char('h')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('h'))));
         assert_eq!(state.view, TuiView::History);
     }
 
@@ -2238,13 +2261,13 @@ mod tests {
     fn key_handler_stages_left_and_enter_opens_compare_from_history() {
         let mut state = history_state(vec![row(1), row(2)]);
 
-        assert!(handle_key_code(&mut state, KeyCode::Char('c')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('c'))));
         assert_eq!(state.staged_left_run_id, Some(1));
         assert!(history_title(&state).contains("staged left #1"));
 
-        assert!(handle_key_code(&mut state, KeyCode::Char('j')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('j'))));
         assert_eq!(state.selected(), 1);
-        assert!(handle_key_code(&mut state, KeyCode::Enter));
+        assert!(handle_key(&mut state, &key(KeyCode::Enter)));
 
         assert_eq!(state.view, TuiView::Compare);
         let compare = state.compare.as_ref().expect("compare state");
@@ -2259,7 +2282,7 @@ mod tests {
         let mut state = history_state(vec![row(1), row(2)]);
         state.select_next();
 
-        assert!(handle_key_code(&mut state, KeyCode::Enter));
+        assert!(handle_key(&mut state, &key(KeyCode::Enter)));
 
         assert_eq!(state.view, TuiView::Detail);
         assert_eq!(state.detail.as_ref().map(|detail| detail.run_id), Some(2));
@@ -2271,15 +2294,15 @@ mod tests {
         let mut state = history_state(vec![row(1), row(2)]);
         state.show_compare(CompareState::missing(1, 2));
 
-        assert!(handle_key_code(&mut state, KeyCode::Char('j')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('j'))));
         assert_eq!(state.selected(), 0);
         assert_eq!(state.view, TuiView::Compare);
 
-        assert!(handle_key_code(&mut state, KeyCode::Esc));
+        assert!(handle_key(&mut state, &key(KeyCode::Esc)));
         assert_eq!(state.view, TuiView::History);
 
         state.show_compare(CompareState::missing(1, 2));
-        assert!(handle_key_code(&mut state, KeyCode::Char('h')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('h'))));
         assert_eq!(state.view, TuiView::History);
     }
 
@@ -2536,7 +2559,7 @@ mod tests {
     fn key_handler_slash_activates_search_in_history() {
         let mut state = history_state(vec![row(1), row(2)]);
         assert!(!state.search_active);
-        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
         assert!(state.search_active);
         assert!(state.search_query.is_empty());
     }
@@ -2544,14 +2567,14 @@ mod tests {
     #[test]
     fn key_handler_search_type_and_submit() {
         let mut state = history_state(vec![row(1), row(2)]);
-        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
-        assert!(handle_key_code(&mut state, KeyCode::Char('t')));
-        assert!(handle_key_code(&mut state, KeyCode::Char('e')));
-        assert!(handle_key_code(&mut state, KeyCode::Char('c')));
-        assert!(handle_key_code(&mut state, KeyCode::Char('h')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('t'))));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('e'))));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('c'))));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('h'))));
         assert_eq!(state.search_query, "tech");
         assert!(state.search_active);
-        assert!(handle_key_code(&mut state, KeyCode::Enter));
+        assert!(handle_key(&mut state, &key(KeyCode::Enter)));
         assert!(!state.search_active);
         // row() has dominant_field = "technology", so "tech" should match
         assert!(!state.rows.is_empty());
@@ -2560,9 +2583,9 @@ mod tests {
     #[test]
     fn key_handler_esc_clears_search_and_restores() {
         let mut state = history_state(vec![row(1), row(2)]);
-        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
-        assert!(handle_key_code(&mut state, KeyCode::Char('z')));
-        assert!(handle_key_code(&mut state, KeyCode::Esc));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('z'))));
+        assert!(handle_key(&mut state, &key(KeyCode::Esc)));
         assert!(!state.search_active);
         assert!(state.search_query.is_empty());
         assert_eq!(state.rows.len(), state.all_rows.len());
@@ -2571,20 +2594,20 @@ mod tests {
     #[test]
     fn key_handler_backspace_in_search() {
         let mut state = history_state(vec![row(1), row(2)]);
-        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
-        assert!(handle_key_code(&mut state, KeyCode::Char('a')));
-        assert!(handle_key_code(&mut state, KeyCode::Char('b')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('a'))));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('b'))));
         assert_eq!(state.search_query, "ab");
-        assert!(handle_key_code(&mut state, KeyCode::Backspace));
+        assert!(handle_key(&mut state, &key(KeyCode::Backspace)));
         assert_eq!(state.search_query, "a");
     }
 
     #[test]
     fn key_handler_search_blocks_quit_when_active() {
         let mut state = history_state(vec![row(1)]);
-        assert!(handle_key_code(&mut state, KeyCode::Char('/')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
         // 'q' should add to search query, not quit
-        assert!(handle_key_code(&mut state, KeyCode::Char('q')));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('q'))));
         assert_eq!(state.search_query, "q");
         assert!(state.search_active);
     }
@@ -2640,8 +2663,10 @@ mod tests {
         // 3. Known TERM_PROGRAM values → NERD
         for program in &["kitty", "ghostty", "wezterm", "alacritty"] {
             std::env::set_var("TERM_PROGRAM", program);
-            assert!(std::ptr::eq(detect_glyph_mode(), &NERD_GLYPHS),
-                "TERM_PROGRAM={program}");
+            assert!(
+                std::ptr::eq(detect_glyph_mode(), &NERD_GLYPHS),
+                "TERM_PROGRAM={program}"
+            );
         }
 
         // 4. Unknown TERM_PROGRAM → ASCII
@@ -2672,5 +2697,95 @@ mod tests {
         assert!(NERD_GLYPHS.down.contains('\u{2193}')); // ↓
         assert!(NERD_GLYPHS.nav_hint.contains('\u{2191}'));
         assert!(NERD_GLYPHS.bullet.contains('\u{2022}')); // •
+    }
+
+    // ── Ctrl+d / Ctrl+u half-page scroll tests ────────────────────────
+
+    #[test]
+    fn ctrl_d_half_page_scroll_down_in_history() {
+        let rows: Vec<HistoryRow> = (1..=10).map(row).collect();
+        let mut state = history_state(rows);
+        assert_eq!(state.selected(), 0);
+
+        // Half-page = 10 / 2 = 5
+        assert!(handle_key(&mut state, &ctrl_key('d')));
+        assert_eq!(state.selected(), 5);
+
+        // Another half-page: 5 + 5 = 10, clamped to len-1 = 9
+        assert!(handle_key(&mut state, &ctrl_key('d')));
+        assert_eq!(state.selected(), 9);
+
+        // Already at bottom, stays clamped
+        assert!(handle_key(&mut state, &ctrl_key('d')));
+        assert_eq!(state.selected(), 9);
+    }
+
+    #[test]
+    fn ctrl_u_half_page_scroll_up_in_history() {
+        let rows: Vec<HistoryRow> = (1..=10).map(row).collect();
+        let mut state = history_state(rows);
+        state.select_last();
+        assert_eq!(state.selected(), 9);
+
+        // Half-page = 10 / 2 = 5
+        assert!(handle_key(&mut state, &ctrl_key('u')));
+        assert_eq!(state.selected(), 4);
+
+        // Another half-page: 4 - 5 = saturating_sub → 0
+        assert!(handle_key(&mut state, &ctrl_key('u')));
+        assert_eq!(state.selected(), 0);
+
+        // Already at top, stays at 0
+        assert!(handle_key(&mut state, &ctrl_key('u')));
+        assert_eq!(state.selected(), 0);
+    }
+
+    #[test]
+    fn ctrl_d_does_not_affect_dashboard_view() {
+        let mut state = TuiState::new(vec![row(1), row(2), row(3)], dashboard());
+        // Start on Dashboard
+        assert_eq!(state.view, TuiView::Dashboard);
+        assert!(handle_key(&mut state, &ctrl_key('d')));
+        // Should not change view or selected (Dashboard has no scrolling)
+        assert_eq!(state.view, TuiView::Dashboard);
+    }
+
+    #[test]
+    fn plain_d_still_switches_to_dashboard() {
+        let rows: Vec<HistoryRow> = (1..=5).map(row).collect();
+        let mut state = history_state(rows);
+        assert_eq!(state.view, TuiView::History);
+
+        // Plain 'd' (no Ctrl) should switch to Dashboard
+        assert!(handle_key(&mut state, &key(KeyCode::Char('d'))));
+        assert_eq!(state.view, TuiView::Dashboard);
+    }
+
+    #[test]
+    fn ctrl_d_u_with_odd_row_count_uses_floor_division() {
+        // 7 rows → half-page = 7 / 2 = 3
+        let rows: Vec<HistoryRow> = (1..=7).map(row).collect();
+        let mut state = history_state(rows);
+        assert_eq!(state.selected(), 0);
+
+        assert!(handle_key(&mut state, &ctrl_key('d')));
+        assert_eq!(state.selected(), 3);
+
+        // 3 + 3 = 6, which is len-1 (valid)
+        assert!(handle_key(&mut state, &ctrl_key('d')));
+        assert_eq!(state.selected(), 6);
+    }
+
+    #[test]
+    fn ctrl_d_u_with_single_row_does_not_panic() {
+        let mut state = history_state(vec![row(1)]);
+        assert_eq!(state.selected(), 0);
+
+        // half-page = 1/2 = 0 (max(1)/2 = 0), so no movement
+        assert!(handle_key(&mut state, &ctrl_key('d')));
+        assert_eq!(state.selected(), 0);
+
+        assert!(handle_key(&mut state, &ctrl_key('u')));
+        assert_eq!(state.selected(), 0);
     }
 }
