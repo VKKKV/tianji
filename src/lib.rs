@@ -51,6 +51,7 @@ pub enum TianJiError {
     Json(serde_json::Error),
     Yaml(serde_yaml::Error, String),
     Storage(rusqlite::Error),
+    Llm(llm::error::LlmError),
 }
 
 impl std::fmt::Display for TianJiError {
@@ -62,6 +63,7 @@ impl std::fmt::Display for TianJiError {
             Self::Json(error) => write!(formatter, "{error}"),
             Self::Yaml(error, path) => write!(formatter, "{error} (in {path})"),
             Self::Storage(error) => write!(formatter, "{error}"),
+            Self::Llm(error) => write!(formatter, "{error}"),
         }
     }
 }
@@ -83,6 +85,12 @@ impl From<serde_json::Error> for TianJiError {
 impl From<rusqlite::Error> for TianJiError {
     fn from(error: rusqlite::Error) -> Self {
         Self::Storage(error)
+    }
+}
+
+impl From<llm::error::LlmError> for TianJiError {
+    fn from(error: llm::error::LlmError) -> Self {
+        Self::Llm(error)
     }
 }
 

@@ -40,7 +40,7 @@ use crate::storage::{
 };
 use crate::{delta_memory_path, HotMemory, TianJiError};
 
-pub fn run_history_browser(
+pub async fn run_history_browser(
     sqlite_path: &str,
     limit: usize,
     simulate: Option<&str>,
@@ -85,7 +85,7 @@ pub fn run_history_browser(
 
     // Optionally run a simulation if --simulate was provided
     if let Some(sim_spec) = simulate {
-        if let Some(sim_state) = run_demo_simulation(sim_spec) {
+        if let Some(sim_state) = run_demo_simulation(sim_spec).await {
             tui_state.simulation = Some(sim_state);
         }
     }
@@ -103,7 +103,7 @@ fn is_missing_runs_table(error: &rusqlite::Error) -> bool {
 
 /// Parse a `--simulate` spec like "east-asia.conflict:30" and run a forward simulation.
 /// Returns `Some(SimulationState)` on success, `None` on parse or execution failure.
-fn run_demo_simulation(spec: &str) -> Option<SimulationState> {
+async fn run_demo_simulation(spec: &str) -> Option<SimulationState> {
     use std::collections::BTreeMap;
 
     use crate::hongmeng::Agent;
@@ -174,7 +174,7 @@ fn run_demo_simulation(spec: &str) -> Option<SimulationState> {
     };
     let config = HongmengConfig::default();
 
-    let outcome = run_forward(&worldline, &agents, &mode, &config);
+    let outcome = run_forward(&worldline, &agents, &mode, &config, None).await;
 
     // Convert outcome → SimulationState
     let primary_branch = outcome.branches.first();
@@ -209,20 +209,17 @@ fn run_demo_simulation(spec: &str) -> Option<SimulationState> {
         });
     }
 
-    // Build agent_statuses from the agents used
+    // Build agent_statuses from branch events because run_forward keeps action history internal.
+    let last_event = primary_branch
+        .and_then(|branch| branch.event_sequence.last())
+        .cloned()
+        .unwrap_or_else(|| "observe".to_string());
     let agent_statuses: Vec<SimAgent> = agents
         .iter()
-        .map(|agent| {
-            let last_action = agent
-                .action_history
-                .last()
-                .map(|a| a.action_type.clone())
-                .unwrap_or_else(|| "none".to_string());
-            SimAgent {
-                actor_id: agent.actor_id.clone(),
-                status: "done".to_string(),
-                last_action,
-            }
+        .map(|agent| SimAgent {
+            actor_id: agent.actor_id.clone(),
+            status: "done".to_string(),
+            last_action: last_event.clone(),
         })
         .collect();
 
@@ -797,9 +794,9 @@ mod tests {
         assert_eq!(state.view, TuiView::Dashboard);
     }
 
-    #[test]
-    fn run_demo_simulation_parses_valid_spec() {
-        let sim = run_demo_simulation("global.conflict:5");
+    #[tokio::test]
+    async fn run_demo_simulation_parses_valid_spec() {
+        let sim = run_demo_simulation("global.conflict:5").await;
         assert!(sim.is_some());
         let sim = sim.unwrap();
         assert_eq!(sim.mode, "forward");
@@ -808,13 +805,13 @@ mod tests {
         assert_eq!(sim.total_ticks, 5);
     }
 
-    #[test]
-    fn run_demo_simulation_rejects_invalid_spec() {
+    #[tokio::test]
+    async fn run_demo_simulation_rejects_invalid_spec() {
         // Missing colon
-        assert!(run_demo_simulation("global.conflict").is_none());
+        assert!(run_demo_simulation("global.conflict").await.is_none());
         // Missing dot in field
-        assert!(run_demo_simulation("conflict:30").is_none());
+        assert!(run_demo_simulation("conflict:30").await.is_none());
         // Non-numeric horizon
-        assert!(run_demo_simulation("global.conflict:abc").is_none());
+        assert!(run_demo_simulation("global.conflict:abc").await.is_none());
     }
 }

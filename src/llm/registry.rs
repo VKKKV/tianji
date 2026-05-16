@@ -69,6 +69,44 @@ impl ProviderRegistry {
         &self.clients
     }
 
+    pub fn fallback_chain(&self, provider_name: &str) -> Result<Vec<&LlmClient>, LlmError> {
+        let mut visited = Vec::new();
+        let mut current = provider_name.to_string();
+        let mut chain = Vec::new();
+
+        loop {
+            if visited.contains(&current) {
+                return Err(LlmError::Config(format!(
+                    "circular fallback chain detected: {} -> {}",
+                    visited.join(" -> "),
+                    current
+                )));
+            }
+
+            if let Some(client) = self.clients.get(&current) {
+                chain.push(client);
+            }
+
+            visited.push(current.clone());
+            let next = self
+                .config
+                .providers
+                .get(&current)
+                .and_then(|pc| pc.fallback.clone());
+
+            match next {
+                Some(fallback) => current = fallback,
+                None => break,
+            }
+        }
+
+        if chain.is_empty() {
+            Err(LlmError::NoAvailableProvider(provider_name.to_string()))
+        } else {
+            Ok(chain)
+        }
+    }
+
     pub fn agent_model_map(&self) -> &BTreeMap<String, String> {
         &self.config.agent_model_map
     }

@@ -2,7 +2,7 @@
 
 > Branch: `rust-cli` | Updated: 2026-05-15
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: All phases complete. 280 tests. Real LLM chat() ready, agents still use stub actions.
+> Current: Phase 4.0 complete. 284 tests. Predict/backtrack can use LLM-backed Agent actions with deterministic fallback.
 
 ---
 
@@ -25,7 +25,7 @@ TUI ████████████████████ ✅ 4 views + s
  3.0 ████████████████████ ✅ Real LLM chat() via reqwest
  3.1 ████████████████████ ✅ CLI: predict/backtrack/baseline/watch
  3.2 ████████████████████ ✅ TUI Simulation view
- 4.0 ████████████████████ ☐ Agent LLM integration (stub→real)
+ 4.0 ████████████████████ ✅ Agent LLM integration (stub→real)
  4.1 ████████████████████ ☐ Live feed watch e2e test
  4.2 ████████████████████ ☐ Worldline SQLite persistence
  4.3 ████████████████████ ☐ Human-in-the-loop pruning (TUI ↔ Sim)

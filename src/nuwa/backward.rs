@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::hongmeng::agent::Agent;
+use crate::hongmeng::agent::{Agent, AgentDecisionContext};
 use crate::hongmeng::referee::generate_delta;
+use crate::llm::ProviderRegistry;
 use crate::worldline::types::{FieldKey, Worldline};
 
 use super::outcome::{ConvergenceReason, InterventionPath, InterventionStep, SimulationOutcome};
@@ -12,10 +13,11 @@ const W2_PATH_PROBABILITY: f64 = 0.2;
 const W3_INTERVENTION_COUNT: f64 = 0.2;
 const W4_COLLATERAL: f64 = 0.2;
 
-pub fn run_backward(
+pub async fn run_backward(
     base_worldline: &Worldline,
     agents: &[Agent],
     mode: &SimulationMode,
+    provider: Option<&ProviderRegistry>,
 ) -> SimulationOutcome {
     let (goal_field_constraints, max_interventions) = match mode {
         SimulationMode::Backward {
@@ -48,7 +50,7 @@ pub fn run_backward(
 
     let mut total_tick: u64 = 0;
 
-    for agent in agents {
+    for mut agent in agents.iter().cloned() {
         let mut working_worldline = base_worldline.clone();
         working_worldline.parent = Some(base_worldline.id);
         working_worldline.diverge_tick = 0;
@@ -62,7 +64,25 @@ pub fn run_backward(
         for i in 0..max_interventions {
             tick += 1;
 
-            let candidate_actions: Vec<String> = coarse_filter_actions(agent, i);
+            let llm_action = if let Some(clients) = resolve_backward_clients(provider) {
+                let context = AgentDecisionContext {
+                    visible_board: &[],
+                    stick: &[],
+                    fields: &working_worldline.fields,
+                    recent_actions: &agent.action_history,
+                };
+                agent
+                    .pick_llm_action_with_fallback(tick, &clients, context)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+
+            let candidate_actions: Vec<String> = llm_action
+                .as_ref()
+                .map(|action| vec![action.action_type.clone()])
+                .unwrap_or_else(|| coarse_filter_actions(&agent, i));
 
             let (best_action, target_field, expected_impact) = fine_prune_action(
                 &candidate_actions,
@@ -70,7 +90,11 @@ pub fn run_backward(
                 &working_worldline,
             );
 
-            let action = agent.pick_stub_action(tick);
+            let action = llm_action.unwrap_or_else(|| {
+                let mut action = agent.pick_stub_action(tick);
+                action.action_type = best_action.clone();
+                action
+            });
             let delta = generate_delta(
                 tick,
                 std::slice::from_ref(&agent.actor_id),
@@ -100,6 +124,7 @@ pub fn run_backward(
                 expected_impact,
                 confidence: action.confidence,
             });
+            agent.action_history.push(action);
 
             goal_met = check_goal_met(&working_worldline.fields, &goal_field_constraints);
 
@@ -149,6 +174,18 @@ pub fn run_backward(
         tick_count: total_tick,
         convergence_reason,
     }
+}
+
+fn resolve_backward_clients(
+    provider: Option<&ProviderRegistry>,
+) -> Option<Vec<&crate::llm::client::LlmClient>> {
+    let registry = provider?;
+    let provider_name = registry
+        .agent_model_map()
+        .get("backward_coarse")
+        .or_else(|| registry.agent_model_map().get("backward_fine"))
+        .or_else(|| registry.providers().keys().next())?;
+    registry.fallback_chain(provider_name).ok()
 }
 
 fn coarse_filter_actions(agent: &Agent, _intervention_index: usize) -> Vec<String> {
@@ -299,8 +336,8 @@ mod tests {
         Agent::from_profile(profile)
     }
 
-    #[test]
-    fn backward_search_with_goal_constraints() {
+    #[tokio::test]
+    async fn backward_search_with_goal_constraints() {
         let worldline = sample_worldline();
         let agents = vec![sample_agent(
             "usa",
@@ -322,7 +359,7 @@ mod tests {
             max_interventions: 3,
         };
 
-        let outcome = run_backward(&worldline, &agents, &mode);
+        let outcome = run_backward(&worldline, &agents, &mode, None).await;
 
         assert!(!outcome.intervention_paths.is_empty());
         assert!(outcome.intervention_paths.len() <= agents.len());
@@ -361,8 +398,8 @@ mod tests {
         assert!(proximity_outside > 0.0);
     }
 
-    #[test]
-    fn backward_with_wrong_mode_returns_empty() {
+    #[tokio::test]
+    async fn backward_with_wrong_mode_returns_empty() {
         let worldline = sample_worldline();
         let agents = vec![sample_agent("usa", vec!["observe"])];
         let mode = SimulationMode::Forward {
@@ -373,13 +410,13 @@ mod tests {
             horizon_ticks: 10,
         };
 
-        let outcome = run_backward(&worldline, &agents, &mode);
+        let outcome = run_backward(&worldline, &agents, &mode, None).await;
         assert!(outcome.intervention_paths.is_empty());
         assert_eq!(outcome.tick_count, 0);
     }
 
-    #[test]
-    fn backward_empty_constraints_returns_no_viable_paths() {
+    #[tokio::test]
+    async fn backward_empty_constraints_returns_no_viable_paths() {
         let worldline = sample_worldline();
         let agents = vec![sample_agent("usa", vec!["observe"])];
         let mode = SimulationMode::Backward {
@@ -388,7 +425,7 @@ mod tests {
             max_interventions: 3,
         };
 
-        let outcome = run_backward(&worldline, &agents, &mode);
+        let outcome = run_backward(&worldline, &agents, &mode, None).await;
         assert_eq!(outcome.convergence_reason, ConvergenceReason::NoViablePaths);
     }
 

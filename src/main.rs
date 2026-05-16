@@ -396,9 +396,10 @@ enum DaemonCommands {
     },
 }
 
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(cli) {
+    match run(cli).await {
         Ok(output) => {
             if !output.is_empty() {
                 println!("{output}");
@@ -441,14 +442,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn run_default_output_remains_run_artifact_json() {
+    #[tokio::test]
+    async fn run_default_output_remains_run_artifact_json() {
         let db_path = temp_sqlite_path("default_output");
         let _ = run(Cli::Run {
             fixture: SAMPLE_FIXTURE.to_string(),
             sqlite_path: Some(db_path.clone()),
             show_delta: false,
         })
+        .await
         .expect("seed run");
 
         let output = run(Cli::Run {
@@ -456,6 +458,7 @@ mod tests {
             sqlite_path: Some(db_path.clone()),
             show_delta: false,
         })
+        .await
         .expect("default output run");
         let value: Value = serde_json::from_str(&output).expect("json output");
 
@@ -471,14 +474,15 @@ mod tests {
         cleanup_sqlite_path(&db_path);
     }
 
-    #[test]
-    fn run_show_delta_outputs_wrapper_json() {
+    #[tokio::test]
+    async fn run_show_delta_outputs_wrapper_json() {
         let db_path = temp_sqlite_path("show_delta");
         let _ = run(Cli::Run {
             fixture: SAMPLE_FIXTURE.to_string(),
             sqlite_path: Some(db_path.clone()),
             show_delta: false,
         })
+        .await
         .expect("seed run");
 
         let output = run(Cli::Run {
@@ -486,6 +490,7 @@ mod tests {
             sqlite_path: Some(db_path.clone()),
             show_delta: true,
         })
+        .await
         .expect("show delta run");
         let value: Value = serde_json::from_str(&output).expect("json output");
 
@@ -631,8 +636,10 @@ mod tests {
 
     #[test]
     fn predict_output_is_valid_json_with_branches() {
-        let output =
-            handle_predict("global.conflict", 5, "profiles/", None).expect("predict output");
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let output = rt
+            .block_on(handle_predict("global.conflict", 5, "profiles/", None))
+            .expect("predict output");
         let value: Value = serde_json::from_str(&output).expect("json output");
 
         assert!(value.get("mode").is_some());
@@ -645,7 +652,8 @@ mod tests {
 
     #[test]
     fn predict_rejects_invalid_field_format() {
-        let result = handle_predict("conflict", 5, "profiles/", None);
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(handle_predict("conflict", 5, "profiles/", None));
         assert!(result.is_err());
         assert!(matches!(result, Err(TianJiError::Usage(msg)) if msg.contains("region.domain")));
     }
@@ -660,7 +668,15 @@ mod tests {
             0.0,
             100.0,
         )];
-        let output = handle_backtrack("keep conflict low", &constraints, 3, "profiles/", None)
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let output = rt
+            .block_on(handle_backtrack(
+                "keep conflict low",
+                &constraints,
+                3,
+                "profiles/",
+                None,
+            ))
             .expect("backtrack output");
         let value: Value = serde_json::from_str(&output).expect("json output");
 
@@ -672,19 +688,21 @@ mod tests {
 
     #[test]
     fn backtrack_rejects_empty_constraints() {
-        let result = handle_backtrack("test", &[], 3, "profiles/", None);
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(handle_backtrack("test", &[], 3, "profiles/", None));
         assert!(result.is_err());
         assert!(matches!(result, Err(TianJiError::Usage(msg)) if msg.contains("field-constraint")));
     }
 
-    #[test]
-    fn baseline_set_and_show_roundtrip() {
+    #[tokio::test]
+    async fn baseline_set_and_show_roundtrip() {
         let db_path = temp_sqlite_path("baseline_set_show");
         let _ = run(Cli::Run {
             fixture: SAMPLE_FIXTURE.to_string(),
             sqlite_path: Some(db_path.clone()),
             show_delta: false,
         })
+        .await
         .expect("seed run for baseline");
 
         let set_output = handle_baseline(true, false, false, Some(&db_path)).expect("baseline set");
@@ -719,14 +737,15 @@ mod tests {
         assert!(matches!(err, Err(TianJiError::Usage(msg)) if msg.contains("--sqlite-path")));
     }
 
-    #[test]
-    fn baseline_show_without_set_returns_error() {
+    #[tokio::test]
+    async fn baseline_show_without_set_returns_error() {
         let db_path = temp_sqlite_path("baseline_no_set");
         let _ = run(Cli::Run {
             fixture: SAMPLE_FIXTURE.to_string(),
             sqlite_path: Some(db_path.clone()),
             show_delta: false,
         })
+        .await
         .expect("seed run");
 
         let err = handle_baseline(false, true, false, Some(&db_path));
@@ -1383,7 +1402,7 @@ where
 // Predict / Backtrack / Baseline / Watch handlers
 // ---------------------------------------------------------------------------
 
-fn handle_predict(
+async fn handle_predict(
     field: &str,
     horizon: u64,
     profile_dir: &str,
@@ -1467,16 +1486,16 @@ fn handle_predict(
     let _sandbox = tianji::nuwa::sandbox::NuwaSandbox::new(
         worldline.clone(),
         agents.clone(),
-        provider,
+        provider.clone(),
         mode.clone(),
         sim_config.clone(),
     );
 
-    let outcome = run_forward(&worldline, &agents, &mode, &sim_config);
+    let outcome = run_forward(&worldline, &agents, &mode, &sim_config, Some(&provider)).await;
     Ok(serde_json::to_string_pretty(&outcome)?)
 }
 
-fn handle_backtrack(
+async fn handle_backtrack(
     goal: &str,
     constraints: &[(tianji::worldline::types::FieldKey, f64, f64)],
     max_interventions: usize,
@@ -1565,12 +1584,12 @@ fn handle_backtrack(
     let _sandbox = tianji::nuwa::sandbox::NuwaSandbox::new(
         worldline.clone(),
         agents.clone(),
-        provider,
+        provider.clone(),
         mode.clone(),
         tianji::hongmeng::HongmengConfig::default(),
     );
 
-    let outcome = run_backward(&worldline, &agents, &mode);
+    let outcome = run_backward(&worldline, &agents, &mode, Some(&provider)).await;
     Ok(serde_json::to_string_pretty(&outcome)?)
 }
 
@@ -1699,7 +1718,7 @@ fn handle_watch(
 // Main run dispatch
 // ---------------------------------------------------------------------------
 
-fn run(cli: Cli) -> Result<String, TianJiError> {
+async fn run(cli: Cli) -> Result<String, TianJiError> {
     match cli {
         Cli::Run {
             fixture,
@@ -2081,26 +2100,22 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
             socket_path,
             sqlite_path,
         } => {
-            let rt = tokio::runtime::Runtime::new()
-                .map_err(|e| TianJiError::Usage(format!("Failed to create tokio runtime: {e}")))?;
-            rt.block_on(async {
-                tianji::webui::serve_webui(
-                    &host,
-                    port,
-                    &api_base_url,
-                    &socket_path,
-                    sqlite_path.as_deref(),
-                )
-                .await
-                .map_err(TianJiError::Usage)
-            })?;
+            tianji::webui::serve_webui(
+                &host,
+                port,
+                &api_base_url,
+                &socket_path,
+                sqlite_path.as_deref(),
+            )
+            .await
+            .map_err(TianJiError::Usage)?;
             Ok(String::new())
         }
         Cli::Tui {
             sqlite_path,
             limit,
             simulate,
-        } => tianji::tui::run_history_browser(&sqlite_path, limit, simulate.as_deref()),
+        } => tianji::tui::run_history_browser(&sqlite_path, limit, simulate.as_deref()).await,
         Cli::Delta {
             sqlite_path,
             left_run_id,
@@ -2154,20 +2169,23 @@ fn run(cli: Cli) -> Result<String, TianJiError> {
             horizon,
             profile_dir,
             config,
-        } => handle_predict(&field, horizon, &profile_dir, config.as_deref()),
+        } => handle_predict(&field, horizon, &profile_dir, config.as_deref()).await,
         Cli::Backtrack {
             goal,
             field_constraints,
             max_interventions,
             profile_dir,
             config,
-        } => handle_backtrack(
-            &goal,
-            &field_constraints,
-            max_interventions,
-            &profile_dir,
-            config.as_deref(),
-        ),
+        } => {
+            handle_backtrack(
+                &goal,
+                &field_constraints,
+                max_interventions,
+                &profile_dir,
+                config.as_deref(),
+            )
+            .await
+        }
         Cli::Baseline {
             set,
             show,

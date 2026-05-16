@@ -1,18 +1,20 @@
 use std::collections::BTreeMap;
 
-use crate::hongmeng::agent::Agent;
+use crate::hongmeng::agent::{Agent, AgentDecisionContext};
 use crate::hongmeng::referee::{generate_delta, FieldChange};
 use crate::hongmeng::HongmengConfig;
+use crate::llm::ProviderRegistry;
 use crate::worldline::types::{FieldKey, Worldline};
 
 use super::outcome::{ConvergenceReason, SimulationOutcome, WorldlineBranch};
 use super::sandbox::SimulationMode;
 
-pub fn run_forward(
+pub async fn run_forward(
     base_worldline: &Worldline,
     agents: &[Agent],
     mode: &SimulationMode,
     config: &HongmengConfig,
+    provider: Option<&ProviderRegistry>,
 ) -> SimulationOutcome {
     let (target_field, horizon_ticks) = match mode {
         SimulationMode::Forward {
@@ -48,7 +50,20 @@ pub fn run_forward(
         let mut agent_ids = Vec::new();
 
         for agent in &mut working_agents {
-            let action = agent.pick_stub_action(tick);
+            let action = if let Some(clients) = resolve_forward_clients(provider) {
+                let context = AgentDecisionContext {
+                    visible_board: &[],
+                    stick: &[],
+                    fields: &worldline.fields,
+                    recent_actions: &agent.action_history,
+                };
+                agent
+                    .pick_llm_action_with_fallback(tick, &clients, context)
+                    .await
+                    .unwrap_or_else(|_| agent.pick_stub_action(tick))
+            } else {
+                agent.pick_stub_action(tick)
+            };
             action_types.push(action.action_type.clone());
             agent_ids.push(agent.actor_id.clone());
             agent.action_history.push(action);
@@ -181,6 +196,17 @@ pub fn run_forward(
     }
 }
 
+fn resolve_forward_clients(
+    provider: Option<&ProviderRegistry>,
+) -> Option<Vec<&crate::llm::client::LlmClient>> {
+    let registry = provider?;
+    let provider_name = registry
+        .agent_model_map()
+        .get("forward_default")
+        .or_else(|| registry.providers().keys().next())?;
+    registry.fallback_chain(provider_name).ok()
+}
+
 fn compute_divergence_from(
     base_fields: &BTreeMap<FieldKey, f64>,
     current_fields: &BTreeMap<FieldKey, f64>,
@@ -250,8 +276,8 @@ mod tests {
         Agent::from_profile(profile)
     }
 
-    #[test]
-    fn forward_simulation_runs_to_convergence() {
+    #[tokio::test]
+    async fn forward_simulation_runs_to_convergence() {
         let worldline = sample_worldline();
         let agents = vec![sample_agent("usa")];
         let mode = SimulationMode::Forward {
@@ -263,15 +289,15 @@ mod tests {
         };
         let config = HongmengConfig::default();
 
-        let outcome = run_forward(&worldline, &agents, &mode, &config);
+        let outcome = run_forward(&worldline, &agents, &mode, &config, None).await;
 
         assert!(outcome.tick_count > 0);
         assert!(outcome.tick_count <= 5);
         assert!(!outcome.branches.is_empty());
     }
 
-    #[test]
-    fn forward_produces_branches_with_decreasing_probability() {
+    #[tokio::test]
+    async fn forward_produces_branches_with_decreasing_probability() {
         let worldline = sample_worldline();
         let agents = vec![sample_agent("usa")];
         let mode = SimulationMode::Forward {
@@ -283,7 +309,7 @@ mod tests {
         };
         let config = HongmengConfig::default();
 
-        let outcome = run_forward(&worldline, &agents, &mode, &config);
+        let outcome = run_forward(&worldline, &agents, &mode, &config, None).await;
 
         assert!(outcome.branches.len() >= 1);
         assert!(outcome.branches.len() <= 3);
@@ -292,8 +318,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn forward_with_wrong_mode_returns_empty() {
+    #[tokio::test]
+    async fn forward_with_wrong_mode_returns_empty() {
         let worldline = sample_worldline();
         let agents = vec![sample_agent("usa")];
         let mode = SimulationMode::Backward {
@@ -303,7 +329,7 @@ mod tests {
         };
         let config = HongmengConfig::default();
 
-        let outcome = run_forward(&worldline, &agents, &mode, &config);
+        let outcome = run_forward(&worldline, &agents, &mode, &config, None).await;
 
         assert!(outcome.branches.is_empty());
         assert_eq!(outcome.tick_count, 0);
