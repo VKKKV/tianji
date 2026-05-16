@@ -9,7 +9,7 @@ use clap_complete::{generate, Shell};
 use tianji::{
     artifact_json, classify_delta_tier, compare_runs, compute_delta, delta_memory_path,
     get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary,
-    list_runs, run_fixture_path,
+    list_runs, run_feed_text, run_fixture_path,
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     TianJiError,
 };
@@ -758,6 +758,61 @@ mod tests {
     fn watch_rejects_interval_below_minimum() {
         let result = handle_watch("https://example.com/feed.xml", 5, None, None);
         assert!(matches!(result, Err(TianJiError::Usage(msg)) if msg.contains("at least 10")));
+    }
+
+    #[test]
+    fn watch_injected_fetcher_runs_real_feed_pipeline() {
+        let fixture = std::fs::read_to_string(SAMPLE_FIXTURE).expect("fixture feed");
+        let output = handle_watch_with_fetcher(
+            "https://example.com/feed.xml",
+            10,
+            None,
+            |_| Ok(fixture.clone()),
+            |_| {},
+        )
+        .expect("watch output");
+        let payload: Value = serde_json::from_str(&output).expect("watch json");
+
+        assert_eq!(
+            payload["watch"]["source_url"],
+            "https://example.com/feed.xml"
+        );
+        assert_eq!(payload["watch"]["iterations"], 3);
+        assert!(payload["watch"].get("note").is_none());
+        assert_eq!(payload["results"].as_array().unwrap().len(), 3);
+        assert_eq!(payload["results"][0]["status"], "ok");
+        assert_eq!(payload["results"][0]["raw_item_count"], 3);
+        assert_eq!(payload["results"][0]["normalized_event_count"], 3);
+        assert!(!payload["results"][0]["headline"]
+            .as_str()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn watch_injected_fetcher_records_fetch_errors() {
+        let output = handle_watch_with_fetcher(
+            "https://example.com/feed.xml",
+            10,
+            None,
+            |_| Err(TianJiError::Input("network down".to_string())),
+            |_| {},
+        )
+        .expect("watch output");
+        let payload: Value = serde_json::from_str(&output).expect("watch json");
+
+        assert_eq!(payload["results"].as_array().unwrap().len(), 3);
+        assert_eq!(payload["results"][0]["status"], "error");
+        assert!(payload["results"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("network down"));
+    }
+
+    #[test]
+    fn fetch_feed_url_rejects_non_http_sources_before_network() {
+        let err = fetch_feed_url("file:///tmp/feed.xml");
+        assert!(matches!(err, Err(TianJiError::Usage(msg)) if msg.contains("HTTP or HTTPS")));
     }
 
     #[test]
@@ -1666,26 +1721,49 @@ fn handle_watch(
     sqlite_path: Option<&str>,
     _config_path: Option<&str>,
 ) -> Result<String, TianJiError> {
+    handle_watch_with_fetcher(
+        source_url,
+        interval,
+        sqlite_path,
+        fetch_feed_url,
+        std::thread::sleep,
+    )
+}
+
+fn handle_watch_with_fetcher<F, S>(
+    source_url: &str,
+    interval: u64,
+    sqlite_path: Option<&str>,
+    mut fetcher: F,
+    sleeper: S,
+) -> Result<String, TianJiError>
+where
+    F: FnMut(&str) -> Result<String, TianJiError>,
+    S: Fn(std::time::Duration),
+{
     if interval < 10 {
         return Err(TianJiError::Usage(
             "--interval must be at least 10 seconds.".to_string(),
         ));
     }
 
-    // Stub: 3-iteration loop with sleep, uses fixture path for now
-    // Live feed fetching via reqwest is deferred
     let max_iterations = 3;
     let mut results = Vec::new();
 
     for i in 1..=max_iterations {
-        let fixture_path = "tests/fixtures/sample_feed.xml";
-        match run_fixture_path(fixture_path, sqlite_path) {
+        match fetcher(source_url)
+            .and_then(|feed_text| run_feed_text(&feed_text, source_url, sqlite_path))
+        {
             Ok(run_result) => {
                 results.push(serde_json::json!({
                     "iteration": i,
                     "source_url": source_url,
                     "status": "ok",
-                    "run_id": run_result.artifact.input_summary.normalized_event_count,
+                    "raw_item_count": run_result.artifact.input_summary.raw_item_count,
+                    "normalized_event_count": run_result.artifact.input_summary.normalized_event_count,
+                    "dominant_field": run_result.artifact.scenario_summary.dominant_field,
+                    "risk_level": run_result.artifact.scenario_summary.risk_level,
+                    "headline": run_result.artifact.scenario_summary.headline,
                 }));
             }
             Err(e) => {
@@ -1698,7 +1776,7 @@ fn handle_watch(
             }
         }
         if i < max_iterations {
-            std::thread::sleep(std::time::Duration::from_secs(interval));
+            sleeper(std::time::Duration::from_secs(interval));
         }
     }
 
@@ -1707,11 +1785,36 @@ fn handle_watch(
             "source_url": source_url,
             "interval": interval,
             "iterations": max_iterations,
-            "note": "stub: using fixture path, live feed fetching deferred",
         },
         "results": results,
     });
     Ok(serde_json::to_string_pretty(&payload)?)
+}
+
+fn fetch_feed_url(source_url: &str) -> Result<String, TianJiError> {
+    if !(source_url.starts_with("http://") || source_url.starts_with("https://")) {
+        return Err(TianJiError::Usage(
+            "--source-url must be an HTTP or HTTPS URL.".to_string(),
+        ));
+    }
+    let response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|error| TianJiError::Input(format!("Failed to build feed client: {error}")))?
+        .get(source_url)
+        .send()
+        .map_err(|error| {
+            TianJiError::Input(format!("Failed to fetch feed {source_url}: {error}"))
+        })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(TianJiError::Input(format!(
+            "Failed to fetch feed {source_url}: HTTP {status}"
+        )));
+    }
+    response
+        .text()
+        .map_err(|error| TianJiError::Input(format!("Failed to read feed {source_url}: {error}")))
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 > Part of plan.md §5.4 Phase 4 TUI Completion
 > Target: add `/` search to filter history list by text match
-> Status: spec
+> Status: implemented (Phase 4.2)
 
 ## Goal
 

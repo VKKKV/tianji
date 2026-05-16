@@ -2,7 +2,7 @@
 
 > Part of plan.md §5.5 Phase 4 TUI Completion
 > Target: split 2676-line src/tui.rs into src/tui/{mod,dashboard,history,detail,compare,state,render}.rs
-> Status: spec
+> Status: implemented (Phase 4.5)
 
 ## Goal
 

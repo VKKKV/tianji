@@ -2,7 +2,7 @@
 
 > Part of plan.md §5.4 Phase 4 TUI Completion
 > Target: distinguish Ctrl+d from 'd', add Ctrl+d/u half-page scroll
-> Status: spec
+> Status: implemented (Phase 4.4)
 
 ## Goal
 

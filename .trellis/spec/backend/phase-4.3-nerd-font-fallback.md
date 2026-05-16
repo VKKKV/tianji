@@ -2,7 +2,7 @@
 
 > Part of plan.md §5.4 Phase 4 TUI Completion
 > Target: auto-detect terminal glyph support, fall back to ASCII
-> Status: spec
+> Status: implemented (Phase 4.3)
 
 ## Goal
 

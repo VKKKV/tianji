@@ -122,7 +122,24 @@ pub fn run_fixture_path_with_alert_marking(
     let path = path.as_ref();
     let feed_text = fs::read_to_string(path)?;
     let source = fixture_source_name(path);
-    let mut raw_items = parse_feed(&feed_text, &source)?;
+    run_feed_text_with_alert_marking(&feed_text, &source, sqlite_path, mark_alerted)
+}
+
+pub fn run_feed_text(
+    feed_text: &str,
+    source: &str,
+    sqlite_path: Option<&str>,
+) -> Result<RunResult, TianJiError> {
+    run_feed_text_with_alert_marking(feed_text, source, sqlite_path, false)
+}
+
+pub fn run_feed_text_with_alert_marking(
+    feed_text: &str,
+    source: &str,
+    sqlite_path: Option<&str>,
+    mark_alerted: bool,
+) -> Result<RunResult, TianJiError> {
+    let mut raw_items = parse_feed(feed_text, source)?;
     assign_canonical_hashes(&mut raw_items);
     let normalized_events = normalize_items(&raw_items);
     let scored_events = score_events(&normalized_events);
@@ -155,7 +172,7 @@ pub fn run_fixture_path_with_alert_marking(
             normalized_event_count: normalized_events.len(),
             raw_item_count: raw_items.len(),
             source_fetch_details: Vec::new(),
-            sources: vec![source],
+            sources: vec![source.to_string()],
         },
         scenario_summary: ScenarioSummary {
             dominant_field,
