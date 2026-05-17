@@ -886,7 +886,7 @@ mod tests {
             summary: DeltaSummary {
                 total_changes,
                 critical_changes,
-                direction: RiskDirection::RiskOn,
+                direction: RiskDirection::Deescalating,
                 signal_breakdown: SignalBreakdown {
                     new_count: 2,
                     escalated_count: 1,
@@ -955,7 +955,7 @@ mod tests {
             dashboard.delta_summary,
             "4 total / 1 critical / 2 new signals"
         );
-        assert_eq!(dashboard.delta_direction, "RiskOn");
+        assert_eq!(dashboard.delta_direction, "Deescalating");
     }
 
     #[test]

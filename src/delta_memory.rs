@@ -296,7 +296,7 @@ fn delta_signal_keys(delta: &DeltaReport) -> Vec<String> {
 
 pub fn classify_delta_tier(delta: &DeltaReport) -> Option<AlertTier> {
     let summary = &delta.summary;
-    if summary.critical_changes >= 2 && summary.direction == RiskDirection::RiskOff {
+    if summary.critical_changes >= 2 && summary.direction == RiskDirection::Escalating {
         return Some(AlertTier::Flash);
     }
     if summary.critical_changes >= 3 {

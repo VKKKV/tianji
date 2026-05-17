@@ -5,9 +5,12 @@
 /// value. Python's round() detects this and rounds down, but naive
 /// `(x * 100.0).round() / 100.0` would round up due to float multiplication.
 pub fn round2(value: f64) -> f64 {
+    if !value.is_finite() {
+        return value;
+    }
     format!("{:.2}", value)
         .parse::<f64>()
-        .expect("round2: formatted f64 should parse")
+        .unwrap_or(value)
 }
 
 /// Compute the number of days since Unix epoch (1970-01-01) for the given

@@ -203,11 +203,19 @@ pub struct NewSignal {
     pub severity: Severity,
 }
 
+/// Risk direction inferred from delta signal breakdown.
+///
+/// "Escalating" (formerly RiskOff) means risk_up signals dominate —
+/// geopolitical tension is increasing. "Deescalating" means risk_down
+/// signals dominate — tension is decreasing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RiskDirection {
-    RiskOff,
-    RiskOn,
+    /// Risk signals are escalating (net risk increase).
+    Escalating,
+    /// Risk signals are deescalating (net risk decrease).
+    Deescalating,
+    /// Risk signals are mixed, no clear direction.
     Mixed,
 }
 
@@ -473,6 +481,9 @@ fn numeric_values(items: &[Value], key: &str) -> Vec<f64> {
 }
 
 fn average(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
     values.iter().sum::<f64>() / values.len() as f64
 }
 
@@ -558,9 +569,9 @@ fn adjust_risk_counts(
 
 fn infer_risk_direction(risk_up: usize, risk_down: usize) -> RiskDirection {
     if risk_up > risk_down + 1 {
-        RiskDirection::RiskOff
+        RiskDirection::Escalating
     } else if risk_down > risk_up + 1 {
-        RiskDirection::RiskOn
+        RiskDirection::Deescalating
     } else {
         RiskDirection::Mixed
     }

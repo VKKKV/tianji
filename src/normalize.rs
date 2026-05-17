@@ -153,17 +153,18 @@ pub fn clean_text(text: &str) -> String {
 
 pub fn extract_keywords(text: &str, limit: usize) -> Vec<String> {
     let lowered = text.to_lowercase();
-    let mut seen = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut result = Vec::new();
     for matched in TOKEN_RE.find_iter(&lowered) {
         let token = matched.as_str().to_string();
-        if token.len() > 2 && !seen.contains(&token) {
-            seen.push(token);
+        if token.len() > 2 && seen.insert(token.clone()) {
+            result.push(token);
         }
-        if seen.len() >= limit {
+        if result.len() >= limit {
             break;
         }
     }
-    seen
+    result
 }
 
 /// Match text against pre-compiled regex patterns.
