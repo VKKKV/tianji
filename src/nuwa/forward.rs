@@ -370,7 +370,6 @@ mod tests {
 
 // ── Interactive forward simulation with TUI channel bridge ──────────
 
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
 use super::outcome::{BranchSummary, SimUpdate};
@@ -385,7 +384,7 @@ pub async fn run_interactive_forward(
     mode: &SimulationMode,
     config: &HongmengConfig,
     provider: Option<&ProviderRegistry>,
-    tx: UnboundedSender<SimUpdate>,
+    tx: tokio::sync::mpsc::Sender<SimUpdate>,
     pruning_interval: u64,
 ) {
     let (target_field, horizon_ticks) = match mode {
@@ -394,7 +393,7 @@ pub async fn run_interactive_forward(
             horizon_ticks,
         } => (target_field.clone(), *horizon_ticks),
         _ => {
-            let _ = tx.send(SimUpdate::Completed);
+            let _ = tx.send(SimUpdate::Completed).await;
             return;
         }
     };
@@ -535,13 +534,13 @@ pub async fn run_interactive_forward(
             let _ = tx.send(SimUpdate::PruneRequest {
                 state: sim_state,
                 response: resp_tx,
-            });
+            }).await;
 
             if let Ok(PruningDecision::Prune(indices)) = resp_rx.await {
                 branches.retain(|b| !indices.contains(&b.index));
             }
         } else {
-            let _ = tx.send(SimUpdate::Tick { state: sim_state });
+            let _ = tx.send(SimUpdate::Tick { state: sim_state }).await;
         }
 
         // Convergence checks
@@ -566,5 +565,5 @@ pub async fn run_interactive_forward(
         }
     }
 
-    let _ = tx.send(SimUpdate::Completed);
+    let _ = tx.send(SimUpdate::Completed).await;
 }

@@ -32,6 +32,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 
 use crate::storage::{
@@ -87,7 +88,7 @@ pub async fn run_history_browser(
     // Optionally run a simulation if --simulate was provided
     if let Some(sim_spec) = simulate {
         if interactive {
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let (tx, rx) = tokio::sync::mpsc::channel(64);
             let spec = sim_spec.to_string();
             let maybe = prepare_simulation_sandbox(&spec);
             if let Some((base_wl, agents, mode, config, provider)) = maybe {
@@ -400,14 +401,17 @@ impl TerminalSession {
             self.terminal
                 .draw(|frame| self::render::render(frame, &state))?;
             if event::poll(Duration::from_millis(100))? {
-                let Event::Key(key) = event::read()? else {
-                    continue;
-                };
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                if !handle_key(&mut state, &key) {
-                    break;
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        if !handle_key(&mut state, &key) {
+                            break;
+                        }
+                    }
+                    Event::Resize(cols, rows) => {
+                        self.terminal
+                            .resize(Rect::new(0, 0, cols, rows))?;
+                    }
+                    _ => {}
                 }
             }
         }
