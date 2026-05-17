@@ -188,8 +188,10 @@ impl Hongmeng {
                 });
             }
 
-            // 5. Checkpoint if interval reached
-            if self.tick.is_multiple_of(self.config.checkpoint_interval) {
+            // 5. Checkpoint if interval reached (skip if interval is 0)
+            if self.config.checkpoint_interval > 0
+                && self.tick.is_multiple_of(self.config.checkpoint_interval)
+            {
                 let agent_states: BTreeMap<ActorId, AgentStatus> = self
                     .agents
                     .iter()
@@ -207,7 +209,12 @@ impl Hongmeng {
 
                 // Save checkpoint to DB if connection available
                 if let Some(conn) = db_conn {
-                    let _ = checkpoint.save(conn);
+                    if let Err(e) = checkpoint.save(conn) {
+                        eprintln!(
+                            "checkpoint save failed at tick {} (sim={}): {e}",
+                            self.tick, simulation_id
+                        );
+                    }
                 }
             }
 

@@ -1,6 +1,7 @@
 use super::config::{ProviderConfig, ProviderType};
 use super::error::LlmError;
 use serde_json::json;
+use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
@@ -17,11 +18,17 @@ pub struct LlmClient {
     api_key: Option<String>,
     #[allow(dead_code)] // Reserved for concurrent request limiting
     max_concurrency: usize,
+    client: reqwest::Client,
 }
 
 impl LlmClient {
     pub fn new(name: &str, config: &ProviderConfig) -> Result<Self, LlmError> {
         let api_key = config.resolve_api_key_for_provider(name)?;
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(120))
+            .build()
+            .map_err(|e| LlmError::Config(format!("failed to build HTTP client: {e}")))?;
         Ok(Self {
             provider_name: name.to_string(),
             provider_type: config.provider_type.clone(),
@@ -29,6 +36,7 @@ impl LlmClient {
             base_url: config.base_url.clone(),
             api_key,
             max_concurrency: config.max_concurrency,
+            client,
         })
     }
 
@@ -85,8 +93,8 @@ impl LlmClient {
         let body_str = serde_json::to_string(&body)
             .map_err(|e| LlmError::ChatFailed(format!("serialize error: {e}")))?;
 
-        let client = reqwest::Client::new();
-        let response = client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
@@ -112,10 +120,14 @@ impl LlmClient {
         let json: serde_json::Value = serde_json::from_str(&text)
             .map_err(|e| LlmError::ChatFailed(format!("failed to parse response: {e}")))?;
 
-        Ok(json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string())
+        let choices = json["choices"].as_array().ok_or_else(|| {
+            LlmError::ChatFailed("no choices in response".into())
+        })?;
+        let content = choices
+            .first()
+            .and_then(|c| c["message"]["content"].as_str())
+            .unwrap_or("");
+        Ok(content.to_string())
     }
 
     async fn chat_ollama(
@@ -145,8 +157,8 @@ impl LlmClient {
         let body_str = serde_json::to_string(&body)
             .map_err(|e| LlmError::ChatFailed(format!("serialize error: {e}")))?;
 
-        let client = reqwest::Client::new();
-        let response = client
+        let response = self
+            .client
             .post(&url)
             .body(body_str)
             .send()

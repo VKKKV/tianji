@@ -84,11 +84,23 @@ pub fn check_convergence(
                 .all(|c| c.delta.abs() < config.convergence_epsilon);
 
             if all_below_epsilon {
-                // Also compare with previous fields to ensure meaningful stability
-                let _ = prev_fields; // Used for future comparison; currently just check deltas
-                return Some(ConvergenceReason::FieldStabilized(
-                    config.convergence_epsilon,
-                ));
+                // Verify stability across ticks: require the current fields
+                // to be close to previous-tick fields, not just low delta
+                let fields_stable = if prev_fields.is_empty() {
+                    true // first tick with delta data, accept
+                } else {
+                    prev_fields
+                        .iter()
+                        .all(|(key, prev_val)| {
+                            let curr = hongmeng.worldline.fields.get(key).copied().unwrap_or(0.0);
+                            (curr - prev_val).abs() < config.convergence_epsilon
+                        })
+                };
+                if fields_stable {
+                    return Some(ConvergenceReason::FieldStabilized(
+                        config.convergence_epsilon,
+                    ));
+                }
             }
         }
     }

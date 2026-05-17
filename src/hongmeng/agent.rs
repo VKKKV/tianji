@@ -136,7 +136,7 @@ impl Agent {
                 .await;
 
             match response {
-                Ok(response) => return Ok(self.parse_llm_action(tick, &response)),
+                Ok(response) => return self.parse_llm_action(tick, &response),
                 Err(error) => last_error = Some(error),
             }
         }
@@ -213,7 +213,7 @@ impl Agent {
             .map_err(|error| LlmError::ChatFailed(format!("prompt serialization failed: {error}")))
     }
 
-    fn parse_llm_action(&self, tick: u64, response: &str) -> AgentAction {
+    fn parse_llm_action(&self, tick: u64, response: &str) -> Result<AgentAction, LlmError> {
         let json_text = extract_json_object(response).unwrap_or(response);
         let parsed = serde_json::from_str::<LlmActionEnvelope>(json_text);
 
@@ -238,7 +238,7 @@ impl Agent {
                     }
                 });
 
-                AgentAction {
+                Ok(AgentAction {
                     tick,
                     action_type,
                     target: envelope.target.filter(|value| !value.trim().is_empty()),
@@ -248,29 +248,11 @@ impl Agent {
                         .rationale
                         .filter(|value| !value.trim().is_empty())
                         .unwrap_or_else(|| "LLM action".to_string()),
-                }
+                })
             }
-            Err(_) => {
-                let trimmed = response.trim();
-                AgentAction {
-                    tick,
-                    action_type: "observe".to_string(),
-                    target: None,
-                    board_message: if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(BoardMessage {
-                            tick,
-                            sender: self.actor_id.clone(),
-                            content: trimmed.chars().take(500).collect(),
-                            visibility: MessageVisibility::Public,
-                        })
-                    },
-                    confidence: 0.4,
-                    rationale: "LLM returned non-JSON response; recorded as observation"
-                        .to_string(),
-                }
-            }
+            Err(e) => Err(LlmError::ChatFailed(format!(
+                "failed to parse LLM response as JSON: {e}"
+            ))),
         }
     }
 }
@@ -349,7 +331,7 @@ mod tests {
         let action = agent.parse_llm_action(
             7,
             r#"{"action_type":"diplomatic_signal","target":"china","board_message":"We seek talks.","confidence":0.82,"rationale":"de-escalation"}"#,
-        );
+        ).expect("valid JSON should parse");
 
         assert_eq!(action.tick, 7);
         assert_eq!(action.action_type, "diplomatic_signal");
@@ -365,7 +347,8 @@ mod tests {
     fn parse_llm_action_clamps_confidence_and_defaults_action() {
         let profile = sample_profile("usa", vec!["observe"]);
         let agent = Agent::from_profile(profile);
-        let action = agent.parse_llm_action(1, r#"{"confidence":2.5,"rationale":"x"}"#);
+        let action = agent.parse_llm_action(1, r#"{"confidence":2.5,"rationale":"x"}"#)
+            .expect("JSON with missing action_type should still parse");
 
         assert_eq!(action.action_type, "observe");
         assert!((action.confidence - 1.0).abs() < f64::EPSILON);
@@ -375,11 +358,14 @@ mod tests {
     fn parse_llm_action_non_json_records_observation() {
         let profile = sample_profile("usa", vec!["observe"]);
         let agent = Agent::from_profile(profile);
-        let action = agent.parse_llm_action(1, "watch and wait");
+        let result = agent.parse_llm_action(1, "watch and wait");
 
-        assert_eq!(action.action_type, "observe");
-        assert_eq!(action.confidence, 0.4);
-        assert!(action.board_message.is_some());
+        assert!(result.is_err(), "non-JSON response should return Err");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, LlmError::ChatFailed(_)),
+            "should be ChatFailed, got {err:?}"
+        );
     }
 
     #[test]

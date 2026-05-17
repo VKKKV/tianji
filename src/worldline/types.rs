@@ -60,7 +60,7 @@ pub struct Worldline {
     pub id: WorldlineId,
     pub fields: BTreeMap<FieldKey, f64>,
     pub events: Vec<EventId>,
-    #[serde(skip)]
+    #[serde(default, skip_serializing)]
     pub causal_graph: DiGraph<EventId, CausalRelation>,
     pub active_actors: BTreeSet<ActorId>,
     pub divergence: f64,
