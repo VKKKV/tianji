@@ -2,7 +2,7 @@
 
 > Branch: `rust-cli` | Updated: 2026-05-15
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Phase 5.2 complete. Worldlines and baselines persist to SQLite. Simulation checkpoint wired. Only Phase 5.3 (human-in-the-loop pruning) remains.
+> Current: ALL PHASES COMPLETE. Phase 5.3 interactive pruning with TUI ↔ Sim channel bridge. TianJi v0.2.1.
 
 ---
 
