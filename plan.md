@@ -2,7 +2,7 @@
 
 > Branch: `rust-cli` | Updated: 2026-05-15
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Phase 4.5 complete. TUI dashboard/search/glyph fallback/scroll/submodule split verified. Predict/backtrack can use LLM-backed Agent actions with deterministic fallback.
+> Current: Phase 5.2 complete. Worldlines and baselines persist to SQLite. Simulation checkpoint wired. Only Phase 5.3 (human-in-the-loop pruning) remains.
 
 ---
 
@@ -32,7 +32,7 @@ TUI ████████████████████ ✅ 4 views + s
  4.4 ████████████████████ ✅ Ctrl+d/u half-page scroll
  4.5 ████████████████████ ✅ TUI submodule split
  5.1 ████████████████████ ✅ Live feed watch e2e test
- 5.2 ████████████████████ ☐ Worldline SQLite persistence
+ 5.2 ████████████████████ ✅ Worldline SQLite persistence
  5.3 ████████████████████ ☐ Human-in-the-loop pruning (TUI ↔ Sim)
 ```
 

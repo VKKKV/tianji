@@ -2,11 +2,13 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::fetch::{derive_canonical_content_hash, derive_canonical_entry_identity_hash};
 use crate::models::{InterventionCandidate, NormalizedEvent, RawItem, RunArtifact, ScoredEvent};
 use crate::utils::{days_since_epoch, round2};
+use crate::worldline::baseline::Baseline;
+use crate::worldline::types::Worldline;
 use crate::TianJiError;
 
 pub const DEFAULT_RUN_SUMMARY_EVENT_LIMIT: usize = 200;
@@ -335,6 +337,19 @@ fn initialize_schema(connection: &Connection) -> Result<(), TianJiError> {
             reason TEXT NOT NULL,
             expected_effect TEXT NOT NULL,
             FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS worldlines (
+            id INTEGER PRIMARY KEY,
+            parent_id INTEGER,
+            worldline_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS baselines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            baseline_json TEXT NOT NULL,
+            locked_at TEXT NOT NULL
         );
         ",
     )?;
@@ -1543,5 +1558,289 @@ fn is_history_timestamp_on_or_before(value: &serde_json::Value, threshold: &i64)
     match parse_history_timestamp(Some(s)) {
         Some(ts) => ts <= *threshold,
         None => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Worldline persistence
+// ---------------------------------------------------------------------------
+
+/// Save a worldline to SQLite. Uses INSERT OR REPLACE so idempotent.
+/// Returns the worldline's id (which may have been auto-assigned).
+pub fn save_worldline(conn: &Connection, worldline: &Worldline) -> Result<i64, TianJiError> {
+    let worldline_json = serde_json::to_string(worldline)?;
+    let created_at = worldline.created_at.to_rfc3339();
+    let parent_id = worldline.parent.map(|pid| pid as i64);
+
+    conn.execute(
+        "INSERT OR REPLACE INTO worldlines (id, parent_id, worldline_json, created_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![worldline.id as i64, parent_id, worldline_json, created_at],
+    )?;
+    Ok(worldline.id as i64)
+}
+
+/// Load a worldline by id. Returns None if not found.
+pub fn load_worldline(conn: &Connection, id: u64) -> Result<Option<Worldline>, TianJiError> {
+    let mut stmt = conn.prepare("SELECT worldline_json FROM worldlines WHERE id = ?1")?;
+    let result = stmt.query_row(params![id as i64], |row| {
+        let json: String = row.get(0)?;
+        Ok(json)
+    });
+
+    match result {
+        Ok(json) => {
+            let mut worldline: Worldline = serde_json::from_str(&json)?;
+            // Restore id from DB (serialized JSON may have a different id)
+            worldline.id = id;
+            Ok(Some(worldline))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(TianJiError::Storage(e)),
+    }
+}
+
+/// Load the most recent worldlines, newest first.
+pub fn load_latest_worldlines(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<Worldline>, TianJiError> {
+    let mut stmt =
+        conn.prepare("SELECT id, worldline_json FROM worldlines ORDER BY id DESC LIMIT ?1")?;
+    let rows = stmt.query_map(params![limit as i64], |row| {
+        let db_id: i64 = row.get(0)?;
+        let json: String = row.get(1)?;
+        Ok((db_id, json))
+    })?;
+
+    let mut worldlines = Vec::new();
+    for row in rows {
+        let (db_id, json) = row?;
+        let mut worldline: Worldline = serde_json::from_str(&json)?;
+        worldline.id = db_id as u64;
+        worldlines.push(worldline);
+    }
+    Ok(worldlines)
+}
+
+/// Get the next available worldline id.
+pub fn next_worldline_id(conn: &Connection) -> Result<u64, TianJiError> {
+    let max_id: Option<i64> = conn
+        .query_row("SELECT MAX(id) FROM worldlines", [], |row| row.get(0))
+        .optional()
+        .map_err(TianJiError::Storage)?
+        .flatten();
+    Ok(max_id.map(|n| n as u64 + 1).unwrap_or(1))
+}
+
+// ---------------------------------------------------------------------------
+// Baseline persistence
+// ---------------------------------------------------------------------------
+
+/// Save a baseline to SQLite. Replaces any existing baseline.
+pub fn save_baseline(conn: &Connection, baseline: &Baseline) -> Result<(), TianJiError> {
+    let baseline_json = serde_json::to_string(baseline)?;
+    let locked_at = baseline.locked_at.to_rfc3339();
+
+    // Clear existing baseline rows, then insert one
+    conn.execute("DELETE FROM baselines", [])?;
+    conn.execute(
+        "INSERT INTO baselines (baseline_json, locked_at) VALUES (?1, ?2)",
+        params![baseline_json, locked_at],
+    )?;
+    Ok(())
+}
+
+/// Load the current baseline. Returns None if no baseline is set.
+pub fn load_baseline(conn: &Connection) -> Result<Option<Baseline>, TianJiError> {
+    let result = conn.query_row(
+        "SELECT baseline_json FROM baselines ORDER BY id DESC LIMIT 1",
+        [],
+        |row| {
+            let json: String = row.get(0)?;
+            Ok(json)
+        },
+    );
+
+    match result {
+        Ok(json) => {
+            let baseline: Baseline = serde_json::from_str(&json)?;
+            Ok(Some(baseline))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(TianJiError::Storage(e)),
+    }
+}
+
+/// Clear the baseline.
+pub fn clear_baseline(conn: &Connection) -> Result<(), TianJiError> {
+    conn.execute("DELETE FROM baselines", [])?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod worldline_persistence_tests {
+    use super::*;
+    use crate::worldline::types::FieldKey;
+    use chrono::Utc;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn sample_worldline(id: u64) -> Worldline {
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            FieldKey {
+                region: "east-asia".to_string(),
+                domain: "conflict".to_string(),
+            },
+            3.5,
+        );
+        fields.insert(
+            FieldKey {
+                region: "global".to_string(),
+                domain: "economy".to_string(),
+            },
+            2.0,
+        );
+        let hash = Worldline::compute_snapshot_hash(&fields);
+        Worldline {
+            id,
+            fields,
+            events: vec!["evt-1".to_string(), "evt-2".to_string()],
+            causal_graph: petgraph::graph::DiGraph::new(),
+            active_actors: BTreeSet::from(["usa".to_string()]),
+            divergence: 0.5,
+            parent: None,
+            diverge_tick: 0,
+            snapshot_hash: hash,
+            created_at: Utc::now(),
+        }
+    }
+
+    fn temp_connection() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        initialize_schema(&conn).expect("schema init");
+        conn
+    }
+
+    #[test]
+    fn save_and_load_worldline_roundtrip() {
+        let conn = temp_connection();
+        let wl = sample_worldline(1);
+
+        let saved_id = save_worldline(&conn, &wl).expect("save");
+        assert_eq!(saved_id, 1);
+
+        let loaded = load_worldline(&conn, 1).expect("load").expect("found");
+        assert_eq!(loaded.id, 1);
+        assert_eq!(loaded.fields.len(), 2);
+        assert_eq!(loaded.events.len(), 2);
+        assert!((loaded.divergence - 0.5).abs() < 1e-10);
+        assert!(loaded.active_actors.contains("usa"));
+        assert_eq!(loaded.parent, None);
+        assert_eq!(loaded.diverge_tick, 0);
+        assert_eq!(loaded.snapshot_hash, wl.snapshot_hash);
+    }
+
+    #[test]
+    fn load_missing_worldline_returns_none() {
+        let conn = temp_connection();
+        let result = load_worldline(&conn, 999).expect("load");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn save_worldline_overwrites_existing_id() {
+        let conn = temp_connection();
+        let wl1 = sample_worldline(1);
+        save_worldline(&conn, &wl1).expect("save 1");
+
+        let mut wl2 = sample_worldline(1);
+        wl2.divergence = 99.0;
+        save_worldline(&conn, &wl2).expect("save 2");
+
+        let loaded = load_worldline(&conn, 1).expect("load").expect("found");
+        assert!((loaded.divergence - 99.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn load_latest_worldlines_respects_limit() {
+        let conn = temp_connection();
+        for i in 1..=5u64 {
+            save_worldline(&conn, &sample_worldline(i)).expect("save");
+        }
+
+        let loaded = load_latest_worldlines(&conn, 3).expect("load");
+        assert_eq!(loaded.len(), 3);
+        assert_eq!(loaded[0].id, 5); // newest first
+    }
+
+    #[test]
+    fn next_worldline_id_empty_db_returns_one() {
+        let conn = temp_connection();
+        let id = next_worldline_id(&conn).expect("next id");
+        assert_eq!(id, 1);
+    }
+
+    #[test]
+    fn next_worldline_id_after_insert_returns_next() {
+        let conn = temp_connection();
+        save_worldline(&conn, &sample_worldline(1)).expect("save");
+        let id = next_worldline_id(&conn).expect("next id");
+        assert_eq!(id, 2);
+    }
+
+    #[test]
+    fn baseline_save_load_and_clear() {
+        let conn = temp_connection();
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            FieldKey {
+                region: "global".to_string(),
+                domain: "conflict".to_string(),
+            },
+            1.0,
+        );
+        let baseline = Baseline {
+            worldline_id: 1,
+            snapshot_hash: "abc123".to_string(),
+            fields,
+            locked_at: Utc::now(),
+            locked_by: Some("cli".to_string()),
+        };
+
+        save_baseline(&conn, &baseline).expect("save");
+
+        let loaded = load_baseline(&conn).expect("load").expect("found");
+        assert_eq!(loaded.worldline_id, 1);
+        assert_eq!(loaded.snapshot_hash, "abc123");
+        assert_eq!(loaded.locked_by.as_deref(), Some("cli"));
+
+        clear_baseline(&conn).expect("clear");
+        let after_clear = load_baseline(&conn).expect("load");
+        assert!(after_clear.is_none());
+    }
+
+    #[test]
+    fn baseline_load_returns_none_when_empty() {
+        let conn = temp_connection();
+        let result = load_baseline(&conn).expect("load");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn worldline_with_parent_id_roundtrip() {
+        let conn = temp_connection();
+        let mut wl = sample_worldline(2);
+        wl.parent = Some(1);
+        wl.diverge_tick = 5;
+
+        save_worldline(&conn, &wl).expect("save");
+        let loaded = load_worldline(&conn, 2).expect("load").expect("found");
+        assert_eq!(loaded.parent, Some(1));
+        assert_eq!(loaded.diverge_tick, 5);
     }
 }

@@ -36,9 +36,11 @@ use normalize::normalize_items;
 use scoring::{score_events, summarize_scenario};
 use serde_json::Value as JsonValue;
 pub use storage::{
-    compare_runs, get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id,
-    get_run_summary, list_runs, persist_run, EventGroupFilters, RunListFilters, ScoredEventFilters,
-    MAX_RUN_SUMMARY_EVENT_LIMIT, MAX_RUN_SUMMARY_GROUP_LIMIT,
+    clear_baseline, compare_runs, get_latest_run_id, get_latest_run_pair, get_next_run_id,
+    get_previous_run_id, get_run_summary, list_runs, load_baseline, load_latest_worldlines,
+    load_worldline, next_worldline_id, persist_run, save_baseline, save_worldline,
+    EventGroupFilters, RunListFilters, ScoredEventFilters, MAX_RUN_SUMMARY_EVENT_LIMIT,
+    MAX_RUN_SUMMARY_GROUP_LIMIT,
 };
 
 pub const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";

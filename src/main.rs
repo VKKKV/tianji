@@ -1,4 +1,5 @@
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::ExitCode;
 
 use std::collections::BTreeMap;
@@ -6,11 +7,16 @@ use std::str::FromStr;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
+use rusqlite::Connection;
 use tianji::{
-    artifact_json, classify_delta_tier, compare_runs, compute_delta, delta_memory_path,
+    artifact_json, classify_delta_tier, clear_baseline, compare_runs, compute_delta,
     get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary,
-    list_runs, run_feed_text, run_fixture_path,
+    list_runs, load_baseline, run_feed_text, run_fixture_path, save_baseline,
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
+    worldline::{
+        baseline::Baseline,
+        types::{FieldKey, Worldline},
+    },
     TianJiError,
 };
 
@@ -1669,45 +1675,76 @@ fn handle_baseline(
     let db_path = sqlite_path.ok_or_else(|| {
         TianJiError::Usage("--sqlite-path is required for baseline operations.".to_string())
     })?;
-    let memory_path = delta_memory_path(db_path);
-    let baseline_path = memory_path.with_file_name("baseline.json");
+
+    if !Path::new(db_path).exists() {
+        return Err(TianJiError::Usage(
+            "SQLite database not found. Run tianji run --sqlite-path first.".to_string(),
+        ));
+    }
+
+    let conn = Connection::open(db_path)?;
+    conn.execute_batch("PRAGMA foreign_keys = ON")?;
 
     if show {
-        if !baseline_path.exists() {
-            return Err(TianJiError::Usage(
+        let baseline = load_baseline(&conn)?;
+        match baseline {
+            Some(b) => Ok(serde_json::to_string_pretty(&b)?),
+            None => Err(TianJiError::Usage(
                 "No baseline is currently set.".to_string(),
-            ));
+            )),
         }
-        let content = std::fs::read_to_string(&baseline_path)?;
-        // Validate it's valid JSON
-        let value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| TianJiError::Usage(format!("Baseline file is corrupt: {e}")))?;
-        Ok(serde_json::to_string_pretty(&value)?)
     } else if set {
-        // Write a placeholder baseline to hot-memory directory
-        // (Real worldline persistence is deferred — write a stub for now)
-        if let Some(parent) = baseline_path.parent() {
-            std::fs::create_dir_all(parent)?;
+        // Build a baseline from the latest run's scored events
+        let latest_id = get_latest_run_id(db_path)?
+            .ok_or_else(|| TianJiError::Usage("No runs found in database.".to_string()))?;
+
+        let summary = get_run_summary(
+            db_path,
+            latest_id,
+            &ScoredEventFilters::default(),
+            false,
+            &EventGroupFilters::default(),
+        )?
+        .ok_or_else(|| TianJiError::Usage("Failed to load latest run summary.".to_string()))?;
+
+        let mut fields: BTreeMap<FieldKey, f64> = BTreeMap::new();
+        if let Some(events) = summary.get("scored_events").and_then(|v| v.as_array()) {
+            for event in events {
+                let field = event
+                    .get("dominant_field")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("uncategorized");
+                let impact = event
+                    .get("impact_score")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let key = FieldKey {
+                    region: "global".to_string(),
+                    domain: field.to_string(),
+                };
+                *fields.entry(key).or_insert(0.0) += impact;
+            }
         }
-        let baseline = serde_json::json!({
-            "worldline_id": 0,
-            "snapshot_hash": "placeholder",
-            "fields": {},
-            "locked_at": chrono::Utc::now().to_rfc3339(),
-            "locked_by": "cli",
-            "note": "stub baseline — worldline not yet persisted"
-        });
-        let json = serde_json::to_string_pretty(&baseline)?;
-        std::fs::write(&baseline_path, &json)?;
-        Ok(json)
+
+        let baseline = Baseline {
+            worldline_id: latest_id as u64,
+            snapshot_hash: Worldline::compute_snapshot_hash(&fields),
+            fields,
+            locked_at: chrono::Utc::now(),
+            locked_by: Some("cli".to_string()),
+        };
+
+        save_baseline(&conn, &baseline)?;
+        Ok(serde_json::to_string_pretty(&baseline)?)
     } else {
         // clear
-        if !baseline_path.exists() {
+        let existing = load_baseline(&conn)?;
+        if existing.is_none() {
             return Err(TianJiError::Usage(
                 "No baseline is currently set to clear.".to_string(),
             ));
         }
-        std::fs::remove_file(&baseline_path)?;
+        clear_baseline(&conn)?;
         Ok(serde_json::to_string_pretty(&serde_json::json!({
             "action": "clear",
             "status": "baseline_removed"

@@ -124,7 +124,10 @@ impl Hongmeng {
     ///
     /// In Phase 2.4 this is a stub: agents pick random actions from their
     /// `behavior_patterns` instead of calling an LLM.
-    pub fn run_simulation(&mut self) -> Result<SimulationOutcome, TianJiError> {
+    pub fn run_simulation(
+        &mut self,
+        db_conn: Option<&rusqlite::Connection>,
+    ) -> Result<SimulationOutcome, TianJiError> {
         self.status = SimulationStatus::Running;
 
         let simulation_id = format!("sim-{}", chrono::Utc::now().timestamp());
@@ -202,9 +205,10 @@ impl Hongmeng {
                     created_at: chrono::Utc::now(),
                 };
 
-                // For stub purposes, save to in-memory connection if available
-                // In production, the caller would provide a connection
-                let _ = checkpoint; // Suppress unused warning — real save needs a conn
+                // Save checkpoint to DB if connection available
+                if let Some(conn) = db_conn {
+                    let _ = checkpoint.save(conn);
+                }
             }
 
             prev_fields = self.worldline.fields.clone();
@@ -447,7 +451,7 @@ mod tests {
 
         assert_eq!(hongmeng.status, SimulationStatus::Idle);
 
-        let outcome = hongmeng.run_simulation().expect("simulation completes");
+        let outcome = hongmeng.run_simulation(None).expect("simulation completes");
 
         // After simulation, should be converged
         match &hongmeng.status {
@@ -470,7 +474,7 @@ mod tests {
         let agents = vec![Agent::from_profile(sample_profile("usa", vec!["observe"]))];
 
         let mut hongmeng = Hongmeng::new(worldline, agents, config);
-        let outcome = hongmeng.run_simulation().expect("simulation");
+        let outcome = hongmeng.run_simulation(None).expect("simulation");
 
         assert!(!outcome.delta_history.is_empty());
         assert_eq!(outcome.delta_history.len() as u64, outcome.total_ticks);
@@ -489,7 +493,7 @@ mod tests {
         ];
 
         let mut hongmeng = Hongmeng::new(worldline, agents, config);
-        let outcome = hongmeng.run_simulation().expect("simulation");
+        let outcome = hongmeng.run_simulation(None).expect("simulation");
 
         assert_eq!(outcome.agent_histories.len(), 2);
         assert!(outcome.agent_histories["usa"].len() > 0);
@@ -518,7 +522,7 @@ mod tests {
         ))];
 
         let mut hongmeng = Hongmeng::new(worldline, agents, config);
-        let outcome = hongmeng.run_simulation().expect("simulation");
+        let outcome = hongmeng.run_simulation(None).expect("simulation");
 
         let final_conflict = outcome
             .final_worldline

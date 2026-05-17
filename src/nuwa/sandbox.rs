@@ -43,7 +43,7 @@ impl NuwaSandbox {
         config: HongmengConfig,
     ) -> Self {
         let id = format!("nuwa-{}", chrono::Utc::now().timestamp());
-        let forked_worldline = fork_worldline(&base_worldline);
+        let forked_worldline = fork_worldline(&base_worldline, None);
         Self {
             id,
             base_worldline,
@@ -57,15 +57,26 @@ impl NuwaSandbox {
     }
 }
 
-fn fork_worldline(base: &Worldline) -> Worldline {
+fn fork_worldline(base: &Worldline, conn: Option<&rusqlite::Connection>) -> Worldline {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    let new_id: WorldlineId = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let new_id: WorldlineId = if let Some(db) = conn {
+        crate::storage::next_worldline_id(db)
+            .unwrap_or_else(|_| COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    } else {
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    };
     let mut forked = base.clone();
     forked.id = new_id;
     forked.parent = Some(base.id);
     forked.diverge_tick = 0;
     forked.snapshot_hash = Worldline::compute_snapshot_hash(&forked.fields);
     forked.created_at = chrono::Utc::now();
+
+    // Persist if DB connection available
+    if let Some(db) = conn {
+        let _ = crate::storage::save_worldline(db, &forked);
+    }
+
     forked
 }
 
@@ -138,7 +149,7 @@ mod tests {
     #[test]
     fn fork_has_new_id_and_parent_set() {
         let base = sample_worldline();
-        let forked = fork_worldline(&base);
+        let forked = fork_worldline(&base, None);
 
         assert_ne!(forked.id, base.id);
         assert_eq!(forked.parent, Some(base.id));
@@ -148,7 +159,7 @@ mod tests {
     #[test]
     fn fork_modifying_does_not_affect_base() {
         let base = sample_worldline();
-        let mut forked = fork_worldline(&base);
+        let mut forked = fork_worldline(&base, None);
 
         let key = FieldKey {
             region: "global".to_string(),
