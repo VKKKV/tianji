@@ -33,7 +33,7 @@ TUI ████████████████████ ✅ 4 views + s
  4.5 ████████████████████ ✅ TUI submodule split
  5.1 ████████████████████ ✅ Live feed watch e2e test
  5.2 ████████████████████ ✅ Worldline SQLite persistence
- 5.3 ████████████████████ ☐ Human-in-the-loop pruning (TUI ↔ Sim)
+ 5.3 ████████████████████ ✅ Human-in-the-loop pruning (TUI ↔ Sim)
 ```
 
   源码: ~30K 行 Rust / 39 源文件

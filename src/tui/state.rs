@@ -138,6 +138,7 @@ pub struct SimulationState {
     pub field_values: Vec<SimField>,
     pub agent_statuses: Vec<SimAgent>,
     pub event_log: Vec<String>,
+    pub branches: Vec<crate::nuwa::outcome::BranchSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,7 +160,7 @@ pub enum TuiView {
     Simulation,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TuiState {
     pub rows: Vec<HistoryRow>,
     pub dashboard: DashboardState,
@@ -175,6 +176,11 @@ pub struct TuiState {
     pub search_active: bool,
     pub all_rows: Vec<HistoryRow>,
     pub glyphs: &'static GlyphSet,
+    pub prune_mode: bool,
+    pub prune_selected: Vec<usize>,
+    pub pending_sim_rx:
+        Option<tokio::sync::mpsc::UnboundedReceiver<crate::nuwa::outcome::SimUpdate>>,
+    pub pending_prune_tx: Option<tokio::sync::oneshot::Sender<crate::nuwa::PruningDecision>>,
 }
 
 impl TuiState {
@@ -195,6 +201,10 @@ impl TuiState {
             search_active: false,
             all_rows,
             glyphs: detect_glyph_mode(),
+            prune_mode: false,
+            prune_selected: Vec::new(),
+            pending_sim_rx: None,
+            pending_prune_tx: None,
         }
     }
 
@@ -1516,6 +1526,7 @@ mod tests {
                 last_action: "naval exercise".to_string(),
             }],
             event_log: vec!["tick 1: conflict increased by 0.12".to_string()],
+            branches: vec![],
         };
 
         assert_eq!(sim.mode, "forward");
@@ -1545,6 +1556,7 @@ mod tests {
             field_values: vec![],
             agent_statuses: vec![],
             event_log: vec![],
+            branches: vec![],
         };
         state.show_simulation(sim.clone());
 

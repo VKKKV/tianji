@@ -68,7 +68,13 @@ pub fn format_simulation(sim: &SimulationState) -> String {
     output
 }
 
-pub fn render_simulation(frame: &mut Frame<'_>, area: Rect, simulation: Option<&SimulationState>) {
+pub fn render_simulation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    simulation: Option<&SimulationState>,
+    prune_mode: bool,
+    prune_selected: &[usize],
+) {
     let sim = match simulation {
         Some(s) => s,
         None => {
@@ -192,6 +198,36 @@ pub fn render_simulation(frame: &mut Frame<'_>, area: Rect, simulation: Option<&
         ]));
     }
 
+    // Prune mode overlay
+    if prune_mode && !sim.branches.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "  -- Prune Branches (Space=toggle, Enter=confirm, c/Esc=cancel) --",
+            Style::default()
+                .fg(KANAGAWA.title)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        for branch in &sim.branches {
+            let selected = prune_selected.contains(&branch.index);
+            let checkbox = if selected { "[x]" } else { "[ ]" };
+            let checkbox_color = if selected { KANAGAWA.warn } else { KANAGAWA.fg };
+            lines.push(Line::from(vec![
+                Span::styled("    ", Style::default().fg(KANAGAWA.fg)),
+                Span::styled(
+                    format!("{} #{:<2}", checkbox, branch.index),
+                    Style::default().fg(checkbox_color),
+                ),
+                Span::styled(
+                    format!(
+                        "  p={:.3}  div={:.2}  events={}",
+                        branch.probability, branch.divergence, branch.event_count
+                    ),
+                    Style::default().fg(KANAGAWA.fg),
+                ),
+            ]));
+        }
+    }
+
     let paragraph = Paragraph::new(lines)
         .block(
             Block::bordered()
@@ -258,6 +294,7 @@ mod tests {
                 "tick 2: diplomacy decreased by 0.05".to_string(),
                 "tick 1: conflict increased by 0.12".to_string(),
             ],
+            branches: vec![],
         }
     }
 
@@ -320,6 +357,7 @@ mod tests {
             field_values: vec![],
             agent_statuses: vec![],
             event_log: vec![],
+            branches: vec![],
         };
         let formatted = format_simulation(&sim);
 

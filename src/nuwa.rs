@@ -7,7 +7,8 @@ pub mod sandbox;
 pub use backward::run_backward;
 pub use forward::run_forward;
 pub use outcome::{
-    ConvergenceReason, InterventionPath, InterventionStep, SimulationOutcome, WorldlineBranch,
+    BranchSummary, ConvergenceReason, InterventionPath, InterventionStep, SimUpdate,
+    SimulationOutcome, WorldlineBranch,
 };
 pub use pruning::PruningDecision;
 pub use sandbox::{NuwaSandbox, SimulationMode};

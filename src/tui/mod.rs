@@ -4,7 +4,7 @@ mod detail;
 mod history;
 mod render;
 mod simulation;
-mod state;
+pub(crate) mod state;
 mod theme;
 
 pub use compare::{format_compare, render_compare};
@@ -44,6 +44,7 @@ pub async fn run_history_browser(
     sqlite_path: &str,
     limit: usize,
     simulate: Option<&str>,
+    interactive: bool,
 ) -> Result<String, TianJiError> {
     if !Path::new(sqlite_path).exists() {
         return Ok(EMPTY_TUI_MESSAGE.to_string());
@@ -85,13 +86,105 @@ pub async fn run_history_browser(
 
     // Optionally run a simulation if --simulate was provided
     if let Some(sim_spec) = simulate {
-        if let Some(sim_state) = run_demo_simulation(sim_spec).await {
+        if interactive {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let spec = sim_spec.to_string();
+            let maybe = prepare_simulation_sandbox(&spec);
+            if let Some((base_wl, agents, mode, config, provider)) = maybe {
+                tokio::spawn(async move {
+                    crate::nuwa::forward::run_interactive_forward(
+                        &base_wl,
+                        &agents,
+                        &mode,
+                        &config,
+                        provider.as_ref(),
+                        tx,
+                        3,
+                    )
+                    .await;
+                });
+                tui_state.pending_sim_rx = Some(rx);
+            }
+        } else if let Some(sim_state) = run_demo_simulation(sim_spec).await {
             tui_state.simulation = Some(sim_state);
         }
     }
 
     run_terminal(tui_state)?;
     Ok(String::new())
+}
+
+#[allow(clippy::type_complexity)]
+fn prepare_simulation_sandbox(
+    spec: &str,
+) -> Option<(
+    crate::worldline::types::Worldline,
+    Vec<crate::hongmeng::agent::Agent>,
+    crate::nuwa::SimulationMode,
+    crate::hongmeng::HongmengConfig,
+    Option<crate::llm::ProviderRegistry>,
+)> {
+    use crate::hongmeng::agent::Agent;
+    use crate::hongmeng::HongmengConfig;
+    use crate::nuwa::SimulationMode;
+    use crate::profile::types::{ActorProfile, ActorTier, Capabilities};
+    use crate::worldline::types::{FieldKey, Worldline};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let (field_str, horizon) = spec.rsplit_once(':')?;
+    let horizon: u64 = horizon.parse().ok()?;
+    let (region, domain) = field_str.rsplit_once('.')?;
+
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        FieldKey {
+            region: region.to_string(),
+            domain: domain.to_string(),
+        },
+        3.5,
+    );
+    let hash = Worldline::compute_snapshot_hash(&fields);
+    let base_worldline = Worldline {
+        id: 1,
+        fields,
+        events: vec![],
+        causal_graph: petgraph::graph::DiGraph::new(),
+        active_actors: BTreeSet::new(),
+        divergence: 0.0,
+        parent: None,
+        diverge_tick: 0,
+        snapshot_hash: hash,
+        created_at: chrono::Utc::now(),
+    };
+    let mode = SimulationMode::Forward {
+        target_field: FieldKey {
+            region: region.to_string(),
+            domain: domain.to_string(),
+        },
+        horizon_ticks: horizon,
+    };
+    let config = HongmengConfig::default();
+    let profiles = [
+        ("usa", vec!["observe", "diplomatic_protest"]),
+        ("china", vec!["observe", "naval_exercise"]),
+        ("russia", vec!["observe", "diplomatic_protest"]),
+    ];
+    let agents: Vec<Agent> = profiles
+        .iter()
+        .map(|(id, pats)| {
+            Agent::from_profile(ActorProfile {
+                id: id.to_string(),
+                name: id.to_string(),
+                tier: ActorTier::Nation,
+                interests: vec![],
+                red_lines: vec![],
+                capabilities: Capabilities::default(),
+                behavior_patterns: pats.iter().map(|s| s.to_string()).collect(),
+                historical_analogues: vec![],
+            })
+        })
+        .collect();
+    Some((base_worldline, agents, mode, config, None))
 }
 
 fn is_missing_runs_table(error: &rusqlite::Error) -> bool {
@@ -238,6 +331,7 @@ async fn run_demo_simulation(spec: &str) -> Option<SimulationState> {
         field_values,
         agent_statuses,
         event_log,
+        branches: vec![],
     })
 }
 
@@ -283,6 +377,26 @@ struct TerminalSession {
 impl TerminalSession {
     fn run(&mut self, mut state: TuiState) -> Result<(), TianJiError> {
         loop {
+            // Poll simulation channel for live updates (non-blocking)
+            if let Some(ref mut rx) = state.pending_sim_rx {
+                while let Ok(update) = rx.try_recv() {
+                    match update {
+                        crate::nuwa::outcome::SimUpdate::Tick { state: sim_state } => {
+                            state.simulation = Some(sim_state);
+                        }
+                        crate::nuwa::outcome::SimUpdate::PruneRequest {
+                            state: sim_state,
+                            response,
+                        } => {
+                            state.simulation = Some(sim_state);
+                            state.prune_mode = true;
+                            state.pending_prune_tx = Some(response);
+                        }
+                        crate::nuwa::outcome::SimUpdate::Completed => {}
+                    }
+                }
+            }
+
             self.terminal
                 .draw(|frame| self::render::render(frame, &state))?;
             if event::poll(Duration::from_millis(100))? {
@@ -326,6 +440,50 @@ fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
             }
             KeyCode::Char(c) => {
                 state.search_query.push(c);
+            }
+            _ => {}
+        }
+        return true;
+    }
+
+    // Prune mode key handling
+    if state.prune_mode {
+        match key.code {
+            KeyCode::Char(' ') => {
+                if state.prune_selected.contains(&state.selected) {
+                    state.prune_selected.retain(|i| *i != state.selected);
+                } else {
+                    state.prune_selected.push(state.selected);
+                    state.prune_selected.sort_unstable();
+                }
+            }
+            KeyCode::Enter => {
+                let decision = if state.prune_selected.is_empty() {
+                    crate::nuwa::PruningDecision::Continue
+                } else {
+                    crate::nuwa::PruningDecision::Prune(state.prune_selected.clone())
+                };
+                if let Some(tx) = state.pending_prune_tx.take() {
+                    let _ = tx.send(decision);
+                }
+                state.prune_mode = false;
+                state.prune_selected.clear();
+            }
+            KeyCode::Char('c') | KeyCode::Esc => {
+                if let Some(tx) = state.pending_prune_tx.take() {
+                    let _ = tx.send(crate::nuwa::PruningDecision::Continue);
+                }
+                state.prune_mode = false;
+                state.prune_selected.clear();
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(ref sim) = state.simulation {
+                    let max = sim.branches.len().saturating_sub(1);
+                    state.selected = (state.selected + 1).min(max);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                state.selected = state.selected.saturating_sub(1);
             }
             _ => {}
         }
@@ -767,6 +925,7 @@ mod tests {
             field_values: vec![],
             agent_statuses: vec![],
             event_log: vec![],
+            branches: vec![],
         });
 
         // Key 3 should now switch to Simulation view
@@ -787,6 +946,7 @@ mod tests {
             field_values: vec![],
             agent_statuses: vec![],
             event_log: vec![],
+            branches: vec![],
         });
         state.view = TuiView::Simulation;
 

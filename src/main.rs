@@ -236,6 +236,9 @@ enum Cli {
         /// Optional simulation spec in "field:horizon" format (e.g. "east-asia.conflict:30")
         #[arg(long = "simulate")]
         simulate: Option<String>,
+        /// Enable interactive pruning during simulation
+        #[arg(long)]
+        interactive: bool,
     },
     /// Show delta between the latest runs or an explicit run pair
     Delta {
@@ -925,10 +928,12 @@ mod tests {
                 sqlite_path,
                 limit,
                 simulate,
+                interactive,
             } => {
                 assert_eq!(sqlite_path, "runs/tianji.sqlite3");
                 assert_eq!(limit, 20);
                 assert_eq!(simulate, Some("east-asia.conflict:30".to_string()));
+                assert!(!interactive);
             }
             _ => panic!("expected Tui variant"),
         }
@@ -2255,7 +2260,11 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             sqlite_path,
             limit,
             simulate,
-        } => tianji::tui::run_history_browser(&sqlite_path, limit, simulate.as_deref()).await,
+            interactive,
+        } => {
+            tianji::tui::run_history_browser(&sqlite_path, limit, simulate.as_deref(), interactive)
+                .await
+        }
         Cli::Delta {
             sqlite_path,
             left_run_id,

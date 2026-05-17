@@ -3,8 +3,35 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
 
+use crate::tui::state::SimulationState;
 use crate::worldline::types::{ActorId, FieldKey, Worldline};
+
+use super::pruning::PruningDecision;
+
+/// Summary of a simulation branch for display in TUI prune mode.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BranchSummary {
+    pub index: usize,
+    pub probability: f64,
+    pub divergence: f64,
+    pub event_count: usize,
+}
+
+/// Messages sent from the async simulation task to the TUI event loop.
+pub enum SimUpdate {
+    /// Simulation state at current tick (non-pruning).
+    Tick { state: SimulationState },
+    /// Simulation needs a pruning decision — the receiver sends back
+    /// a PruningDecision through the oneshot sender.
+    PruneRequest {
+        state: SimulationState,
+        response: oneshot::Sender<PruningDecision>,
+    },
+    /// Simulation has completed.
+    Completed,
+}
 
 /// Nuwa-specific convergence reason.
 ///

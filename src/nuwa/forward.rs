@@ -366,3 +366,181 @@ mod tests {
         assert!(compute_divergence_from(&base, &current) > 0.0);
     }
 }
+
+// ── Interactive forward simulation with TUI channel bridge ──────────
+
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
+
+use super::outcome::{BranchSummary, SimUpdate};
+use super::pruning::PruningDecision;
+use crate::tui::state::{SimAgent, SimField, SimulationState};
+
+/// Run forward simulation with TUI channel updates.
+/// Sends state snapshots at each tick and pauses for pruning decisions.
+pub async fn run_interactive_forward(
+    base_worldline: &Worldline,
+    agents: &[Agent],
+    mode: &SimulationMode,
+    config: &HongmengConfig,
+    provider: Option<&ProviderRegistry>,
+    tx: UnboundedSender<SimUpdate>,
+    pruning_interval: u64,
+) {
+    let (target_field, horizon_ticks) = match mode {
+        SimulationMode::Forward {
+            target_field,
+            horizon_ticks,
+        } => (target_field.clone(), *horizon_ticks),
+        _ => {
+            let _ = tx.send(SimUpdate::Completed);
+            return;
+        }
+    };
+
+    let mut worldline = base_worldline.clone();
+    worldline.parent = Some(base_worldline.id);
+    worldline.diverge_tick = 0;
+
+    let mut working_agents: Vec<Agent> = agents.to_vec();
+    let mut tick: u64 = 0;
+    let mut branches: Vec<BranchSummary> = Vec::new();
+
+    loop {
+        tick += 1;
+
+        let mut action_types = Vec::new();
+        let mut agent_ids = Vec::new();
+
+        for agent in &mut working_agents {
+            let action = if let Some(clients) = resolve_forward_clients(provider) {
+                let context = AgentDecisionContext {
+                    visible_board: &[],
+                    stick: &[],
+                    fields: &worldline.fields,
+                    recent_actions: &agent.action_history,
+                };
+                agent
+                    .pick_llm_action_with_fallback(tick, &clients, context)
+                    .await
+                    .unwrap_or_else(|_| agent.pick_stub_action(tick))
+            } else {
+                agent.pick_stub_action(tick)
+            };
+            action_types.push(action.action_type.clone());
+            agent_ids.push(agent.actor_id.clone());
+            agent.action_history.push(action);
+        }
+
+        let delta = generate_delta(tick, &agent_ids, &action_types);
+        let mut delta_history = Vec::new();
+
+        for change in &delta.field_changes {
+            let key = change.to_field_key();
+            let current = worldline.fields.get(&key).copied().unwrap_or(0.0);
+            worldline.fields.insert(key.clone(), current + change.delta);
+            delta_history.push(change.clone());
+        }
+
+        worldline.snapshot_hash = Worldline::compute_snapshot_hash(&worldline.fields);
+        worldline.divergence = compute_divergence_from(&base_worldline.fields, &worldline.fields);
+
+        // Build field values for TUI state
+        let field_values: Vec<SimField> = worldline
+            .fields
+            .iter()
+            .map(|(key, value)| SimField {
+                region: key.region.clone(),
+                domain: key.domain.clone(),
+                value: *value,
+                delta: delta_history
+                    .iter()
+                    .find(|c| &c.to_field_key() == key)
+                    .map(|c| c.delta)
+                    .unwrap_or(0.0),
+            })
+            .collect();
+
+        let agent_statuses: Vec<SimAgent> = working_agents
+            .iter()
+            .map(|agent| SimAgent {
+                actor_id: agent.actor_id.clone(),
+                status: format!("{:?}", agent.status).to_lowercase(),
+                last_action: agent
+                    .action_history
+                    .last()
+                    .map(|a| a.action_type.clone())
+                    .unwrap_or_else(|| "none".to_string()),
+            })
+            .collect();
+
+        let event_log = delta_history
+            .iter()
+            .filter(|c| c.delta.abs() > 0.01)
+            .map(|c| {
+                let key = c.to_field_key();
+                format!(
+                    "tick {tick}: {} {} by {:.2}",
+                    key.domain,
+                    if c.delta > 0.0 {
+                        "increased"
+                    } else {
+                        "decreased"
+                    },
+                    c.delta.abs()
+                )
+            })
+            .collect();
+
+        let sim_state = SimulationState {
+            mode: "forward".to_string(),
+            target: format!("{}.{}", target_field.region, target_field.domain),
+            horizon: horizon_ticks,
+            tick,
+            total_ticks: horizon_ticks,
+            status: "running".to_string(),
+            field_values,
+            agent_statuses,
+            event_log,
+            branches: branches.clone(),
+        };
+
+        // Pruning check
+        if pruning_interval > 0 && tick.is_multiple_of(pruning_interval) {
+            let (resp_tx, resp_rx) = oneshot::channel();
+            let _ = tx.send(SimUpdate::PruneRequest {
+                state: sim_state,
+                response: resp_tx,
+            });
+
+            if let Ok(PruningDecision::Prune(indices)) = resp_rx.await {
+                branches.retain(|b| !indices.contains(&b.index));
+            }
+        } else {
+            let _ = tx.send(SimUpdate::Tick { state: sim_state });
+        }
+
+        // Convergence checks
+        if let Some(target_value) = worldline.fields.get(&target_field) {
+            if *target_value >= 10.0 {
+                break;
+            }
+        }
+
+        if tick > 1 {
+            let all_stable = delta
+                .field_changes
+                .iter()
+                .all(|c| c.delta.abs() < config.convergence_epsilon);
+            if all_stable && !delta.field_changes.is_empty() {
+                break;
+            }
+        }
+
+        if tick >= horizon_ticks {
+            break;
+        }
+    }
+
+    let _ = tx.send(SimUpdate::Completed);
+}

@@ -37,9 +37,13 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
         super::state::TuiView::Compare => {
             super::compare::render_compare(frame, root[1], state.compare.as_ref())
         }
-        super::state::TuiView::Simulation => {
-            super::simulation::render_simulation(frame, root[1], state.simulation.as_ref())
-        }
+        super::state::TuiView::Simulation => super::simulation::render_simulation(
+            frame,
+            root[1],
+            state.simulation.as_ref(),
+            state.prune_mode,
+            &state.prune_selected,
+        ),
     }
 
     let mut spans = vec![
