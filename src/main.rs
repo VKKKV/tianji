@@ -1687,7 +1687,7 @@ fn handle_baseline(
         ));
     }
 
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON")?;
 
     if show {
@@ -1739,7 +1739,7 @@ fn handle_baseline(
             locked_by: Some("cli".to_string()),
         };
 
-        save_baseline(&conn, &baseline)?;
+        save_baseline(&mut conn, &baseline)?;
         Ok(serde_json::to_string_pretty(&baseline)?)
     } else {
         // clear

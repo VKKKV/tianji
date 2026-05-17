@@ -28,6 +28,36 @@ impl IntoResponse for JsonEnvelope {
 const API_VERSION: &str = "v1";
 const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";
 const MAX_RUNS_LIMIT: usize = 200;
+
+// ---------------------------------------------------------------------------
+// Error mapping
+// ---------------------------------------------------------------------------
+
+fn tianji_error_to_api(e: crate::TianJiError) -> ApiError {
+    use crate::TianJiError;
+    match &e {
+        TianJiError::Usage(_) | TianJiError::Input(_) => ApiError {
+            status: StatusCode::BAD_REQUEST,
+            body: error_envelope("invalid_request", "Bad request"),
+        },
+        TianJiError::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound => ApiError {
+            status: StatusCode::NOT_FOUND,
+            body: error_envelope("not_found", "Resource not found"),
+        },
+        TianJiError::Storage(rusqlite::Error::QueryReturnedNoRows) => ApiError {
+            status: StatusCode::NOT_FOUND,
+            body: error_envelope("not_found", "Resource not found"),
+        },
+        TianJiError::Storage(_) => ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            body: error_envelope("internal_error", "An internal error occurred"),
+        },
+        _ => ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            body: error_envelope("internal_error", "An internal error occurred"),
+        },
+    }
+}
 const API_RUN_SUMMARY_EVENT_LIMIT: usize = 200;
 const API_RUN_SUMMARY_GROUP_LIMIT: usize = 200;
 
@@ -124,9 +154,7 @@ pub struct CompareQuery {
 }
 
 #[derive(Deserialize, Default)]
-pub struct DeltaLatestQuery {
-    pub sqlite_path: Option<String>,
-}
+pub struct DeltaLatestQuery {}
 
 // ---------------------------------------------------------------------------
 // Route handlers
@@ -156,10 +184,7 @@ async fn get_runs(
     };
 
     let filters = crate::storage::RunListFilters::default();
-    let items = crate::list_runs(&state.sqlite_path, limit, &filters).map_err(|e| ApiError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        body: error_envelope("internal_error", &e.to_string()),
-    })?;
+    let items = crate::list_runs(&state.sqlite_path, limit, &filters).map_err(tianji_error_to_api)?;
 
     let data = serde_json::json!({
         "resource": "/api/v1/runs",
@@ -190,10 +215,7 @@ async fn get_run_by_id(
         false,
         &group_filters,
     )
-    .map_err(|e| ApiError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        body: error_envelope("internal_error", &e.to_string()),
-    })?;
+    .map_err(tianji_error_to_api)?;
 
     match payload {
         Some(p) => Ok(JsonEnvelope(success_envelope(p))),
@@ -205,10 +227,7 @@ async fn get_run_by_id(
 }
 
 async fn get_latest_run(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
-    let latest_run_id = crate::get_latest_run_id(&state.sqlite_path).map_err(|e| ApiError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        body: error_envelope("internal_error", &e.to_string()),
-    })?;
+    let latest_run_id = crate::get_latest_run_id(&state.sqlite_path).map_err(tianji_error_to_api)?;
 
     let run_id = match latest_run_id {
         Some(id) => id,
@@ -229,10 +248,7 @@ async fn get_latest_run(State(state): State<AppState>) -> Result<impl IntoRespon
         false,
         &group_filters,
     )
-    .map_err(|e| ApiError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        body: error_envelope("internal_error", &e.to_string()),
-    })?;
+    .map_err(tianji_error_to_api)?;
 
     match payload {
         Some(p) => Ok(JsonEnvelope(success_envelope(p))),
@@ -305,10 +321,7 @@ async fn get_compare(
         false,
         &group_filters,
     )
-    .map_err(|e| ApiError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        body: error_envelope("internal_error", &e.to_string()),
-    })?;
+    .map_err(tianji_error_to_api)?;
 
     match result {
         Some(r) => {
@@ -335,10 +348,9 @@ async fn get_compare(
 
 async fn get_latest_delta(
     State(state): State<AppState>,
-    Query(params): Query<DeltaLatestQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let sqlite_path = params.sqlite_path.unwrap_or(state.sqlite_path);
-    let memory = crate::HotMemory::load(&crate::delta_memory_path(&sqlite_path));
+    let sqlite_path = &state.sqlite_path;
+    let memory = crate::HotMemory::load(&crate::delta_memory_path(sqlite_path));
     let Some(run) = memory.runs.front() else {
         let payload = serde_json::json!({
             "run_id": null,

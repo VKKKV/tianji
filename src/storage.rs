@@ -42,6 +42,7 @@ pub fn persist_run(
 
     let mut connection = Connection::open(db_path)?;
     connection.execute_batch("PRAGMA foreign_keys = ON")?;
+    connection.execute_batch("PRAGMA journal_mode = WAL")?;
     initialize_schema(&connection)?;
 
     let tx = connection.transaction()?;
@@ -75,22 +76,33 @@ fn insert_run(connection: &Connection, artifact: &RunArtifact) -> Result<i64, Ti
     Ok(connection.last_insert_rowid())
 }
 
+// ---------------------------------------------------------------------------
+// Canonical hash helpers
+// ---------------------------------------------------------------------------
+
+/// Returns the effective (identity_hash, content_hash) for a RawItem,
+/// deriving from canonical fields when either hash is empty.
+fn canonical_hashes_for_raw_item(item: &RawItem) -> (String, String) {
+    let identity = if item.entry_identity_hash.is_empty() {
+        derive_canonical_entry_identity_hash(item)
+    } else {
+        item.entry_identity_hash.clone()
+    };
+    let content = if item.content_hash.is_empty() {
+        derive_canonical_content_hash(item)
+    } else {
+        item.content_hash.clone()
+    };
+    (identity, content)
+}
+
 fn ensure_canonical_source_items(
     connection: &Connection,
     raw_items: &[RawItem],
 ) -> Result<BTreeMap<(String, String), i64>, TianJiError> {
     let mut canonical_ids: BTreeMap<(String, String), i64> = BTreeMap::new();
     for item in raw_items {
-        let identity_hash = if item.entry_identity_hash.is_empty() {
-            derive_canonical_entry_identity_hash(item)
-        } else {
-            item.entry_identity_hash.clone()
-        };
-        let content_hash = if item.content_hash.is_empty() {
-            derive_canonical_content_hash(item)
-        } else {
-            item.content_hash.clone()
-        };
+        let (identity_hash, content_hash) = canonical_hashes_for_raw_item(item);
         let key = (identity_hash.clone(), content_hash.clone());
         if canonical_ids.contains_key(&key) {
             continue;
@@ -130,7 +142,7 @@ fn insert_raw_items(
     canonical_ids: &BTreeMap<(String, String), i64>,
 ) -> Result<(), TianJiError> {
     for item in raw_items {
-        let key = (item.entry_identity_hash.clone(), item.content_hash.clone());
+        let key = canonical_hashes_for_raw_item(item);
         let canonical_id = canonical_ids.get(&key).ok_or_else(|| {
             TianJiError::Storage(rusqlite::Error::InvalidParameterName(
                 "missing canonical source item id".to_string(),
@@ -159,6 +171,12 @@ fn insert_normalized_events(
     canonical_ids: &BTreeMap<(String, String), i64>,
 ) -> Result<(), TianJiError> {
     for event in normalized_events {
+        if event.entry_identity_hash.is_empty() || event.content_hash.is_empty() {
+            return Err(TianJiError::Input(format!(
+                "normalized event {} has empty hash fields",
+                event.event_id
+            )));
+        }
         let key = (
             event.entry_identity_hash.clone(),
             event.content_hash.clone(),
@@ -1638,16 +1656,17 @@ pub fn next_worldline_id(conn: &Connection) -> Result<u64, TianJiError> {
 // ---------------------------------------------------------------------------
 
 /// Save a baseline to SQLite. Replaces any existing baseline.
-pub fn save_baseline(conn: &Connection, baseline: &Baseline) -> Result<(), TianJiError> {
+pub fn save_baseline(conn: &mut Connection, baseline: &Baseline) -> Result<(), TianJiError> {
     let baseline_json = serde_json::to_string(baseline)?;
     let locked_at = baseline.locked_at.to_rfc3339();
 
-    // Clear existing baseline rows, then insert one
-    conn.execute("DELETE FROM baselines", [])?;
-    conn.execute(
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM baselines", [])?;
+    tx.execute(
         "INSERT INTO baselines (baseline_json, locked_at) VALUES (?1, ?2)",
         params![baseline_json, locked_at],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -1795,7 +1814,7 @@ mod worldline_persistence_tests {
 
     #[test]
     fn baseline_save_load_and_clear() {
-        let conn = temp_connection();
+        let mut conn = temp_connection();
         let mut fields = BTreeMap::new();
         fields.insert(
             FieldKey {
@@ -1812,7 +1831,7 @@ mod worldline_persistence_tests {
             locked_by: Some("cli".to_string()),
         };
 
-        save_baseline(&conn, &baseline).expect("save");
+        save_baseline(&mut conn, &baseline).expect("save");
 
         let loaded = load_baseline(&conn).expect("load").expect("found");
         assert_eq!(loaded.worldline_id, 1);
