@@ -117,6 +117,12 @@ pub async fn run_backward(
             working_worldline.snapshot_hash =
                 Worldline::compute_snapshot_hash(&working_worldline.fields);
 
+            // Update divergence after field changes so path_probability is meaningful
+            working_worldline.divergence = crate::worldline::baseline::compute_divergence(
+                &base_worldline.fields,
+                &working_worldline.fields,
+            );
+
             interventions.push(InterventionStep {
                 actor: agent.actor_id.clone(),
                 action: best_action,

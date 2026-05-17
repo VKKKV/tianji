@@ -172,11 +172,12 @@ pub async fn run_forward(
 
         let branch_prob = base_probability / (1.0 + offset as f64);
 
+        let alt_divergence = alt_worldline.divergence;
         branches.push(WorldlineBranch {
             worldline: alt_worldline,
             probability: branch_prob,
             event_sequence: alt_event_sequence,
-            final_divergence: worldline.divergence + offset as f64 * 0.5,
+            final_divergence: alt_divergence + offset as f64 * 0.5,
         });
     }
 
@@ -491,6 +492,29 @@ pub async fn run_interactive_forward(
                 )
             })
             .collect();
+
+        // Generate branch summaries from current field state
+        // (simplified from run_forward's full branch generation)
+        {
+            let mut next_index = branches.len();
+            for &value in worldline.fields.values() {
+                if value.abs() < 0.01 {
+                    continue;
+                }
+                let divergence = value.abs();
+                let probability = 1.0 / (1.0 + divergence);
+                branches.push(BranchSummary {
+                    index: next_index,
+                    probability,
+                    divergence,
+                    event_count: delta.field_changes.len(),
+                });
+                next_index += 1;
+                if next_index >= 6 {
+                    break; // cap at a manageable number
+                }
+            }
+        }
 
         let sim_state = SimulationState {
             mode: "forward".to_string(),
