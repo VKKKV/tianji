@@ -137,20 +137,15 @@ impl LlmClient {
     ) -> Result<String, LlmError> {
         let base_url = self.base_url.as_deref().unwrap_or("http://localhost:11434");
 
-        let prompt = messages
+        let msgs: Vec<serde_json::Value> = messages
             .into_iter()
-            .map(|m| match m.role.as_str() {
-                "system" => format!("[System]: {}", m.content),
-                "assistant" => format!("[Assistant]: {}", m.content),
-                _ => m.content,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .map(|m| json!({"role": m.role, "content": m.content}))
+            .collect();
 
-        let url = format!("{}/api/generate", base_url.trim_end_matches('/'));
+        let url = format!("{}/api/chat", base_url.trim_end_matches('/'));
         let body = json!({
             "model": model,
-            "prompt": prompt,
+            "messages": msgs,
             "stream": false,
         });
 
@@ -182,13 +177,20 @@ impl LlmClient {
         let json: serde_json::Value = serde_json::from_str(&text)
             .map_err(|e| LlmError::ChatFailed(format!("failed to parse Ollama response: {e}")))?;
 
-        Ok(json["response"].as_str().unwrap_or("").to_string())
+        Ok(json["message"]["content"]
+            .as_str()
+            .unwrap_or("")
+            .to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc::{self, Receiver};
+    use std::thread;
 
     fn ollama_config() -> ProviderConfig {
         ProviderConfig {
@@ -212,6 +214,68 @@ mod tests {
             max_concurrency: 1,
             fallback: None,
         }
+    }
+
+    fn read_http_request(mut stream: &TcpStream) -> (String, serde_json::Value) {
+        let mut bytes = Vec::new();
+        let mut buffer = [0_u8; 1024];
+
+        loop {
+            let count = stream.read(&mut buffer).expect("read request bytes");
+            assert!(count > 0, "client closed before headers");
+            bytes.extend_from_slice(&buffer[..count]);
+            if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+
+        let header_end = bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("headers terminator")
+            + 4;
+        let headers = String::from_utf8(bytes[..header_end].to_vec()).expect("headers utf8");
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then(|| {
+                    value
+                        .trim()
+                        .parse::<usize>()
+                        .expect("content length number")
+                })
+            })
+            .expect("content-length header");
+
+        while bytes.len() - header_end < content_length {
+            let count = stream.read(&mut buffer).expect("read request body");
+            assert!(count > 0, "client closed before body");
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+
+        let body = &bytes[header_end..header_end + content_length];
+        let json = serde_json::from_slice(body).expect("request body JSON");
+        (headers, json)
+    }
+
+    fn spawn_ollama_server(
+        response: &'static str,
+    ) -> (String, Receiver<(String, serde_json::Value)>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("test server addr");
+        let (sender, receiver) = mpsc::channel();
+
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let request = read_http_request(&stream);
+            sender.send(request).expect("send captured request");
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+
+        (format!("http://{addr}"), receiver)
     }
 
     #[test]
@@ -253,5 +317,70 @@ mod tests {
         }];
         let result = client.chat(messages, None).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn chat_ollama_posts_structured_messages_to_api_chat() {
+        let (base_url, request_receiver) = spawn_ollama_server(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 58\r\n\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"structured ok\"}}",
+        );
+        let mut config = ollama_config();
+        config.base_url = Some(base_url);
+        let client = LlmClient::new("ollama_local", &config).expect("create client");
+        let messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: "Return JSON only".to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Pick an action".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "Previous answer".to_string(),
+            },
+        ];
+
+        let result = client.chat(messages, None).await.expect("ollama chat");
+        let (headers, body) = request_receiver.recv().expect("captured request");
+
+        assert_eq!(result, "structured ok");
+        assert!(headers.starts_with("POST /api/chat HTTP/1.1"));
+        assert_eq!(body["model"], "qwen3:14b");
+        assert_eq!(body["stream"], false);
+        assert!(body.get("prompt").is_none(), "should not flatten prompt");
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][0]["content"], "Return JSON only");
+        assert_eq!(body["messages"][1]["role"], "user");
+        assert_eq!(body["messages"][1]["content"], "Pick an action");
+        assert_eq!(body["messages"][2]["role"], "assistant");
+        assert_eq!(body["messages"][2]["content"], "Previous answer");
+    }
+
+    #[tokio::test]
+    async fn chat_ollama_non_success_includes_status_and_body() {
+        let (base_url, request_receiver) = spawn_ollama_server(
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nollama failed",
+        );
+        let mut config = ollama_config();
+        config.base_url = Some(base_url);
+        let client = LlmClient::new("ollama_local", &config).expect("create client");
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "Hello".to_string(),
+        }];
+
+        let result = client.chat(messages, None).await;
+        let (headers, _) = request_receiver.recv().expect("captured request");
+
+        assert!(headers.starts_with("POST /api/chat HTTP/1.1"));
+        let error = result.expect_err("non-success should fail");
+        let message = error.to_string();
+        assert!(message.contains("500"), "missing status: {message}");
+        assert!(
+            message.contains("ollama failed"),
+            "missing response body: {message}"
+        );
     }
 }
