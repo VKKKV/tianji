@@ -177,6 +177,69 @@ Files: `src/nuwa/sandbox.rs`, `src/nuwa/forward.rs`, `src/nuwa/backward.rs`
 
 ---
 
+## 3.5 Cross-Project Borrowings (ShadowBroker v0.9.7 → TianJi)
+
+> Full analysis: `.trellis/reviews/shadowbroker-cross-project-analysis.md`
+> Repo: `/home/kita/code/Shadowbroker`
+
+ShadowBroker is a 60+ feed real-time OSINT geospatial dashboard
+(Next.js + MapLibre + FastAPI + Rust privacy-core). Six patterns
+are worth adapting for TianJi, ordered by priority:
+
+### Borrowing 1 (high): Alert Dispatch to External Channels
+ShadowBroker's `AlertDispatcher` sends branded alerts to Discord
+webhooks, Telegram bots, and generic webhooks — with automatic
+message chunking for platform character limits.
+
+**TianJi adoption:** Wire `AlertTier` (Flash/Priority/Routine) to
+real delivery channels. New file `src/alert_dispatch.rs`, config
+in `~/.tianji/config.yaml`. Reuses existing `reqwest` dep.
+
+### Borrowing 2 (medium): HMAC-Signed Agent Command Channel
+ShadowBroker exposes `POST /api/ai/channel/command` and `/batch`
+endpoints with HMAC-SHA256 signing (timestamp + nonce + body digest),
+tier-gated access (restricted/full), and SSE push for layer changes.
+
+**TianJi adoption:** Add `/api/v1/agent/command` to daemon's axum
+router, enabling external AI agents (Hermes, OpenClaw, etc.) to
+participate in Hongmeng simulations as first-class actors.
+
+### Borrowing 3 (medium): Typed Data Model (H8 fix reference)
+ShadowBroker's frontend has ~1100 lines of TypeScript interfaces
+covering every entity (Flight, Ship, Satellite, Earthquake, GDELT, ...).
+Every field is typed. No `any` overuse.
+
+**TianJi adoption:** This is the reference pattern for fixing H8
+(`serde_json::Value` → strong types). Define `#[derive(Serialize,
+Deserialize)]` structs for ScoredEvent, InterventionCandidate,
+EventGroupSummary, etc. Phase C1 in this plan.
+
+### Borrowing 4 (medium): Fast/Slow Feed Tier Separation
+ShadowBroker splits 60+ feeds: fast tier (15-30s: flights, ships,
+satellites) vs slow tier (5-15min: GDELT, news, earthquakes, fires).
+
+**TianJi adoption:** Extend `DaemonConfig` with `fast_interval_secs`
+and `slow_interval_secs`. Group watched feeds by urgency. Lowers
+API costs and LLM token consumption in Hongmeng simulations.
+
+### Borrowing 5 (low): Structured Agent Output (Analysis Zones)
+ShadowBroker agents place analysis zones on the map with category
+(contradiction/warning/observation/hypothesis), severity, cell size,
+and evidence drivers.
+
+**TianJi adoption:** Enrich `AgentAction` with structured rationale:
+`{assessment, category, confidence, drivers[]}`. Makes Nuwa
+simulation paths auditable and the TUI simulation view richer.
+
+### Borrowing 6 (low): Snapshot Timeline Replay
+ShadowBroker's Time Machine captures hourly snapshots with frame
+interpolation for moving entities, variable playback speed.
+
+**TianJi adoption:** Extend TUI history mode with arrow-key timeline
+scrubbing through persisted runs, replaying field changes tick-by-tick.
+
+---
+
 ## 4. Dependencies
 
 ```toml
