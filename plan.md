@@ -2,7 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-17
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: ALL PHASES COMPLETE. 22 bugs fixed post-review. TianJi v0.2.1-post-bugfix.
+> Current: ALL PHASES COMPLETE. 22 bugs fixed post-review. Phase B code-quality improvements ongoing.
+> Tests: 310 pass / 0 fail
 
 ---
 
@@ -39,10 +40,28 @@ Bugfix ████████████████████ ✅ 22 bugs 
 ```
 
   源码: ~20K 行 Rust / 52 源文件
-  测试: 296 pass / 0 fail
+  测试: 310 pass / 0 fail
   构建: cargo build + clippy -D warnings zero
   依赖: 18 crates
   Python: 已退役
+
+### Phase B — Code Quality (COMPLETE)
+
+**B1. Extract time_utils module** ✅
+- Consolidated ISO parsing, days_since_epoch into src/time_utils.rs
+
+**B2. Async TUI data loading** ✅
+- Background threads for detail/compare SQLite queries
+- mpsc channel polling in event loop, "loading..." indicator in title bar
+
+**B3. Structured logging** ✅
+- All eprintln! calls replaced with tracing::{error,warn}
+- tracing_subscriber::fmt with RUST_LOG env-var support
+
+**B4. Scoring parameters configurable** ✅
+- NEW src/scoring_params.rs: ScoreParams struct with Default + YAML deserialization
+- All scoring functions threaded with &ScoreParams
+- Backward-compat score_events() uses default params
 
 ---
 
