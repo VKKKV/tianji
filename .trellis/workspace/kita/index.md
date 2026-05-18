@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-0.md`
-- **Total Sessions**: 18
+- **Total Sessions**: 19
 - **Last Active**: 2026-05-18
 <!-- @@@/auto:current-status -->
 
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-05-18 | Phase D1 storage history coverage | `604fe89`, `bdacfad` | `main` |
 | 18 | 2026-05-18 | Phase C4 fork worldline unification | `504b4af`, `836df75`, `b1c307d` | `main` |
 | 17 | 2026-05-18 | Phase C2 TUI view-state dispatch preservation | `45db1e8` | `main` |
 | 16 | 2026-05-15 | Phase 6 Cleanup & Release | `30a40db`, `5a02482`, `26dfc09`, `8b40305` | `main` |
