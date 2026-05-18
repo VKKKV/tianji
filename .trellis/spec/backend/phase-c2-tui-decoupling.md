@@ -58,6 +58,13 @@ fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
 }
 ```
 
+If `handle_key` temporarily moves `state.view` out to satisfy Rust borrowing,
+restore or cache the active variant before calling any view-switch method. Otherwise
+switching dashboard/history/detail/compare/simulation can silently drop view-owned
+state such as search text, compare staging, simulation receivers, or pruning
+selection. Prefer routing through `TuiState::show_*` methods that preserve the
+relevant cached variant instead of constructing fresh view state in key handlers.
+
 ### Render dispatch
 
 Already clean (render.rs:29-47) — just change the match arms to destructure ViewState.
