@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Serialize)]
@@ -116,4 +116,15 @@ pub struct EventGroupSummary {
     pub evidence_chain: Vec<EventChainLink>,
     pub chain_summary: String,
     pub causal_summary: String,
+}
+
+/// Typed private runtime state for Hongmeng agents.
+///
+/// Kept alongside the legacy JSON `private_state` during the strong-types
+/// migration so existing serialized artifacts remain readable.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentPrivateState {
+    pub objectives: Vec<String>,
+    pub memory: BTreeMap<String, String>,
+    pub numeric_state: BTreeMap<String, f64>,
 }

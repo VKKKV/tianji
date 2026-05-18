@@ -15,9 +15,9 @@ pub use render::{base_style, render};
 pub use simulation::{format_simulation, render_simulation};
 pub use state::{
     array_string_field, bool_field, capitalize_first, compact_json_field, compact_json_value,
-    compact_timestamp, detect_glyph_mode, format_alert_tier, numeric_field, optional_f64_field,
-    placeholder_or_value, signed_numeric_field, string_field, CompareState, DashboardState,
-    DetailState, FieldStat, GlyphSet, HistoryRow, LoadingState, SimAgent, SimField,
+    compact_stick_value, compact_timestamp, detect_glyph_mode, format_alert_tier, numeric_field,
+    optional_f64_field, placeholder_or_value, signed_numeric_field, string_field, CompareState,
+    DashboardState, DetailState, FieldStat, GlyphSet, HistoryRow, LoadingState, SimAgent, SimField,
     SimulationState, TopEvent, TuiState, TuiView, ASCII_GLYPHS, EMPTY_TUI_MESSAGE, NERD_GLYPHS,
 };
 pub use theme::{Theme, KANAGAWA};

@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::llm::client::{ChatMessage, LlmClient};
 use crate::llm::error::LlmError;
+use crate::models::AgentPrivateState;
 use crate::profile::types::ActorProfile;
 use crate::worldline::types::{ActorId, FieldKey};
 
@@ -57,6 +58,8 @@ pub struct Agent {
     pub status: AgentStatus,
     pub action_history: Vec<AgentAction>,
     pub private_state: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_state_typed: Option<AgentPrivateState>,
 }
 
 impl Agent {
@@ -70,7 +73,25 @@ impl Agent {
             status: AgentStatus::Idle,
             action_history: Vec::new(),
             private_state: serde_json::Value::Null,
+            private_state_typed: None,
         }
+    }
+
+    /// Construct an Agent with typed private state mirrored into legacy JSON.
+    pub fn from_profile_with_private_state(
+        profile: ActorProfile,
+        private_state_typed: AgentPrivateState,
+    ) -> Self {
+        let mut agent = Self::from_profile(profile);
+        agent.set_private_state_typed(private_state_typed);
+        agent
+    }
+
+    /// Set typed private state and keep the legacy JSON field in sync.
+    pub fn set_private_state_typed(&mut self, private_state_typed: AgentPrivateState) {
+        self.private_state = serde_json::to_value(&private_state_typed)
+            .expect("AgentPrivateState serialization should not fail");
+        self.private_state_typed = Some(private_state_typed);
     }
 
     /// Pick a stub action from the profile's behavior_patterns.
@@ -165,8 +186,25 @@ impl Agent {
         let stick: Vec<serde_json::Value> = context
             .stick
             .iter()
-            .map(|entry| json!({"tick": entry.tick, "key": entry.key, "value": entry.value}))
+            .map(|entry| {
+                let value = entry
+                    .typed_value
+                    .as_ref()
+                    .map(|typed| typed.to_json_value())
+                    .unwrap_or_else(|| entry.value.clone());
+                json!({"tick": entry.tick, "key": entry.key, "value": value})
+            })
             .collect();
+
+        let private_state = self
+            .private_state_typed
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|error| {
+                LlmError::ChatFailed(format!("private state serialization failed: {error}"))
+            })?
+            .unwrap_or_else(|| self.private_state.clone());
 
         let fields: Vec<serde_json::Value> = context
             .fields
@@ -206,6 +244,7 @@ impl Agent {
             "worldline_fields": fields,
             "visible_board": visible_board,
             "private_stick": stick,
+            "private_state": private_state,
             "recent_actions": recent_actions,
         });
 
@@ -298,6 +337,27 @@ mod tests {
         assert_eq!(agent.status, AgentStatus::Idle);
         assert!(agent.action_history.is_empty());
         assert!(agent.private_state.is_null());
+        assert!(agent.private_state_typed.is_none());
+    }
+
+    #[test]
+    fn typed_private_state_mirrors_to_legacy_json() {
+        let profile = sample_profile("china", vec!["observe"]);
+        let mut typed = AgentPrivateState {
+            objectives: vec!["de-escalate".to_string()],
+            ..Default::default()
+        };
+        typed
+            .memory
+            .insert("last_signal".to_string(), "cautious".to_string());
+
+        let agent = Agent::from_profile_with_private_state(profile, typed.clone());
+
+        assert_eq!(agent.private_state_typed, Some(typed));
+        assert_eq!(
+            agent.private_state["objectives"],
+            serde_json::json!(["de-escalate"])
+        );
     }
 
     #[test]

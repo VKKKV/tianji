@@ -21,12 +21,38 @@ pub struct BoardMessage {
     pub visibility: MessageVisibility,
 }
 
+/// Strongly typed private stick value.
+///
+/// The legacy `value` JSON field remains on `StickEntry` for backward-compatible
+/// serialization while consumers migrate to this type.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum StickValue {
+    Text(String),
+    Number(f64),
+    Flag(bool),
+    List(Vec<String>),
+}
+
+impl StickValue {
+    pub fn to_json_value(&self) -> serde_json::Value {
+        match self {
+            Self::Text(value) => serde_json::Value::String(value.clone()),
+            Self::Number(value) => serde_json::json!(value),
+            Self::Flag(value) => serde_json::Value::Bool(*value),
+            Self::List(values) => serde_json::json!(values),
+        }
+    }
+}
+
 /// A private stick entry — per-actor scratch space not visible to other agents.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StickEntry {
     pub tick: u64,
     pub key: String,
     pub value: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typed_value: Option<StickValue>,
 }
 
 #[cfg(test)]
@@ -67,6 +93,7 @@ mod tests {
             tick: 3,
             key: "threat_level".to_string(),
             value: serde_json::json!({"level": "high", "confidence": 0.8}),
+            typed_value: None,
         };
 
         assert_eq!(entry.tick, 3);
@@ -93,10 +120,31 @@ mod tests {
             tick: 5,
             key: "negotiation_stance".to_string(),
             value: serde_json::json!("cautious"),
+            typed_value: Some(StickValue::Text("cautious".to_string())),
         };
 
         let json = serde_json::to_string(&entry).unwrap();
         let deserialized: StickEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, entry);
+    }
+
+    #[test]
+    fn stick_value_converts_to_legacy_json_value() {
+        assert_eq!(
+            StickValue::Text("watch".to_string()).to_json_value(),
+            serde_json::json!("watch")
+        );
+        assert_eq!(
+            StickValue::Number(0.7).to_json_value(),
+            serde_json::json!(0.7)
+        );
+        assert_eq!(
+            StickValue::Flag(true).to_json_value(),
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            StickValue::List(vec!["a".to_string(), "b".to_string()]).to_json_value(),
+            serde_json::json!(["a", "b"])
+        );
     }
 }

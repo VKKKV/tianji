@@ -7,7 +7,7 @@ use crate::worldline::types::{ActorId, Worldline};
 use crate::TianJiError;
 
 use super::agent::{Agent, AgentAction, AgentStatus};
-use super::board::{BoardMessage, MessageVisibility, StickEntry};
+use super::board::{BoardMessage, MessageVisibility, StickEntry, StickValue};
 use super::checkpoint::HongmengCheckpoint;
 use super::config::HongmengConfig;
 use super::convergence::{check_convergence, ConvergenceReason};
@@ -108,12 +108,24 @@ impl Hongmeng {
     }
 
     /// Write a key-value pair to an agent's stick.
-    pub fn set_stick(&mut self, actor_id: &ActorId, key: String, value: serde_json::Value) {
+    pub fn set_stick(&mut self, actor_id: &ActorId, key: String, value: StickValue) {
+        let stick = self.sticks.entry(actor_id.clone()).or_default();
+        stick.push(StickEntry {
+            tick: self.tick,
+            key,
+            value: value.to_json_value(),
+            typed_value: Some(value),
+        });
+    }
+
+    /// Backward-compatible stick writer for legacy JSON callers.
+    pub fn set_stick_json(&mut self, actor_id: &ActorId, key: String, value: serde_json::Value) {
         let stick = self.sticks.entry(actor_id.clone()).or_default();
         stick.push(StickEntry {
             tick: self.tick,
             key,
             value,
+            typed_value: None,
         });
     }
 
@@ -388,12 +400,12 @@ mod tests {
         hongmeng.set_stick(
             &"usa".to_string(),
             "threat_assessment".to_string(),
-            serde_json::json!({"level": "elevated"}),
+            StickValue::Text("elevated".to_string()),
         );
         hongmeng.set_stick(
             &"china".to_string(),
             "threat_assessment".to_string(),
-            serde_json::json!({"level": "low"}),
+            StickValue::Text("low".to_string()),
         );
 
         let usa_stick = hongmeng.get_stick(&"usa".to_string());
@@ -405,7 +417,11 @@ mod tests {
         assert_eq!(china_stick[0].key, "threat_assessment");
 
         // Verify values are different (isolation)
-        assert_ne!(usa_stick[0].value["level"], china_stick[0].value["level"]);
+        assert_ne!(usa_stick[0].value, china_stick[0].value);
+        assert_eq!(
+            usa_stick[0].typed_value,
+            Some(StickValue::Text("elevated".to_string()))
+        );
 
         // Agent without stick entries returns empty
         let iran_stick = hongmeng.get_stick(&"iran".to_string());
@@ -424,13 +440,13 @@ mod tests {
         hongmeng.set_stick(
             &"usa".to_string(),
             "key1".to_string(),
-            serde_json::json!("value1"),
+            StickValue::Text("value1".to_string()),
         );
         hongmeng.tick = 2;
         hongmeng.set_stick(
             &"usa".to_string(),
             "key2".to_string(),
-            serde_json::json!("value2"),
+            StickValue::Text("value2".to_string()),
         );
 
         let stick = hongmeng.get_stick(&"usa".to_string());

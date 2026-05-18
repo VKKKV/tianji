@@ -7,7 +7,7 @@ pub mod referee;
 pub mod simulation;
 
 pub use agent::{Agent, AgentAction, AgentStatus};
-pub use board::{BoardMessage, MessageVisibility, StickEntry};
+pub use board::{BoardMessage, MessageVisibility, StickEntry, StickValue};
 pub use checkpoint::HongmengCheckpoint;
 pub use config::HongmengConfig;
 pub use convergence::ConvergenceReason;

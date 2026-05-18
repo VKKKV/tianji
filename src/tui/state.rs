@@ -1,6 +1,7 @@
 use ratatui::widgets::ListState;
 use std::sync::mpsc;
 
+use crate::hongmeng::StickValue;
 use crate::storage::{
     compare_runs, get_run_summary, CompareResult, EventGroupFilters, ScoredEventFilters,
 };
@@ -431,6 +432,15 @@ pub fn compact_json_value(value: &serde_json::Value) -> String {
         serde_json::Value::Object(object) => format!("{} fields", object.len()),
         serde_json::Value::Null => "null".to_string(),
         _ => value.to_string(),
+    }
+}
+
+pub fn compact_stick_value(value: &StickValue) -> String {
+    match value {
+        StickValue::Text(text) => text.clone(),
+        StickValue::Number(number) => number.to_string(),
+        StickValue::Flag(flag) => flag.to_string(),
+        StickValue::List(items) => format!("{} items", items.len()),
     }
 }
 
