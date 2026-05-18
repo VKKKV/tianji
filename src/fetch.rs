@@ -6,6 +6,7 @@ use crate::models::RawItem;
 use crate::TianJiError;
 
 const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
+pub const MAX_RAW_ITEMS: usize = 500;
 
 pub fn parse_feed(feed_text: &str, source: &str) -> Result<Vec<RawItem>, TianJiError> {
     let document = roxmltree::Document::parse(feed_text).map_err(|error| {
@@ -77,6 +78,9 @@ fn parse_rss(channel: roxmltree::Node<'_, '_>, source: &str) -> Vec<RawItem> {
             entry_identity_hash: String::new(),
             content_hash: String::new(),
         });
+        if items.len() >= MAX_RAW_ITEMS {
+            break;
+        }
     }
     items
 }
@@ -112,6 +116,9 @@ fn parse_atom(root: roxmltree::Node<'_, '_>, source: &str) -> Vec<RawItem> {
             entry_identity_hash: String::new(),
             content_hash: String::new(),
         });
+        if items.len() >= MAX_RAW_ITEMS {
+            break;
+        }
     }
     items
 }

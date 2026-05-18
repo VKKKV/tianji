@@ -44,6 +44,7 @@ pub use storage::{
 };
 
 pub const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";
+pub const MAX_SCORED_EVENTS: usize = 500;
 
 #[derive(Debug)]
 pub enum TianJiError {
@@ -144,7 +145,8 @@ pub fn run_feed_text_with_alert_marking(
     let mut raw_items = parse_feed(feed_text, source)?;
     assign_canonical_hashes(&mut raw_items);
     let normalized_events = normalize_items(&raw_items);
-    let scored_events = score_events(&normalized_events);
+    let mut scored_events = score_events(&normalized_events);
+    scored_events.truncate(MAX_SCORED_EVENTS);
     let (headline, dominant_field, risk_level, top_regions, top_actors) =
         summarize_scenario(&scored_events);
     let event_groups = group_events(&scored_events);
@@ -550,6 +552,122 @@ mod tests {
         assert_eq!(events[0].regions, vec!["europe".to_string()]);
         assert_eq!(events[0].field_scores["diplomacy"], 3.0);
         assert_eq!(events[0].field_scores["technology"], 2.5);
+    }
+
+    #[test]
+    fn parse_feed_caps_rss_at_max_raw_items() {
+        let feed = oversized_rss_feed(crate::fetch::MAX_RAW_ITEMS + 25);
+        let items = parse_feed(&feed, "fixture:oversized_rss.xml").expect("rss feed");
+
+        assert_eq!(items.len(), crate::fetch::MAX_RAW_ITEMS);
+        assert_eq!(items[0].title, "China chip talks item 0000");
+        assert_eq!(
+            items.last().expect("last item").title,
+            format!(
+                "China chip talks item {:04}",
+                crate::fetch::MAX_RAW_ITEMS - 1
+            )
+        );
+    }
+
+    #[test]
+    fn parse_feed_caps_atom_at_max_raw_items() {
+        let feed = oversized_atom_feed(crate::fetch::MAX_RAW_ITEMS + 25);
+        let items = parse_feed(&feed, "fixture:oversized_atom.xml").expect("atom feed");
+
+        assert_eq!(items.len(), crate::fetch::MAX_RAW_ITEMS);
+        assert_eq!(items[0].title, "EU cyber negotiation entry 0000");
+        assert_eq!(
+            items.last().expect("last item").title,
+            format!(
+                "EU cyber negotiation entry {:04}",
+                crate::fetch::MAX_RAW_ITEMS - 1
+            )
+        );
+    }
+
+    #[test]
+    fn run_feed_text_caps_artifact_and_persistence_at_max_scored_events() {
+        let db_path = temp_sqlite_path();
+        let feed = oversized_rss_feed(MAX_SCORED_EVENTS + 25);
+        let result = run_feed_text(&feed, "fixture:oversized_pipeline.xml", Some(&db_path))
+            .expect("run oversized feed");
+
+        assert_eq!(result.artifact.scored_events.len(), MAX_SCORED_EVENTS);
+        assert_eq!(
+            result.artifact.input_summary.raw_item_count,
+            crate::fetch::MAX_RAW_ITEMS
+        );
+        assert_eq!(
+            result.artifact.input_summary.normalized_event_count,
+            crate::fetch::MAX_RAW_ITEMS
+        );
+
+        let conn = rusqlite::Connection::open(&db_path).expect("open db");
+        let scored_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM scored_events", [], |row| row.get(0))
+            .expect("count scored events");
+        assert_eq!(scored_count as usize, MAX_SCORED_EVENTS);
+
+        let raw_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM raw_items", [], |row| row.get(0))
+            .expect("count raw items");
+        assert_eq!(raw_count as usize, crate::fetch::MAX_RAW_ITEMS);
+
+        let memory_path = delta_memory_path(&db_path);
+        let _ = std::fs::remove_dir_all(memory_path.parent().expect("memory parent"));
+        cleanup_db(&db_path);
+    }
+
+    fn oversized_rss_feed(count: usize) -> String {
+        use std::fmt::Write as _;
+
+        let mut feed = String::from(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Oversized RSS Feed</title>
+"#,
+        );
+        for index in 0..count {
+            writeln!(
+                feed,
+                r#"    <item>
+      <title>China chip talks item {index:04}</title>
+      <link>https://example.com/rss/{index:04}</link>
+      <description>China and the United States hold AI chip talks after a cyber trade dispute.</description>
+      <pubDate>Sun, 22 Mar 2026 10:00:00 GMT</pubDate>
+    </item>"#
+            )
+            .expect("write rss item");
+        }
+        feed.push_str("  </channel>\n</rss>\n");
+        feed
+    }
+
+    fn oversized_atom_feed(count: usize) -> String {
+        use std::fmt::Write as _;
+
+        let mut feed = String::from(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Oversized Atom Feed</title>
+"#,
+        );
+        for index in 0..count {
+            writeln!(
+                feed,
+                r#"  <entry>
+    <title>EU cyber negotiation entry {index:04}</title>
+    <link href="https://example.com/atom/{index:04}" />
+    <updated>2026-03-22T10:00:00Z</updated>
+    <summary>European Union officials opened cyber negotiation talks with China after an AI dispute.</summary>
+  </entry>"#
+            )
+            .expect("write atom entry");
+        }
+        feed.push_str("</feed>\n");
+        feed
     }
 
     fn object_keys(value: &Value) -> BTreeSet<String> {
