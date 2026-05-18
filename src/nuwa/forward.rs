@@ -4,10 +4,75 @@ use crate::hongmeng::agent::{Agent, AgentDecisionContext};
 use crate::hongmeng::referee::{generate_delta, FieldChange};
 use crate::hongmeng::HongmengConfig;
 use crate::llm::ProviderRegistry;
-use crate::worldline::types::{FieldKey, Worldline};
+use crate::worldline::types::{ActorId, FieldKey, Worldline};
 
 use super::outcome::{ConvergenceReason, SimulationOutcome, WorldlineBranch};
 use super::sandbox::SimulationMode;
+
+struct TickInput<'a> {
+    tick: u64,
+    worldline: &'a mut Worldline,
+    base_fields: &'a BTreeMap<FieldKey, f64>,
+    agents: &'a mut [Agent],
+    provider: Option<&'a ProviderRegistry>,
+}
+
+struct TickOutput {
+    agent_ids: Vec<ActorId>,
+    action_types: Vec<String>,
+    field_changes: Vec<FieldChange>,
+}
+
+async fn tick_simulation(input: TickInput<'_>) -> TickOutput {
+    let TickInput {
+        tick,
+        worldline,
+        base_fields,
+        agents,
+        provider,
+    } = input;
+
+    let mut action_types = Vec::new();
+    let mut agent_ids = Vec::new();
+
+    for agent in agents {
+        let action = if let Some(clients) = resolve_forward_clients(provider) {
+            let context = AgentDecisionContext {
+                visible_board: &[],
+                stick: &[],
+                fields: &worldline.fields,
+                recent_actions: &agent.action_history,
+            };
+            agent
+                .pick_llm_action_with_fallback(tick, &clients, context)
+                .await
+                .unwrap_or_else(|_| agent.pick_stub_action(tick))
+        } else {
+            agent.pick_stub_action(tick)
+        };
+        action_types.push(action.action_type.clone());
+        agent_ids.push(agent.actor_id.clone());
+        agent.action_history.push(action);
+    }
+
+    let delta = generate_delta(tick, &agent_ids, &action_types);
+    let field_changes = delta.field_changes;
+
+    for change in &field_changes {
+        let key = change.to_field_key();
+        let current = worldline.fields.get(&key).copied().unwrap_or(0.0);
+        worldline.fields.insert(key, current + change.delta);
+    }
+
+    worldline.snapshot_hash = Worldline::compute_snapshot_hash(&worldline.fields);
+    worldline.divergence = compute_divergence_from(base_fields, &worldline.fields);
+
+    TickOutput {
+        agent_ids,
+        action_types,
+        field_changes,
+    }
+}
 
 pub async fn run_forward(
     base_worldline: &Worldline,
@@ -41,40 +106,22 @@ pub async fn run_forward(
     let mut event_sequence: Vec<String> = Vec::new();
     let mut tick: u64 = 0;
     let mut convergence_reason = ConvergenceReason::MaxTicksReached(horizon_ticks);
-    let mut _prev_fields = worldline.fields.clone();
 
     loop {
         tick += 1;
 
-        let mut action_types = Vec::new();
-        let mut agent_ids = Vec::new();
+        let output = tick_simulation(TickInput {
+            tick,
+            worldline: &mut worldline,
+            base_fields: &base_worldline.fields,
+            agents: &mut working_agents,
+            provider,
+        })
+        .await;
+        debug_assert_eq!(output.agent_ids.len(), output.action_types.len());
 
-        for agent in &mut working_agents {
-            let action = if let Some(clients) = resolve_forward_clients(provider) {
-                let context = AgentDecisionContext {
-                    visible_board: &[],
-                    stick: &[],
-                    fields: &worldline.fields,
-                    recent_actions: &agent.action_history,
-                };
-                agent
-                    .pick_llm_action_with_fallback(tick, &clients, context)
-                    .await
-                    .unwrap_or_else(|_| agent.pick_stub_action(tick))
-            } else {
-                agent.pick_stub_action(tick)
-            };
-            action_types.push(action.action_type.clone());
-            agent_ids.push(agent.actor_id.clone());
-            agent.action_history.push(action);
-        }
-
-        let delta = generate_delta(tick, &agent_ids, &action_types);
-
-        for change in &delta.field_changes {
+        for change in &output.field_changes {
             let key = change.to_field_key();
-            let current = worldline.fields.get(&key).copied().unwrap_or(0.0);
-            worldline.fields.insert(key.clone(), current + change.delta);
             delta_history.push(change.clone());
 
             if change.delta.abs() > 0.01 {
@@ -91,9 +138,6 @@ pub async fn run_forward(
             }
         }
 
-        worldline.snapshot_hash = Worldline::compute_snapshot_hash(&worldline.fields);
-        worldline.divergence = compute_divergence_from(&base_worldline.fields, &worldline.fields);
-
         if let Some(target_value) = worldline.fields.get(&target_field) {
             if *target_value >= 10.0 {
                 convergence_reason = ConvergenceReason::FieldTargetReached;
@@ -102,11 +146,11 @@ pub async fn run_forward(
         }
 
         if tick > 1 {
-            let all_stable = delta
+            let all_stable = output
                 .field_changes
                 .iter()
                 .all(|c| c.delta.abs() < config.convergence_epsilon);
-            if all_stable && !delta.field_changes.is_empty() {
+            if all_stable && !output.field_changes.is_empty() {
                 convergence_reason = ConvergenceReason::FieldStabilized(config.convergence_epsilon);
                 break;
             }
@@ -115,8 +159,6 @@ pub async fn run_forward(
         if tick >= horizon_ticks {
             break;
         }
-
-        _prev_fields = worldline.fields.clone();
     }
 
     let base_probability = 1.0 / (1.0 + worldline.divergence);
@@ -409,41 +451,15 @@ pub async fn run_interactive_forward(
     loop {
         tick += 1;
 
-        let mut action_types = Vec::new();
-        let mut agent_ids = Vec::new();
-
-        for agent in &mut working_agents {
-            let action = if let Some(clients) = resolve_forward_clients(provider) {
-                let context = AgentDecisionContext {
-                    visible_board: &[],
-                    stick: &[],
-                    fields: &worldline.fields,
-                    recent_actions: &agent.action_history,
-                };
-                agent
-                    .pick_llm_action_with_fallback(tick, &clients, context)
-                    .await
-                    .unwrap_or_else(|_| agent.pick_stub_action(tick))
-            } else {
-                agent.pick_stub_action(tick)
-            };
-            action_types.push(action.action_type.clone());
-            agent_ids.push(agent.actor_id.clone());
-            agent.action_history.push(action);
-        }
-
-        let delta = generate_delta(tick, &agent_ids, &action_types);
-        let mut delta_history = Vec::new();
-
-        for change in &delta.field_changes {
-            let key = change.to_field_key();
-            let current = worldline.fields.get(&key).copied().unwrap_or(0.0);
-            worldline.fields.insert(key.clone(), current + change.delta);
-            delta_history.push(change.clone());
-        }
-
-        worldline.snapshot_hash = Worldline::compute_snapshot_hash(&worldline.fields);
-        worldline.divergence = compute_divergence_from(&base_worldline.fields, &worldline.fields);
+        let output = tick_simulation(TickInput {
+            tick,
+            worldline: &mut worldline,
+            base_fields: &base_worldline.fields,
+            agents: &mut working_agents,
+            provider,
+        })
+        .await;
+        debug_assert_eq!(output.agent_ids.len(), output.action_types.len());
 
         // Build field values for TUI state
         let field_values: Vec<SimField> = worldline
@@ -453,7 +469,8 @@ pub async fn run_interactive_forward(
                 region: key.region.clone(),
                 domain: key.domain.clone(),
                 value: *value,
-                delta: delta_history
+                delta: output
+                    .field_changes
                     .iter()
                     .find(|c| &c.to_field_key() == key)
                     .map(|c| c.delta)
@@ -474,7 +491,8 @@ pub async fn run_interactive_forward(
             })
             .collect();
 
-        let event_log = delta_history
+        let event_log = output
+            .field_changes
             .iter()
             .filter(|c| c.delta.abs() > 0.01)
             .map(|c| {
@@ -506,7 +524,7 @@ pub async fn run_interactive_forward(
                     index: next_index,
                     probability,
                     divergence,
-                    event_count: delta.field_changes.len(),
+                    event_count: output.field_changes.len(),
                 });
                 next_index += 1;
                 if next_index >= 6 {
@@ -553,11 +571,11 @@ pub async fn run_interactive_forward(
         }
 
         if tick > 1 {
-            let all_stable = delta
+            let all_stable = output
                 .field_changes
                 .iter()
                 .all(|c| c.delta.abs() < config.convergence_epsilon);
-            if all_stable && !delta.field_changes.is_empty() {
+            if all_stable && !output.field_changes.is_empty() {
                 break;
             }
         }
