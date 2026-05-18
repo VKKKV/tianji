@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::hongmeng::agent::Agent;
 use crate::hongmeng::HongmengConfig;
 use crate::llm::ProviderRegistry;
+use crate::worldline::store::WorldlineStore;
 use crate::worldline::types::{FieldKey, Worldline, WorldlineId};
+use tracing::warn;
 
 use super::outcome::SimulationOutcome;
 
@@ -57,13 +59,23 @@ impl NuwaSandbox {
     }
 }
 
-fn fork_worldline(base: &Worldline, conn: Option<&rusqlite::Connection>) -> Worldline {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    let new_id: WorldlineId = if let Some(db) = conn {
-        crate::storage::next_worldline_id(db)
-            .unwrap_or_else(|_| COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    } else {
-        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+pub fn fork_worldline(base: &Worldline, store: Option<&dyn WorldlineStore>) -> Worldline {
+    let new_id: WorldlineId = match store {
+        Some(worldline_store) => match worldline_store.next_id() {
+            Ok(candidate) if candidate != base.id => candidate,
+            Ok(candidate) => {
+                warn!(
+                    worldline_id = candidate,
+                    "worldline store returned base id for fork; using fallback id"
+                );
+                fallback_worldline_id(base.id)
+            }
+            Err(error) => {
+                warn!(error = %error, "worldline store failed to allocate id; using fallback id");
+                fallback_worldline_id(base.id)
+            }
+        },
+        None => fallback_worldline_id(base.id),
     };
     let mut forked = base.clone();
     forked.id = new_id;
@@ -72,12 +84,27 @@ fn fork_worldline(base: &Worldline, conn: Option<&rusqlite::Connection>) -> Worl
     forked.snapshot_hash = Worldline::compute_snapshot_hash(&forked.fields);
     forked.created_at = chrono::Utc::now();
 
-    // Persist if DB connection available
-    if let Some(db) = conn {
-        let _ = crate::storage::save_worldline(db, &forked);
+    if let Some(worldline_store) = store {
+        if let Err(error) = worldline_store.save(&forked) {
+            warn!(
+                error = %error,
+                worldline_id = forked.id,
+                "worldline store failed to persist forked worldline"
+            );
+        }
     }
 
     forked
+}
+
+fn fallback_worldline_id(base_id: WorldlineId) -> WorldlineId {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    loop {
+        let candidate = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if candidate != base_id {
+            return candidate;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -154,6 +181,31 @@ mod tests {
         assert_ne!(forked.id, base.id);
         assert_eq!(forked.parent, Some(base.id));
         assert_eq!(forked.diverge_tick, 0);
+    }
+
+    #[test]
+    fn fork_fallback_id_does_not_reuse_base_id_one() {
+        let mut base = sample_worldline();
+        base.id = 1;
+
+        let forked = fork_worldline(&base, None);
+
+        assert_ne!(forked.id, base.id);
+        assert_eq!(forked.parent, Some(base.id));
+    }
+
+    #[test]
+    fn fork_with_memory_store_persists_fork() {
+        let base = sample_worldline();
+        let store = crate::worldline::MemoryStore::new(200);
+
+        let forked = fork_worldline(&base, Some(&store));
+        let saved = store.saved_worldlines().expect("saved worldlines");
+
+        assert_eq!(forked.id, 200);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].id, forked.id);
+        assert_eq!(saved[0].parent, Some(base.id));
     }
 
     #[test]

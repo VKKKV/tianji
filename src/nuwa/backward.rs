@@ -6,7 +6,7 @@ use crate::llm::ProviderRegistry;
 use crate::worldline::types::{FieldKey, Worldline};
 
 use super::outcome::{ConvergenceReason, InterventionPath, InterventionStep, SimulationOutcome};
-use super::sandbox::SimulationMode;
+use super::sandbox::{fork_worldline, SimulationMode};
 
 const W1_GOAL_PROXIMITY: f64 = 0.4;
 const W2_PATH_PROBABILITY: f64 = 0.2;
@@ -51,9 +51,7 @@ pub async fn run_backward(
     let mut total_tick: u64 = 0;
 
     for mut agent in agents.iter().cloned() {
-        let mut working_worldline = base_worldline.clone();
-        working_worldline.parent = Some(base_worldline.id);
-        working_worldline.diverge_tick = 0;
+        let mut working_worldline = fork_worldline(base_worldline, None);
 
         let mut interventions: Vec<InterventionStep> = Vec::new();
         let mut tick: u64 = 0;

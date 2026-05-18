@@ -7,7 +7,7 @@ use crate::llm::ProviderRegistry;
 use crate::worldline::types::{ActorId, FieldKey, Worldline};
 
 use super::outcome::{ConvergenceReason, SimulationOutcome, WorldlineBranch};
-use super::sandbox::SimulationMode;
+use super::sandbox::{fork_worldline, SimulationMode};
 
 struct TickInput<'a> {
     tick: u64,
@@ -97,9 +97,7 @@ pub async fn run_forward(
         }
     };
 
-    let mut worldline = base_worldline.clone();
-    worldline.parent = Some(base_worldline.id);
-    worldline.diverge_tick = 0;
+    let mut worldline = fork_worldline(base_worldline, None);
 
     let mut working_agents: Vec<Agent> = agents.to_vec();
     let mut delta_history: Vec<FieldChange> = Vec::new();
@@ -172,8 +170,7 @@ pub async fn run_forward(
     });
 
     for offset in 1..3u64 {
-        let mut alt_worldline = base_worldline.clone();
-        alt_worldline.parent = Some(base_worldline.id);
+        let mut alt_worldline = fork_worldline(base_worldline, None);
         alt_worldline.diverge_tick = offset;
 
         let mut alt_event_sequence = Vec::new();
@@ -440,9 +437,7 @@ pub async fn run_interactive_forward(
         }
     };
 
-    let mut worldline = base_worldline.clone();
-    worldline.parent = Some(base_worldline.id);
-    worldline.diverge_tick = 0;
+    let mut worldline = fork_worldline(base_worldline, None);
 
     let mut working_agents: Vec<Agent> = agents.to_vec();
     let mut tick: u64 = 0;
