@@ -1,4 +1,5 @@
 use ratatui::widgets::ListState;
+use std::sync::mpsc;
 
 use crate::storage::{
     compare_runs, get_run_summary, CompareResult, EventGroupFilters, ScoredEventFilters,
@@ -160,6 +161,21 @@ pub enum TuiView {
     Simulation,
 }
 
+/// Background loading handle for async detail/compare view population.
+pub enum LoadingState {
+    Detail(mpsc::Receiver<DetailState>),
+    Compare(mpsc::Receiver<CompareState>),
+}
+
+impl std::fmt::Debug for LoadingState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Detail(_) => f.debug_tuple("LoadingState::Detail").finish(),
+            Self::Compare(_) => f.debug_tuple("LoadingState::Compare").finish(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TuiState {
     pub rows: Vec<HistoryRow>,
@@ -180,6 +196,7 @@ pub struct TuiState {
     pub prune_selected: Vec<usize>,
     pub pending_sim_rx: Option<tokio::sync::mpsc::Receiver<crate::nuwa::outcome::SimUpdate>>,
     pub pending_prune_tx: Option<tokio::sync::oneshot::Sender<crate::nuwa::PruningDecision>>,
+    pub pending_loading: Option<LoadingState>,
 }
 
 impl TuiState {
@@ -204,6 +221,7 @@ impl TuiState {
             prune_selected: Vec::new(),
             pending_sim_rx: None,
             pending_prune_tx: None,
+            pending_loading: None,
         }
     }
 
@@ -305,11 +323,21 @@ impl TuiState {
         let Some(row) = self.rows.get(self.selected) else {
             return;
         };
-        let detail = match self.sqlite_path.as_deref() {
-            Some(sqlite_path) => load_detail_state(sqlite_path, row.run_id),
-            None => DetailState::missing(row.run_id),
+        let run_id = row.run_id;
+        let sqlite_path = match self.sqlite_path.as_deref() {
+            Some(path) => path.to_string(),
+            None => {
+                let detail = DetailState::missing(run_id);
+                self.show_detail(detail);
+                return;
+            }
         };
-        self.show_detail(detail);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let detail = load_detail_state(&sqlite_path, run_id);
+            let _ = tx.send(detail);
+        });
+        self.pending_loading = Some(LoadingState::Detail(rx));
     }
 
     pub fn open_selected_compare(&mut self) -> bool {
@@ -324,11 +352,20 @@ impl TuiState {
             return false;
         };
         let right_run_id = right_row.run_id;
-        let compare = match self.sqlite_path.as_deref() {
-            Some(sqlite_path) => load_compare_state(sqlite_path, left_run_id, right_run_id),
-            None => CompareState::missing(left_run_id, right_run_id),
+        let sqlite_path = match self.sqlite_path.as_deref() {
+            Some(path) => path.to_string(),
+            None => {
+                let compare = CompareState::missing(left_run_id, right_run_id);
+                self.show_compare(compare);
+                return true;
+            }
         };
-        self.show_compare(compare);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let compare = load_compare_state(&sqlite_path, left_run_id, right_run_id);
+            let _ = tx.send(compare);
+        });
+        self.pending_loading = Some(LoadingState::Compare(rx));
         true
     }
 

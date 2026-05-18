@@ -105,12 +105,16 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
 }
 
 fn title_line(state: &TuiState) -> Line<'static> {
-    let view = match state.view {
-        super::state::TuiView::Dashboard => "dashboard",
-        super::state::TuiView::History => "history",
-        super::state::TuiView::Detail => "detail",
-        super::state::TuiView::Compare => "compare",
-        super::state::TuiView::Simulation => "simulation",
+    let view = if state.pending_loading.is_some() {
+        "loading..."
+    } else {
+        match state.view {
+            super::state::TuiView::Dashboard => "dashboard",
+            super::state::TuiView::History => "history",
+            super::state::TuiView::Detail => "detail",
+            super::state::TuiView::Compare => "compare",
+            super::state::TuiView::Simulation => "simulation",
+        }
     };
     let count_text = if state.rows.len() < state.all_rows.len() {
         format!(

@@ -17,8 +17,8 @@ pub use state::{
     array_string_field, bool_field, capitalize_first, compact_json_field, compact_json_value,
     compact_timestamp, detect_glyph_mode, format_alert_tier, numeric_field, optional_f64_field,
     placeholder_or_value, signed_numeric_field, string_field, CompareState, DashboardState,
-    DetailState, FieldStat, GlyphSet, HistoryRow, SimAgent, SimField, SimulationState, TopEvent,
-    TuiState, TuiView, ASCII_GLYPHS, EMPTY_TUI_MESSAGE, NERD_GLYPHS,
+    DetailState, FieldStat, GlyphSet, HistoryRow, LoadingState, SimAgent, SimField,
+    SimulationState, TopEvent, TuiState, TuiView, ASCII_GLYPHS, EMPTY_TUI_MESSAGE, NERD_GLYPHS,
 };
 pub use theme::{Theme, KANAGAWA};
 
@@ -395,6 +395,31 @@ impl TerminalSession {
                         }
                         crate::nuwa::outcome::SimUpdate::Completed => {}
                     }
+                }
+            }
+
+            // Poll background detail/compare loading (non-blocking)
+            if let Some(ref loading) = state.pending_loading {
+                let done = match loading {
+                    LoadingState::Detail(rx) => {
+                        if let Ok(detail) = rx.try_recv() {
+                            state.show_detail(detail);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    LoadingState::Compare(rx) => {
+                        if let Ok(compare) = rx.try_recv() {
+                            state.show_compare(compare);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                };
+                if done {
+                    state.pending_loading = None;
                 }
             }
 
