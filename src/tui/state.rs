@@ -162,10 +162,155 @@ pub enum TuiView {
     Simulation,
 }
 
+#[derive(Debug)]
+pub enum ViewState {
+    Dashboard(DashboardState),
+    History(HistoryViewState),
+    Detail(DetailState),
+    Compare(CompareState),
+    Simulation(SimulationViewState),
+}
+
+impl ViewState {
+    pub fn kind(&self) -> TuiView {
+        match self {
+            Self::Dashboard(_) => TuiView::Dashboard,
+            Self::History(_) => TuiView::History,
+            Self::Detail(_) => TuiView::Detail,
+            Self::Compare(_) => TuiView::Compare,
+            Self::Simulation(_) => TuiView::Simulation,
+        }
+    }
+}
+
+impl PartialEq<TuiView> for ViewState {
+    fn eq(&self, other: &TuiView) -> bool {
+        self.kind() == *other
+    }
+}
+
+impl PartialEq<ViewState> for TuiView {
+    fn eq(&self, other: &ViewState) -> bool {
+        *self == other.kind()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryViewState {
+    pub all_rows: Vec<HistoryRow>,
+    pub staged_left_run_id: Option<i64>,
+    pub search_query: String,
+    pub search_active: bool,
+    pub pending_g: bool,
+}
+
+impl HistoryViewState {
+    pub fn new(all_rows: Vec<HistoryRow>) -> Self {
+        Self {
+            all_rows,
+            staged_left_run_id: None,
+            search_query: String::new(),
+            search_active: false,
+            pending_g: false,
+        }
+    }
+
+    pub fn apply_search(&mut self, rows: &mut Vec<HistoryRow>, selected: &mut usize) {
+        if self.search_query.is_empty() {
+            *rows = self.all_rows.clone();
+        } else {
+            let q = self.search_query.to_lowercase();
+            *rows = self
+                .all_rows
+                .iter()
+                .filter(|row| {
+                    row.dominant_field.to_lowercase().contains(&q)
+                        || row.headline.to_lowercase().contains(&q)
+                        || row.risk_level.to_lowercase().contains(&q)
+                })
+                .cloned()
+                .collect();
+        }
+        *selected = 0;
+        self.search_active = false;
+    }
+
+    pub fn stage_selected_for_compare(&mut self, rows: &[HistoryRow], selected: usize) {
+        self.pending_g = false;
+        self.staged_left_run_id = rows.get(selected).map(|row| row.run_id);
+    }
+
+    pub fn open_selected_compare(
+        &mut self,
+        rows: &[HistoryRow],
+        selected: usize,
+        sqlite_path: Option<&str>,
+    ) -> Option<LoadingState> {
+        self.pending_g = false;
+        let left_run_id = self.staged_left_run_id?;
+        let right_run_id = rows.get(selected)?.run_id;
+        let sqlite_path = match sqlite_path {
+            Some(path) => path.to_string(),
+            None => {
+                return Some(LoadingState::ImmediateCompare(CompareState::missing(
+                    left_run_id,
+                    right_run_id,
+                )))
+            }
+        };
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let compare = load_compare_state(&sqlite_path, left_run_id, right_run_id);
+            let _ = tx.send(compare);
+        });
+        Some(LoadingState::Compare(rx))
+    }
+}
+
+pub struct SimulationViewState {
+    pub sim_state: Option<SimulationState>,
+    pub prune_mode: bool,
+    pub prune_selected: Vec<usize>,
+    pub pending_sim_rx: Option<tokio::sync::mpsc::Receiver<crate::nuwa::outcome::SimUpdate>>,
+    pub pending_prune_tx: Option<tokio::sync::oneshot::Sender<crate::nuwa::PruningDecision>>,
+}
+
+impl std::fmt::Debug for SimulationViewState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimulationViewState")
+            .field("sim_state", &self.sim_state)
+            .field("prune_mode", &self.prune_mode)
+            .field("prune_selected", &self.prune_selected)
+            .field(
+                "pending_sim_rx",
+                &self.pending_sim_rx.as_ref().map(|_| "Receiver"),
+            )
+            .field(
+                "pending_prune_tx",
+                &self.pending_prune_tx.as_ref().map(|_| "Sender"),
+            )
+            .finish()
+    }
+}
+
+impl SimulationViewState {
+    pub fn new(sim_state: Option<SimulationState>) -> Self {
+        Self {
+            sim_state,
+            prune_mode: false,
+            prune_selected: Vec::new(),
+            pending_sim_rx: None,
+            pending_prune_tx: None,
+        }
+    }
+}
+
 /// Background loading handle for async detail/compare view population.
 pub enum LoadingState {
     Detail(mpsc::Receiver<DetailState>),
     Compare(mpsc::Receiver<CompareState>),
+    ImmediateDetail(DetailState),
+    ImmediateCompare(CompareState),
 }
 
 impl std::fmt::Debug for LoadingState {
@@ -173,6 +318,8 @@ impl std::fmt::Debug for LoadingState {
         match self {
             Self::Detail(_) => f.debug_tuple("LoadingState::Detail").finish(),
             Self::Compare(_) => f.debug_tuple("LoadingState::Compare").finish(),
+            Self::ImmediateDetail(_) => f.debug_tuple("LoadingState::ImmediateDetail").finish(),
+            Self::ImmediateCompare(_) => f.debug_tuple("LoadingState::ImmediateCompare").finish(),
         }
     }
 }
@@ -180,24 +327,14 @@ impl std::fmt::Debug for LoadingState {
 #[derive(Debug)]
 pub struct TuiState {
     pub rows: Vec<HistoryRow>,
-    pub dashboard: DashboardState,
-    pub view: TuiView,
-    pub detail: Option<DetailState>,
-    pub compare: Option<CompareState>,
-    pub simulation: Option<SimulationState>,
-    pub staged_left_run_id: Option<i64>,
+    pub view: ViewState,
     pub sqlite_path: Option<String>,
     pub selected: usize,
-    pub pending_g: bool,
-    pub search_query: String,
-    pub search_active: bool,
-    pub all_rows: Vec<HistoryRow>,
     pub glyphs: &'static GlyphSet,
-    pub prune_mode: bool,
-    pub prune_selected: Vec<usize>,
-    pub pending_sim_rx: Option<tokio::sync::mpsc::Receiver<crate::nuwa::outcome::SimUpdate>>,
-    pub pending_prune_tx: Option<tokio::sync::oneshot::Sender<crate::nuwa::PruningDecision>>,
     pub pending_loading: Option<LoadingState>,
+    dashboard_cache: DashboardState,
+    history_cache: HistoryViewState,
+    simulation_cache: Option<SimulationViewState>,
 }
 
 impl TuiState {
@@ -205,24 +342,14 @@ impl TuiState {
         let all_rows = rows.clone();
         Self {
             rows,
-            dashboard,
-            view: TuiView::Dashboard,
-            detail: None,
-            compare: None,
-            simulation: None,
-            staged_left_run_id: None,
+            view: ViewState::Dashboard(dashboard.clone()),
             sqlite_path: None,
             selected: 0,
-            pending_g: false,
-            search_query: String::new(),
-            search_active: false,
-            all_rows,
             glyphs: detect_glyph_mode(),
-            prune_mode: false,
-            prune_selected: Vec::new(),
-            pending_sim_rx: None,
-            pending_prune_tx: None,
             pending_loading: None,
+            dashboard_cache: dashboard,
+            history_cache: HistoryViewState::new(all_rows),
+            simulation_cache: None,
         }
     }
 
@@ -237,23 +364,9 @@ impl TuiState {
     }
 
     pub fn apply_search(&mut self) {
-        if self.search_query.is_empty() {
-            self.rows = self.all_rows.clone();
-        } else {
-            let q = self.search_query.to_lowercase();
-            self.rows = self
-                .all_rows
-                .iter()
-                .filter(|row| {
-                    row.dominant_field.to_lowercase().contains(&q)
-                        || row.headline.to_lowercase().contains(&q)
-                        || row.risk_level.to_lowercase().contains(&q)
-                })
-                .cloned()
-                .collect();
+        if let ViewState::History(history) = &mut self.view {
+            history.apply_search(&mut self.rows, &mut self.selected);
         }
-        self.selected = 0;
-        self.search_active = false;
     }
 
     pub fn selected(&self) -> usize {
@@ -281,44 +394,125 @@ impl TuiState {
     }
 
     pub fn show_dashboard(&mut self) {
-        self.pending_g = false;
-        self.view = TuiView::Dashboard;
+        self.cache_current_view();
+        if let ViewState::Dashboard(dashboard) = &self.view {
+            self.dashboard_cache = dashboard.clone();
+        }
+        self.view = ViewState::Dashboard(self.dashboard_cache.clone());
     }
 
     pub fn show_history(&mut self) {
-        self.pending_g = false;
-        self.view = TuiView::History;
+        self.cache_current_view();
+        let mut history = self.history_cache.clone();
+        history.pending_g = false;
+        self.view = ViewState::History(history);
     }
 
     pub fn show_detail(&mut self, detail: DetailState) {
-        self.pending_g = false;
-        self.detail = Some(detail);
-        self.view = TuiView::Detail;
+        if let ViewState::History(history) = &mut self.view {
+            history.pending_g = false;
+        }
+        self.cache_current_view();
+        self.view = ViewState::Detail(detail);
     }
 
     pub fn show_compare(&mut self, compare: CompareState) {
-        self.pending_g = false;
-        self.compare = Some(compare);
-        self.view = TuiView::Compare;
+        if let ViewState::History(history) = &mut self.view {
+            history.pending_g = false;
+        }
+        self.cache_current_view();
+        self.view = ViewState::Compare(compare);
     }
 
     pub fn show_simulation(&mut self, sim: SimulationState) {
-        self.pending_g = false;
-        self.simulation = Some(sim);
-        self.view = TuiView::Simulation;
+        self.cache_current_view();
+        let sim_view = SimulationViewState::new(Some(sim));
+        self.view = ViewState::Simulation(sim_view);
+    }
+
+    pub fn has_simulation(&self) -> bool {
+        matches!(&self.view, ViewState::Simulation(s) if s.sim_state.is_some())
+            || self
+                .simulation_cache
+                .as_ref()
+                .and_then(|s| s.sim_state.as_ref())
+                .is_some()
+    }
+
+    pub fn show_existing_simulation(&mut self) {
+        self.cache_current_view();
+        let sim_view = self
+            .simulation_cache
+            .take()
+            .unwrap_or_else(|| SimulationViewState::new(None));
+        self.view = ViewState::Simulation(sim_view);
+    }
+
+    pub fn cache_current_view(&mut self) {
+        match &mut self.view {
+            ViewState::Dashboard(dashboard) => self.dashboard_cache = dashboard.clone(),
+            ViewState::History(history) => self.history_cache = history.clone(),
+            ViewState::Simulation(_) => {
+                let old = std::mem::replace(
+                    &mut self.view,
+                    ViewState::Dashboard(self.dashboard_cache.clone()),
+                );
+                if let ViewState::Simulation(sim) = old {
+                    self.simulation_cache = Some(sim);
+                }
+            }
+            ViewState::Detail(_) | ViewState::Compare(_) => {}
+        }
+    }
+
+    pub fn history(&self) -> Option<&HistoryViewState> {
+        match &self.view {
+            ViewState::History(history) => Some(history),
+            _ => Some(&self.history_cache),
+        }
+    }
+
+    pub fn history_mut(&mut self) -> &mut HistoryViewState {
+        match &mut self.view {
+            ViewState::History(history) => history,
+            _ => &mut self.history_cache,
+        }
+    }
+
+    pub fn detail(&self) -> Option<&DetailState> {
+        match &self.view {
+            ViewState::Detail(detail) => Some(detail),
+            _ => None,
+        }
+    }
+
+    pub fn compare(&self) -> Option<&CompareState> {
+        match &self.view {
+            ViewState::Compare(compare) => Some(compare),
+            _ => None,
+        }
+    }
+
+    pub fn simulation(&self) -> Option<&SimulationState> {
+        match &self.view {
+            ViewState::Simulation(simulation) => simulation.sim_state.as_ref(),
+            _ => self
+                .simulation_cache
+                .as_ref()
+                .and_then(|s| s.sim_state.as_ref()),
+        }
     }
 
     pub fn stage_selected_for_compare(&mut self) {
-        self.pending_g = false;
-        if self.view != TuiView::History {
-            return;
+        if let ViewState::History(history) = &mut self.view {
+            history.stage_selected_for_compare(&self.rows, self.selected);
         }
-        self.staged_left_run_id = self.rows.get(self.selected).map(|row| row.run_id);
     }
 
     pub fn open_selected_detail(&mut self) {
-        self.pending_g = false;
-        if self.view != TuiView::History {
+        if let ViewState::History(history) = &mut self.view {
+            history.pending_g = false;
+        } else {
             return;
         }
         let Some(row) = self.rows.get(self.selected) else {
@@ -328,8 +522,7 @@ impl TuiState {
         let sqlite_path = match self.sqlite_path.as_deref() {
             Some(path) => path.to_string(),
             None => {
-                let detail = DetailState::missing(run_id);
-                self.show_detail(detail);
+                self.show_detail(DetailState::missing(run_id));
                 return;
             }
         };
@@ -342,31 +535,20 @@ impl TuiState {
     }
 
     pub fn open_selected_compare(&mut self) -> bool {
-        self.pending_g = false;
-        if self.view != TuiView::History {
+        let Some(loading) = (match &mut self.view {
+            ViewState::History(history) => history.open_selected_compare(
+                &self.rows,
+                self.selected,
+                self.sqlite_path.as_deref(),
+            ),
+            _ => None,
+        }) else {
             return false;
+        };
+        match loading {
+            LoadingState::ImmediateCompare(compare) => self.show_compare(compare),
+            other => self.pending_loading = Some(other),
         }
-        let Some(left_run_id) = self.staged_left_run_id else {
-            return false;
-        };
-        let Some(right_row) = self.rows.get(self.selected) else {
-            return false;
-        };
-        let right_run_id = right_row.run_id;
-        let sqlite_path = match self.sqlite_path.as_deref() {
-            Some(path) => path.to_string(),
-            None => {
-                let compare = CompareState::missing(left_run_id, right_run_id);
-                self.show_compare(compare);
-                return true;
-            }
-        };
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let compare = load_compare_state(&sqlite_path, left_run_id, right_run_id);
-            let _ = tx.send(compare);
-        });
-        self.pending_loading = Some(LoadingState::Compare(rx));
         true
     }
 
@@ -1319,7 +1501,7 @@ mod tests {
             },
         ];
         let mut state = history_state(rows);
-        state.search_query = "conflict".to_string();
+        state.history_mut().search_query = "conflict".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 1);
         assert_eq!(state.rows[0].run_id, 1);
@@ -1348,7 +1530,7 @@ mod tests {
             },
         ];
         let mut state = history_state(rows);
-        state.search_query = "nuclear talks".to_string();
+        state.history_mut().search_query = "nuclear talks".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 1);
         assert_eq!(state.rows[0].run_id, 1);
@@ -1377,7 +1559,7 @@ mod tests {
             },
         ];
         let mut state = history_state(rows);
-        state.search_query = "critical".to_string();
+        state.history_mut().search_query = "critical".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 1);
         assert_eq!(state.rows[0].run_id, 1);
@@ -1387,35 +1569,35 @@ mod tests {
     fn search_empty_query_restores_full_list() {
         let rows = vec![row(1), row(2), row(3)];
         let mut state = history_state(rows);
-        state.search_query = "nonexistent".to_string();
+        state.history_mut().search_query = "nonexistent".to_string();
         state.apply_search();
-        assert!(state.rows.len() < state.all_rows.len());
+        assert!(state.rows.len() < state.history().unwrap().all_rows.len());
 
-        state.search_query.clear();
+        state.history_mut().search_query.clear();
         state.apply_search();
-        assert_eq!(state.rows.len(), state.all_rows.len());
+        assert_eq!(state.rows.len(), state.history().unwrap().all_rows.len());
     }
 
     #[test]
     fn search_no_matches_shows_empty_list() {
         let rows = vec![row(1), row(2)];
         let mut state = history_state(rows);
-        state.search_query = "xyznonexistent".to_string();
+        state.history_mut().search_query = "xyznonexistent".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 0);
-        assert_eq!(state.all_rows.len(), 2);
+        assert_eq!(state.history().unwrap().all_rows.len(), 2);
     }
 
     #[test]
     fn search_does_not_mutate_all_rows() {
         let rows = vec![row(1), row(2), row(3)];
         let mut state = history_state(rows);
-        let original_count = state.all_rows.len();
-        state.search_query = "nonexistent".to_string();
+        let original_count = state.history().unwrap().all_rows.len();
+        state.history_mut().search_query = "nonexistent".to_string();
         state.apply_search();
-        assert_eq!(state.all_rows.len(), original_count);
+        assert_eq!(state.history().unwrap().all_rows.len(), original_count);
         // Restore by clearing search
-        state.search_query.clear();
+        state.history_mut().search_query.clear();
         state.apply_search();
         assert_eq!(state.rows.len(), original_count);
     }
@@ -1432,15 +1614,15 @@ mod tests {
             headline: "Major Event".to_string(),
         }];
         let mut state = history_state(rows);
-        state.search_query = "conflict".to_string();
+        state.history_mut().search_query = "conflict".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 1);
 
-        state.search_query = "high".to_string();
+        state.history_mut().search_query = "high".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 1);
 
-        state.search_query = "major event".to_string();
+        state.history_mut().search_query = "major event".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 1);
     }
@@ -1477,7 +1659,7 @@ mod tests {
             },
         ];
         let mut state = history_state(rows);
-        state.search_query = "conflict".to_string();
+        state.history_mut().search_query = "conflict".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 2);
         assert_eq!(state.selected(), 0);
@@ -1590,7 +1772,7 @@ mod tests {
     fn show_simulation_switches_view_and_stores_state() {
         let mut state = TuiState::new(vec![row(1)], dashboard());
         assert_eq!(state.view, TuiView::Dashboard);
-        assert!(state.simulation.is_none());
+        assert!(state.simulation().is_none());
 
         let sim = SimulationState {
             mode: "forward".to_string(),
@@ -1607,8 +1789,8 @@ mod tests {
         state.show_simulation(sim.clone());
 
         assert_eq!(state.view, TuiView::Simulation);
-        assert!(state.simulation.is_some());
-        assert_eq!(state.simulation.as_ref().unwrap().target, "global.conflict");
+        assert!(state.simulation().is_some());
+        assert_eq!(state.simulation().unwrap().target, "global.conflict");
     }
 
     #[test]

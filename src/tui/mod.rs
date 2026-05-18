@@ -17,8 +17,9 @@ pub use state::{
     array_string_field, bool_field, capitalize_first, compact_json_field, compact_json_value,
     compact_stick_value, compact_timestamp, detect_glyph_mode, format_alert_tier, numeric_field,
     optional_f64_field, placeholder_or_value, signed_numeric_field, string_field, CompareState,
-    DashboardState, DetailState, FieldStat, GlyphSet, HistoryRow, LoadingState, SimAgent, SimField,
-    SimulationState, TopEvent, TuiState, TuiView, ASCII_GLYPHS, EMPTY_TUI_MESSAGE, NERD_GLYPHS,
+    DashboardState, DetailState, FieldStat, GlyphSet, HistoryRow, HistoryViewState, LoadingState,
+    SimAgent, SimField, SimulationState, SimulationViewState, TopEvent, TuiState, TuiView,
+    ViewState, ASCII_GLYPHS, EMPTY_TUI_MESSAGE, NERD_GLYPHS,
 };
 pub use theme::{Theme, KANAGAWA};
 
@@ -104,10 +105,14 @@ pub async fn run_history_browser(
                     )
                     .await;
                 });
-                tui_state.pending_sim_rx = Some(rx);
+                tui_state.view = ViewState::Simulation({
+                    let mut state = SimulationViewState::new(None);
+                    state.pending_sim_rx = Some(rx);
+                    state
+                });
             }
         } else if let Some(sim_state) = run_demo_simulation(sim_spec).await {
-            tui_state.simulation = Some(sim_state);
+            tui_state.show_simulation(sim_state);
         }
     }
 
@@ -379,21 +384,23 @@ impl TerminalSession {
     fn run(&mut self, mut state: TuiState) -> Result<(), TianJiError> {
         loop {
             // Poll simulation channel for live updates (non-blocking)
-            if let Some(ref mut rx) = state.pending_sim_rx {
-                while let Ok(update) = rx.try_recv() {
-                    match update {
-                        crate::nuwa::outcome::SimUpdate::Tick { state: sim_state } => {
-                            state.simulation = Some(sim_state);
+            if let ViewState::Simulation(sim_view) = &mut state.view {
+                if let Some(ref mut rx) = sim_view.pending_sim_rx {
+                    while let Ok(update) = rx.try_recv() {
+                        match update {
+                            crate::nuwa::outcome::SimUpdate::Tick { state: sim_state } => {
+                                sim_view.sim_state = Some(sim_state);
+                            }
+                            crate::nuwa::outcome::SimUpdate::PruneRequest {
+                                state: sim_state,
+                                response,
+                            } => {
+                                sim_view.sim_state = Some(sim_state);
+                                sim_view.prune_mode = true;
+                                sim_view.pending_prune_tx = Some(response);
+                            }
+                            crate::nuwa::outcome::SimUpdate::Completed => {}
                         }
-                        crate::nuwa::outcome::SimUpdate::PruneRequest {
-                            state: sim_state,
-                            response,
-                        } => {
-                            state.simulation = Some(sim_state);
-                            state.prune_mode = true;
-                            state.pending_prune_tx = Some(response);
-                        }
-                        crate::nuwa::outcome::SimUpdate::Completed => {}
                     }
                 }
             }
@@ -417,6 +424,7 @@ impl TerminalSession {
                             false
                         }
                     }
+                    LoadingState::ImmediateDetail(_) | LoadingState::ImmediateCompare(_) => true,
                 };
                 if done {
                     state.pending_loading = None;
@@ -452,87 +460,89 @@ impl Drop for TerminalSession {
 }
 
 fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
-    if state.search_active {
+    let view = std::mem::replace(
+        &mut state.view,
+        ViewState::History(HistoryViewState::new(state.rows.clone())),
+    );
+    match view {
+        ViewState::Dashboard(dashboard) => {
+            state.view = ViewState::Dashboard(dashboard.clone());
+            handle_dashboard_key(state, dashboard, key)
+        }
+        ViewState::History(mut history) => {
+            state.view = ViewState::History(history.clone());
+            handle_history_key(state, &mut history, key)
+        }
+        ViewState::Detail(detail) => {
+            state.view = ViewState::Detail(detail);
+            handle_detail_compare_key(state, key)
+        }
+        ViewState::Compare(compare) => {
+            state.view = ViewState::Compare(compare);
+            handle_detail_compare_key(state, key)
+        }
+        ViewState::Simulation(mut simulation) => handle_simulation_key(state, &mut simulation, key),
+    }
+}
+
+fn handle_dashboard_key(state: &mut TuiState, dashboard: DashboardState, key: &KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char('q') => false,
+        KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('2') => {
+            state.show_history();
+            true
+        }
+        KeyCode::Char('3') if state.has_simulation() => {
+            state.show_existing_simulation();
+            true
+        }
+        _ => {
+            state.view = ViewState::Dashboard(dashboard);
+            true
+        }
+    }
+}
+
+fn handle_history_key(
+    state: &mut TuiState,
+    history: &mut HistoryViewState,
+    key: &KeyEvent,
+) -> bool {
+    if history.search_active {
         match key.code {
             KeyCode::Esc => {
-                state.search_active = false;
-                state.search_query.clear();
-                state.rows = state.all_rows.clone();
+                history.search_active = false;
+                history.search_query.clear();
+                state.rows = history.all_rows.clone();
                 state.selected = 0;
             }
             KeyCode::Enter => {
-                state.apply_search();
+                history.apply_search(&mut state.rows, &mut state.selected);
             }
             KeyCode::Backspace => {
-                state.search_query.pop();
+                history.search_query.pop();
             }
             KeyCode::Char(c) => {
-                state.search_query.push(c);
+                history.search_query.push(c);
             }
             _ => {}
         }
-        return true;
-    }
-
-    // Prune mode key handling
-    if state.prune_mode {
-        match key.code {
-            KeyCode::Char(' ') => {
-                if state.prune_selected.contains(&state.selected) {
-                    state.prune_selected.retain(|i| *i != state.selected);
-                } else {
-                    state.prune_selected.push(state.selected);
-                    state.prune_selected.sort_unstable();
-                }
-            }
-            KeyCode::Enter => {
-                let decision = if state.prune_selected.is_empty() {
-                    crate::nuwa::PruningDecision::Continue
-                } else {
-                    crate::nuwa::PruningDecision::Prune(state.prune_selected.clone())
-                };
-                if let Some(tx) = state.pending_prune_tx.take() {
-                    let _ = tx.send(decision);
-                }
-                state.prune_mode = false;
-                state.prune_selected.clear();
-            }
-            KeyCode::Char('c') | KeyCode::Esc => {
-                if let Some(tx) = state.pending_prune_tx.take() {
-                    let _ = tx.send(crate::nuwa::PruningDecision::Continue);
-                }
-                state.prune_mode = false;
-                state.prune_selected.clear();
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if let Some(ref sim) = state.simulation {
-                    let max = sim.branches.len().saturating_sub(1);
-                    state.selected = (state.selected + 1).min(max);
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                state.selected = state.selected.saturating_sub(1);
-            }
-            _ => {}
-        }
+        state.view = ViewState::History(history.clone());
         return true;
     }
 
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
             KeyCode::Char('d') => {
-                if state.view == TuiView::History {
-                    let page = state.rows.len().max(1) / 2;
-                    state.selected =
-                        (state.selected + page).min(state.rows.len().saturating_sub(1));
-                }
+                let page = state.rows.len().max(1) / 2;
+                state.selected = (state.selected + page).min(state.rows.len().saturating_sub(1));
+                state.view = ViewState::History(history.clone());
                 return true;
             }
             KeyCode::Char('u') => {
-                if state.view == TuiView::History {
-                    let page = state.rows.len().max(1) / 2;
-                    state.selected = state.selected.saturating_sub(page);
-                }
+                let page = state.rows.len().max(1) / 2;
+                state.selected = state.selected.saturating_sub(page);
+                state.view = ViewState::History(history.clone());
                 return true;
             }
             _ => {}
@@ -542,22 +552,14 @@ fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
     match key.code {
         KeyCode::Char('q') => false,
         KeyCode::Esc => {
-            if state.view == TuiView::Simulation {
-                state.show_dashboard();
-            } else if matches!(state.view, TuiView::Detail | TuiView::Compare) {
-                state.show_history();
-            } else {
-                state.pending_g = false;
-            }
+            history.pending_g = false;
+            state.view = ViewState::History(history.clone());
             true
         }
         KeyCode::Enter => {
-            if state.view == TuiView::History {
-                if !state.open_selected_compare() {
-                    state.open_selected_detail();
-                }
-            } else {
-                state.pending_g = false;
+            state.view = ViewState::History(history.clone());
+            if !state.open_selected_compare() {
+                state.open_selected_detail();
             }
             true
         }
@@ -566,65 +568,157 @@ fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
             true
         }
         KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('2') => {
-            state.show_history();
+            history.pending_g = false;
+            state.view = ViewState::History(history.clone());
             true
         }
         KeyCode::Char('3') => {
-            if state.simulation.is_some() {
-                state.view = TuiView::Simulation;
+            if state.has_simulation() {
+                state.show_existing_simulation();
+            } else {
+                state.view = ViewState::History(history.clone());
             }
             true
         }
         KeyCode::Char('c') => {
-            state.stage_selected_for_compare();
+            history.stage_selected_for_compare(&state.rows, state.selected);
+            state.view = ViewState::History(history.clone());
             true
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            state.pending_g = false;
-            if state.view == TuiView::History {
-                state.select_next();
-            }
+            history.pending_g = false;
+            state.select_next();
+            state.view = ViewState::History(history.clone());
             true
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            state.pending_g = false;
-            if state.view == TuiView::History {
-                state.select_previous();
-            }
+            history.pending_g = false;
+            state.select_previous();
+            state.view = ViewState::History(history.clone());
             true
         }
         KeyCode::Char('G') | KeyCode::End => {
-            state.pending_g = false;
-            if state.view == TuiView::History {
-                state.select_last();
-            }
+            history.pending_g = false;
+            state.select_last();
+            state.view = ViewState::History(history.clone());
             true
         }
         KeyCode::Char('g') => {
-            if state.pending_g {
-                if state.view == TuiView::History {
-                    state.select_first();
-                }
-                state.pending_g = false;
+            if history.pending_g {
+                state.select_first();
+                history.pending_g = false;
             } else {
-                state.pending_g = true;
+                history.pending_g = true;
             }
+            state.view = ViewState::History(history.clone());
             true
         }
         KeyCode::Home => {
-            state.pending_g = false;
-            if state.view == TuiView::History {
-                state.select_first();
-            }
+            history.pending_g = false;
+            state.select_first();
+            state.view = ViewState::History(history.clone());
             true
         }
-        KeyCode::Char('/') if state.view == TuiView::History => {
-            state.search_active = true;
-            state.search_query.clear();
+        KeyCode::Char('/') => {
+            history.search_active = true;
+            history.search_query.clear();
+            state.view = ViewState::History(history.clone());
             true
         }
         _ => {
-            state.pending_g = false;
+            history.pending_g = false;
+            state.view = ViewState::History(history.clone());
+            true
+        }
+    }
+}
+
+fn handle_detail_compare_key(state: &mut TuiState, key: &KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char('q') => false,
+        KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('2') => {
+            state.show_history();
+            true
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Char('1') => {
+            state.show_dashboard();
+            true
+        }
+        KeyCode::Char('3') if state.has_simulation() => {
+            state.show_existing_simulation();
+            true
+        }
+        _ => true,
+    }
+}
+
+fn handle_simulation_key(
+    state: &mut TuiState,
+    simulation: &mut SimulationViewState,
+    key: &KeyEvent,
+) -> bool {
+    if simulation.prune_mode {
+        match key.code {
+            KeyCode::Char(' ') => {
+                if simulation.prune_selected.contains(&state.selected) {
+                    simulation.prune_selected.retain(|i| *i != state.selected);
+                } else {
+                    simulation.prune_selected.push(state.selected);
+                    simulation.prune_selected.sort_unstable();
+                }
+            }
+            KeyCode::Enter => {
+                let decision = if simulation.prune_selected.is_empty() {
+                    crate::nuwa::PruningDecision::Continue
+                } else {
+                    crate::nuwa::PruningDecision::Prune(simulation.prune_selected.clone())
+                };
+                if let Some(tx) = simulation.pending_prune_tx.take() {
+                    let _ = tx.send(decision);
+                }
+                simulation.prune_mode = false;
+                simulation.prune_selected.clear();
+            }
+            KeyCode::Char('c') | KeyCode::Esc => {
+                if let Some(tx) = simulation.pending_prune_tx.take() {
+                    let _ = tx.send(crate::nuwa::PruningDecision::Continue);
+                }
+                simulation.prune_mode = false;
+                simulation.prune_selected.clear();
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(ref sim) = simulation.sim_state {
+                    let max = sim.branches.len().saturating_sub(1);
+                    state.selected = (state.selected + 1).min(max);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                state.selected = state.selected.saturating_sub(1);
+            }
+            _ => {}
+        }
+        state.view = ViewState::Simulation(std::mem::replace(
+            simulation,
+            SimulationViewState::new(None),
+        ));
+        return true;
+    }
+
+    match key.code {
+        KeyCode::Char('q') => false,
+        KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('2') => {
+            state.view = ViewState::Simulation(std::mem::replace(
+                simulation,
+                SimulationViewState::new(None),
+            ));
+            state.show_dashboard();
+            true
+        }
+        _ => {
+            state.view = ViewState::Simulation(std::mem::replace(
+                simulation,
+                SimulationViewState::new(None),
+            ));
             true
         }
     }
@@ -739,7 +833,7 @@ mod tests {
 
         assert!(handle_key(&mut state, &key(KeyCode::Enter)));
         assert_eq!(state.view, TuiView::Detail);
-        assert_eq!(state.detail.as_ref().map(|d| d.run_id), Some(2));
+        assert_eq!(state.detail().map(|d| d.run_id), Some(2));
         assert_eq!(state.selected(), 1);
 
         assert!(handle_key(&mut state, &key(KeyCode::Esc)));
@@ -757,7 +851,7 @@ mod tests {
         let mut state = history_state(vec![row(1), row(2)]);
 
         assert!(handle_key(&mut state, &key(KeyCode::Char('c'))));
-        assert_eq!(state.staged_left_run_id, Some(1));
+        assert_eq!(state.history().unwrap().staged_left_run_id, Some(1));
         assert!(history_title(&state).contains("staged left #1"));
 
         assert!(handle_key(&mut state, &key(KeyCode::Char('j'))));
@@ -765,7 +859,7 @@ mod tests {
         assert!(handle_key(&mut state, &key(KeyCode::Enter)));
 
         assert_eq!(state.view, TuiView::Compare);
-        let compare = state.compare.as_ref().expect("compare state");
+        let compare = state.compare().expect("compare state");
         assert_eq!(compare.left_run_id, 1);
         assert_eq!(compare.right_run_id, 2);
         assert!(compare.status.contains("could not"));
@@ -780,8 +874,8 @@ mod tests {
         assert!(handle_key(&mut state, &key(KeyCode::Enter)));
 
         assert_eq!(state.view, TuiView::Detail);
-        assert_eq!(state.detail.as_ref().map(|d| d.run_id), Some(2));
-        assert!(state.compare.is_none());
+        assert_eq!(state.detail().map(|d| d.run_id), Some(2));
+        assert!(state.compare().is_none());
     }
 
     #[test]
@@ -804,10 +898,10 @@ mod tests {
     #[test]
     fn key_handler_slash_activates_search_in_history() {
         let mut state = history_state(vec![row(1), row(2)]);
-        assert!(!state.search_active);
+        assert!(!state.history().unwrap().search_active);
         assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
-        assert!(state.search_active);
-        assert!(state.search_query.is_empty());
+        assert!(state.history().unwrap().search_active);
+        assert!(state.history_mut().search_query.is_empty());
     }
 
     #[test]
@@ -818,10 +912,10 @@ mod tests {
         assert!(handle_key(&mut state, &key(KeyCode::Char('e'))));
         assert!(handle_key(&mut state, &key(KeyCode::Char('c'))));
         assert!(handle_key(&mut state, &key(KeyCode::Char('h'))));
-        assert_eq!(state.search_query, "tech");
-        assert!(state.search_active);
+        assert_eq!(state.history_mut().search_query, "tech");
+        assert!(state.history().unwrap().search_active);
         assert!(handle_key(&mut state, &key(KeyCode::Enter)));
-        assert!(!state.search_active);
+        assert!(!state.history().unwrap().search_active);
         assert!(!state.rows.is_empty());
     }
 
@@ -831,9 +925,9 @@ mod tests {
         assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
         assert!(handle_key(&mut state, &key(KeyCode::Char('z'))));
         assert!(handle_key(&mut state, &key(KeyCode::Esc)));
-        assert!(!state.search_active);
-        assert!(state.search_query.is_empty());
-        assert_eq!(state.rows.len(), state.all_rows.len());
+        assert!(!state.history().unwrap().search_active);
+        assert!(state.history_mut().search_query.is_empty());
+        assert_eq!(state.rows.len(), state.history().unwrap().all_rows.len());
     }
 
     #[test]
@@ -842,9 +936,9 @@ mod tests {
         assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
         assert!(handle_key(&mut state, &key(KeyCode::Char('a'))));
         assert!(handle_key(&mut state, &key(KeyCode::Char('b'))));
-        assert_eq!(state.search_query, "ab");
+        assert_eq!(state.history_mut().search_query, "ab");
         assert!(handle_key(&mut state, &key(KeyCode::Backspace)));
-        assert_eq!(state.search_query, "a");
+        assert_eq!(state.history_mut().search_query, "a");
     }
 
     #[test]
@@ -852,8 +946,8 @@ mod tests {
         let mut state = history_state(vec![row(1)]);
         assert!(handle_key(&mut state, &key(KeyCode::Char('/'))));
         assert!(handle_key(&mut state, &key(KeyCode::Char('q'))));
-        assert_eq!(state.search_query, "q");
-        assert!(state.search_active);
+        assert_eq!(state.history_mut().search_query, "q");
+        assert!(state.history().unwrap().search_active);
     }
 
     #[test]
@@ -936,14 +1030,14 @@ mod tests {
     fn key_3_switches_to_simulation_when_available() {
         let mut state = TuiState::new(vec![row(1)], dashboard());
         assert_eq!(state.view, TuiView::Dashboard);
-        assert!(state.simulation.is_none());
+        assert!(state.simulation().is_none());
 
         // Key 3 without simulation state should not switch view
         assert!(handle_key(&mut state, &key(KeyCode::Char('3'))));
         assert_eq!(state.view, TuiView::Dashboard);
 
         // Add simulation state
-        state.simulation = Some(SimulationState {
+        state.show_simulation(SimulationState {
             mode: "forward".to_string(),
             target: "global.conflict".to_string(),
             horizon: 10,
@@ -964,7 +1058,7 @@ mod tests {
     #[test]
     fn simulation_view_esc_returns_to_dashboard() {
         let mut state = TuiState::new(vec![row(1)], dashboard());
-        state.simulation = Some(SimulationState {
+        state.show_simulation(SimulationState {
             mode: "forward".to_string(),
             target: "global.conflict".to_string(),
             horizon: 10,
@@ -976,7 +1070,6 @@ mod tests {
             event_log: vec![],
             branches: vec![],
         });
-        state.view = TuiView::Simulation;
 
         assert!(handle_key(&mut state, &key(KeyCode::Esc)));
         assert_eq!(state.view, TuiView::Dashboard);

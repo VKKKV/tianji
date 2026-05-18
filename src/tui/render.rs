@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use super::state::TuiState;
+use super::state::{TuiState, ViewState};
 use super::theme::KANAGAWA;
 
 pub fn base_style() -> Style {
@@ -26,23 +26,23 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
         root[0],
     );
 
-    match state.view {
-        super::state::TuiView::Dashboard => {
-            super::dashboard::render_dashboard(frame, root[1], &state.dashboard)
+    match &state.view {
+        ViewState::Dashboard(dashboard) => {
+            super::dashboard::render_dashboard(frame, root[1], dashboard)
         }
-        super::state::TuiView::History => super::history::render_history(frame, root[1], state),
-        super::state::TuiView::Detail => {
-            super::detail::render_detail(frame, root[1], state.detail.as_ref())
+        ViewState::History(history) => {
+            super::history::render_history(frame, root[1], state, history)
         }
-        super::state::TuiView::Compare => {
-            super::compare::render_compare(frame, root[1], state.compare.as_ref())
+        ViewState::Detail(detail) => super::detail::render_detail(frame, root[1], Some(detail)),
+        ViewState::Compare(compare) => {
+            super::compare::render_compare(frame, root[1], Some(compare))
         }
-        super::state::TuiView::Simulation => super::simulation::render_simulation(
+        ViewState::Simulation(simulation) => super::simulation::render_simulation(
             frame,
             root[1],
-            state.simulation.as_ref(),
-            state.prune_mode,
-            &state.prune_selected,
+            simulation.sim_state.as_ref(),
+            simulation.prune_mode,
+            &simulation.prune_selected,
         ),
     }
 
@@ -53,16 +53,16 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
         Span::styled("[h]", Style::default().fg(KANAGAWA.key_hint)),
         Span::raw(" history  "),
     ];
-    if state.simulation.is_some() {
+    if state.has_simulation() {
         spans.extend(vec![
             Span::styled("[3]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" simulation  "),
         ]);
     }
-    if state.view == super::state::TuiView::History {
+    if let ViewState::History(history) = &state.view {
         spans.extend(vec![
             Span::styled("[Enter]", Style::default().fg(KANAGAWA.key_hint)),
-            Span::raw(if state.staged_left_run_id.is_some() {
+            Span::raw(if history.staged_left_run_id.is_some() {
                 " compare  "
             } else {
                 " detail  "
@@ -85,9 +85,7 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
         ]);
     } else if matches!(
         state.view,
-        super::state::TuiView::Detail
-            | super::state::TuiView::Compare
-            | super::state::TuiView::Simulation
+        ViewState::Detail(_) | ViewState::Compare(_) | ViewState::Simulation(_)
     ) {
         spans.extend(vec![
             Span::styled("[Esc]", Style::default().fg(KANAGAWA.key_hint)),
@@ -108,7 +106,7 @@ fn title_line(state: &TuiState) -> Line<'static> {
     let view = if state.pending_loading.is_some() {
         "loading..."
     } else {
-        match state.view {
+        match state.view.kind() {
             super::state::TuiView::Dashboard => "dashboard",
             super::state::TuiView::History => "history",
             super::state::TuiView::Detail => "detail",
@@ -116,14 +114,14 @@ fn title_line(state: &TuiState) -> Line<'static> {
             super::state::TuiView::Simulation => "simulation",
         }
     };
-    let count_text = if state.rows.len() < state.all_rows.len() {
-        format!(
-            "· {}/{} persisted runs ",
-            state.rows.len(),
-            state.all_rows.len()
-        )
+    let all_count = match &state.view {
+        ViewState::History(history) => history.all_rows.len(),
+        _ => state.rows.len(),
+    };
+    let count_text = if state.rows.len() < all_count {
+        format!("· {}/{} persisted runs ", state.rows.len(), all_count)
     } else {
-        format!("· {} persisted runs ", state.all_rows.len())
+        format!("· {} persisted runs ", all_count)
     };
     Line::from(vec![
         Span::styled(

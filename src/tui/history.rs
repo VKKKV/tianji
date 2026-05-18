@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 use ratatui::Frame;
 
-use super::state::{compact_timestamp, HistoryRow, TuiState};
+use super::state::{compact_timestamp, HistoryRow, HistoryViewState, TuiState};
 use super::theme::KANAGAWA;
 
 impl HistoryRow {
@@ -59,8 +59,13 @@ pub fn format_history_row(row: &HistoryRow) -> String {
     )
 }
 
-pub fn render_history(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
-    let (list_area, search_area) = if state.search_active {
+pub fn render_history(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &TuiState,
+    history: &HistoryViewState,
+) {
+    let (list_area, search_area) = if history.search_active {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(3), Constraint::Length(1)])
@@ -95,7 +100,10 @@ pub fn render_history(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
     if let Some(search_area) = search_area {
         let search_bar = Paragraph::new(Line::from(vec![
             Span::styled("/ ", Style::default().fg(KANAGAWA.fg)),
-            Span::styled(state.search_query.clone(), Style::default().fg(KANAGAWA.fg)),
+            Span::styled(
+                history.search_query.clone(),
+                Style::default().fg(KANAGAWA.fg),
+            ),
             Span::styled("▊", Style::default().fg(KANAGAWA.label)),
         ]))
         .style(super::render::base_style().bg(KANAGAWA.panel_bg));
@@ -104,12 +112,15 @@ pub fn render_history(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
 }
 
 pub fn history_title(state: &TuiState) -> String {
-    let filter_indicator = if state.rows.len() < state.all_rows.len() {
-        format!(" [{}/{}]", state.rows.len(), state.all_rows.len())
+    let Some(history) = state.history() else {
+        return " Run History ".to_string();
+    };
+    let filter_indicator = if state.rows.len() < history.all_rows.len() {
+        format!(" [{}/{}]", state.rows.len(), history.all_rows.len())
     } else {
         String::new()
     };
-    match state.staged_left_run_id {
+    match history.staged_left_run_id {
         Some(run_id) => format!(" Run History · staged left #{run_id}{filter_indicator} "),
         None => format!(" Run History{filter_indicator} "),
     }
@@ -209,10 +220,10 @@ mod tests {
         let mut state = history_state(rows);
         assert_eq!(history_title(&state), " Run History ");
 
-        state.search_query = "conflict".to_string();
+        state.history_mut().search_query = "conflict".to_string();
         state.apply_search();
         assert_eq!(state.rows.len(), 1);
-        assert_eq!(state.all_rows.len(), 2);
+        assert_eq!(state.history().unwrap().all_rows.len(), 2);
         let title = history_title(&state);
         assert!(title.contains("[1/2]"));
     }
