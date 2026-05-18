@@ -70,6 +70,63 @@ pub fn fork_worldline(
 }
 ```
 
+### `fork_worldline` failure contract
+
+`fork_worldline` is a simulation helper, not a persistence transaction. It must
+return a usable fork even when the optional store cannot allocate or persist.
+
+Signatures:
+
+```rust
+pub trait WorldlineStore {
+    fn next_id(&self) -> Result<WorldlineId, TianJiError>;
+    fn save(&self, worldline: &Worldline) -> Result<(), TianJiError>;
+}
+
+pub fn fork_worldline(base: &Worldline, store: Option<&dyn WorldlineStore>) -> Worldline;
+```
+
+Contracts:
+
+- With `Some(store)`, call `store.next_id()` first; with `None`, use the fallback allocator.
+- If `store.next_id()` fails, log `tracing::warn!` and use the fallback allocator.
+- The fallback allocator must never return `base.id`; loop/advance when needed.
+- If a store returns `base.id`, log `tracing::warn!` and use a fallback ID instead.
+- Always set `parent = Some(base.id)`, `diverge_tick = 0`, recompute `snapshot_hash`, and refresh `created_at`.
+- If `store.save(&forked)` fails, log `tracing::warn!` and still return the forked worldline.
+
+Validation/error matrix:
+
+- `store = None` -> return fork with fallback ID.
+- `store.next_id() = Ok(id)` and `id != base.id` -> return fork with store ID.
+- `store.next_id() = Ok(base.id)` -> warn, return fork with fallback ID.
+- `store.next_id() = Err(error)` -> warn, return fork with fallback ID.
+- `store.save() = Err(error)` -> warn, return fork; persistence is best-effort for this helper.
+
+Good/base/bad cases:
+
+- Good: `MemoryStore` allocates a new ID and records the fork.
+- Base: `None` store forks in memory only.
+- Bad: fallback ID reuses `base.id`, making parent and child indistinguishable.
+
+Required tests:
+
+- `fork_worldline(base.id == 1, None)` does not reuse ID 1.
+- `fork_worldline(base, Some(&MemoryStore))` saves exactly the forked worldline.
+- Existing sandbox fork tests continue to assert parent/diverge/hash semantics.
+
+Wrong:
+
+```rust
+let new_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+```
+
+Correct:
+
+```rust
+let new_id = fallback_worldline_id(base.id);
+```
+
 ### Step 3: Update callers
 
 - `NuwaSandbox::new` (sandbox.rs:46) → `fork_worldline(&base_worldline, None)` → unchanged
