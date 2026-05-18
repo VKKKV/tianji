@@ -80,6 +80,9 @@ impl ProfileRegistry {
             let content = std::fs::read_to_string(&path)?;
             let profile: ActorProfile = serde_yaml::from_str(&content)
                 .map_err(|e| TianJiError::Yaml(e, path.display().to_string()))?;
+            profile
+                .validate()
+                .map_err(|error| TianJiError::Usage(format!("{error} (in {})", path.display())))?;
             registry.profiles.insert(profile.id.clone(), profile);
         }
 
@@ -215,6 +218,9 @@ historical_analogues: []
 id: china
 name: China
 tier: nation
+interests:
+  - goal: "territorial integrity"
+    salience: 0.8
 capabilities:
   military: 0.8
   economic: 0.7
@@ -229,6 +235,9 @@ capabilities:
 id: usa
 name: USA
 tier: nation
+interests:
+  - goal: "alliance credibility"
+    salience: 0.9
 capabilities:
   military: 0.9
   economic: 0.85
@@ -243,6 +252,9 @@ capabilities:
 id: nato
 name: NATO
 tier: organization
+interests:
+  - goal: "collective defense"
+    salience: 0.9
 capabilities:
   military: 0.0
   economic: 0.6
@@ -323,6 +335,9 @@ capabilities:
 id: china
 name: China
 tier: nation
+interests:
+  - goal: "territorial integrity"
+    salience: 0.8
 capabilities:
   military: 0.8
   economic: 0.7
@@ -339,6 +354,53 @@ capabilities:
         let registry = ProfileRegistry::load_from_dir(&base).unwrap();
         assert_eq!(registry.profiles.len(), 1);
         assert!(registry.get("china").is_some());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn load_from_dir_loads_existing_sample_profiles() {
+        let registry = ProfileRegistry::load_from_dir(Path::new("profiles")).unwrap();
+
+        assert!(registry.get("china").is_some());
+        assert!(registry.get("nato").is_some());
+        assert!(registry.get("huawei").is_some());
+    }
+
+    #[test]
+    fn invalid_profile_returns_error_with_path_and_field() {
+        let base = tempfile_path("invalid_profile_validation");
+        let _ = std::fs::remove_dir_all(&base);
+        write_temp_profiles(
+            &base,
+            &[(
+                "nations/bad.yaml",
+                r#"
+id: bad
+name: Bad
+tier: nation
+interests:
+  - goal: "territorial integrity"
+    salience: 1.5
+capabilities:
+  military: 0.8
+  economic: 0.7
+  technological: 0.6
+  diplomatic: 0.7
+  cyber: 0.8
+"#,
+            )],
+        );
+
+        let result = ProfileRegistry::load_from_dir(&base);
+        let message = match result.unwrap_err() {
+            TianJiError::Usage(message) => message,
+            other => panic!("expected Usage validation error, got: {other}"),
+        };
+        assert!(message.contains("bad"));
+        assert!(message.contains("bad.yaml"));
+        assert!(message.contains("interests[0].salience"));
+        assert!(message.contains("[0.0, 1.0]"));
 
         let _ = std::fs::remove_dir_all(&base);
     }
