@@ -1161,6 +1161,170 @@ mod tests {
     }
 
     #[test]
+    fn persisted_run_summaries_feed_compare_output_end_to_end() {
+        let db_path = temp_sqlite_path();
+
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 2");
+
+        let scored_filters = ScoredEventFilters::default();
+        let group_filters = EventGroupFilters::default();
+        let left_detail = get_run_summary(&db_path, 1, &scored_filters, false, &group_filters)
+            .expect("left summary")
+            .expect("left run");
+        let right_detail = get_run_summary(&db_path, 2, &scored_filters, false, &group_filters)
+            .expect("right summary")
+            .expect("right run");
+        let comparison = compare_runs(&db_path, 1, 2, &scored_filters, false, &group_filters)
+            .expect("compare_runs")
+            .expect("comparison");
+
+        assert_eq!(comparison.left_run_id, left_detail["run_id"]);
+        assert_eq!(comparison.right_run_id, right_detail["run_id"]);
+
+        assert_eq!(comparison.left["run_id"], left_detail["run_id"]);
+        assert_eq!(comparison.left["mode"], left_detail["mode"]);
+        assert_eq!(
+            comparison.left["schema_version"],
+            left_detail["schema_version"]
+        );
+        assert_eq!(
+            comparison.left["raw_item_count"],
+            left_detail["input_summary"]["raw_item_count"]
+        );
+        assert_eq!(
+            comparison.left["normalized_event_count"],
+            left_detail["input_summary"]["normalized_event_count"]
+        );
+        assert_eq!(
+            comparison.left["dominant_field"],
+            left_detail["scenario_summary"]["dominant_field"]
+        );
+        assert_eq!(
+            comparison.left["risk_level"],
+            left_detail["scenario_summary"]["risk_level"]
+        );
+        assert_eq!(
+            comparison.left["headline"],
+            left_detail["scenario_summary"]["headline"]
+        );
+        assert_eq!(
+            comparison.left["event_group_count"],
+            left_detail["scenario_summary"]["event_groups"]
+                .as_array()
+                .expect("left event groups")
+                .len()
+        );
+        assert_eq!(
+            comparison.left["top_scored_event"],
+            left_detail["scored_events"]
+                .as_array()
+                .expect("left events")[0]
+        );
+        assert_eq!(
+            comparison.left["top_scored_event"]["event_id"],
+            "1e007871b783bb48"
+        );
+
+        assert_eq!(comparison.right["run_id"], right_detail["run_id"]);
+        assert_eq!(comparison.right["mode"], right_detail["mode"]);
+        assert_eq!(
+            comparison.right["schema_version"],
+            right_detail["schema_version"]
+        );
+        assert_eq!(
+            comparison.right["raw_item_count"],
+            right_detail["input_summary"]["raw_item_count"]
+        );
+        assert_eq!(
+            comparison.right["normalized_event_count"],
+            right_detail["input_summary"]["normalized_event_count"]
+        );
+        assert_eq!(
+            comparison.right["dominant_field"],
+            right_detail["scenario_summary"]["dominant_field"]
+        );
+        assert_eq!(
+            comparison.right["risk_level"],
+            right_detail["scenario_summary"]["risk_level"]
+        );
+        assert_eq!(
+            comparison.right["headline"],
+            right_detail["scenario_summary"]["headline"]
+        );
+        assert_eq!(
+            comparison.right["event_group_count"],
+            right_detail["scenario_summary"]["event_groups"]
+                .as_array()
+                .expect("right event groups")
+                .len()
+        );
+        assert_eq!(
+            comparison.right["top_scored_event"],
+            right_detail["scored_events"]
+                .as_array()
+                .expect("right events")[0]
+        );
+        assert_eq!(
+            comparison.right["top_scored_event"]["event_id"],
+            "1e007871b783bb48"
+        );
+
+        let raw_delta = right_detail["input_summary"]["raw_item_count"]
+            .as_i64()
+            .expect("right raw count")
+            - left_detail["input_summary"]["raw_item_count"]
+                .as_i64()
+                .expect("left raw count");
+        let normalized_delta = right_detail["input_summary"]["normalized_event_count"]
+            .as_i64()
+            .expect("right normalized count")
+            - left_detail["input_summary"]["normalized_event_count"]
+                .as_i64()
+                .expect("left normalized count");
+        let event_group_delta = right_detail["scenario_summary"]["event_groups"]
+            .as_array()
+            .expect("right event groups")
+            .len() as i64
+            - left_detail["scenario_summary"]["event_groups"]
+                .as_array()
+                .expect("left event groups")
+                .len() as i64;
+        assert_eq!(comparison.diff["raw_item_count_delta"], raw_delta);
+        assert_eq!(
+            comparison.diff["normalized_event_count_delta"],
+            normalized_delta
+        );
+        assert_eq!(
+            comparison.diff["event_group_count_delta"],
+            event_group_delta
+        );
+        assert_eq!(comparison.diff["dominant_field_changed"], false);
+        assert_eq!(comparison.diff["risk_level_changed"], false);
+        assert_eq!(
+            comparison.diff["left_top_scored_event_id"],
+            left_detail["scored_events"]
+                .as_array()
+                .expect("left events")[0]["event_id"]
+        );
+        assert_eq!(
+            comparison.diff["right_top_scored_event_id"],
+            right_detail["scored_events"]
+                .as_array()
+                .expect("right events")[0]["event_id"]
+        );
+        assert_eq!(comparison.diff["top_scored_event_changed"], false);
+        assert_eq!(comparison.diff["top_scored_event_comparable"], true);
+        assert_eq!(comparison.diff["top_impact_score_delta"], 0.0);
+        assert_eq!(comparison.diff["top_field_attraction_delta"], 0.0);
+        assert_eq!(comparison.diff["top_divergence_score_delta"], 0.0);
+
+        let memory_path = delta_memory_path(&db_path);
+        let _ = std::fs::remove_dir_all(memory_path.parent().expect("memory parent"));
+        cleanup_db(&db_path);
+    }
+
+    #[test]
     fn compare_latest_pair() {
         let db_path = temp_sqlite_path();
 
