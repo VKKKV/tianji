@@ -3,6 +3,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::warn;
 
 use crate::delta::{DeltaReport, RiskDirection};
 use crate::time_utils::parse_unix_or_rfc3339_timestamp_seconds;
@@ -141,7 +142,7 @@ impl HotMemory {
             if let Ok(raw) = std::fs::read_to_string(candidate) {
                 match serde_json::from_str::<Self>(&raw) {
                     Ok(memory) => return memory,
-                    Err(error) => eprintln!(
+                    Err(error) => warn!(
                         "warning: failed to parse hot memory {}: {error}",
                         candidate.display()
                     ),

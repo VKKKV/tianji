@@ -19,6 +19,8 @@ use tianji::{
     },
     TianJiError,
 };
+use tracing::error;
+use tracing_subscriber::EnvFilter;
 
 /// Shell names for completion generation
 #[derive(Clone, Debug, ValueEnum)]
@@ -407,6 +409,9 @@ enum DaemonCommands {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
     let cli = Cli::parse();
     match run(cli).await {
         Ok(output) => {
@@ -416,7 +421,7 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            error!("{error}");
             ExitCode::from(1)
         }
     }

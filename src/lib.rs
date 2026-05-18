@@ -12,6 +12,7 @@ pub mod normalize;
 pub mod nuwa;
 pub mod profile;
 pub mod scoring;
+pub mod scoring_params;
 pub mod storage;
 pub mod time_utils;
 pub mod tui;

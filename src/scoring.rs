@@ -5,56 +5,8 @@ use regex::Regex;
 
 use crate::models::{NormalizedEvent, ScoredEvent};
 use crate::normalize::{match_patterns, ACTOR_PATTERNS, FIELD_KEYWORDS, REGION_PATTERNS};
+use crate::scoring_params::ScoreParams;
 use crate::utils::round2;
-
-const REGION_WEIGHTS: &[(&str, f64)] = &[
-    ("ukraine", 2.5),
-    ("russia", 2.0),
-    ("middle-east", 2.5),
-    ("east-asia", 2.0),
-    ("united-states", 1.0),
-    ("europe", 1.0),
-];
-
-const ACTOR_WEIGHTS: &[(&str, f64)] = &[
-    ("nato", 1.5),
-    ("eu", 1.0),
-    ("un", 1.0),
-    ("usa", 1.5),
-    ("china", 1.5),
-    ("russia", 1.5),
-    ("iran", 1.2),
-];
-
-const IMPACT_WEIGHT: f64 = 0.65;
-const FIELD_ATTRACTION_WEIGHT: f64 = 1.35;
-const FA_MARGIN_WEIGHT: f64 = 0.15;
-const FA_MAX_MARGIN_BONUS: f64 = 1.0;
-const FA_COHERENCE_WEIGHT: f64 = 0.75;
-const FA_NEAR_TIE_MARGIN_THRESHOLD: f64 = 1.0;
-const FA_NEAR_TIE_WEIGHT: f64 = 0.35;
-const FA_MAX_NEAR_TIE_PENALTY: f64 = 0.3;
-const FA_DIFFUSE_THIRD_FIELD_THRESHOLD: f64 = 2.5;
-const FA_DIFFUSE_THIRD_FIELD_WEIGHT: f64 = 0.1;
-const FA_MAX_DIFFUSE_THIRD_FIELD_PENALTY: f64 = 0.2;
-const IM_DOMINANT_FIELD_WEIGHT: f64 = 0.25;
-const IM_NONZERO_FIELD_WEIGHT: f64 = 0.2;
-const IM_NONZERO_FIELD_MIN_SCORE: f64 = 1.0;
-const IM_TITLE_SALIENCE_ACTOR_MULTIPLIER: f64 = 0.2;
-const IM_TITLE_SALIENCE_REGION_MULTIPLIER: f64 = 0.2;
-const IM_TITLE_SALIENCE_ACTOR_MAX_PER_MATCH: f64 = 0.35;
-const IM_TITLE_SALIENCE_REGION_MAX_PER_MATCH: f64 = 0.4;
-const IM_TITLE_SALIENCE_MAX_BONUS: f64 = 0.8;
-const IM_FIELD_IMPACT_BASELINE_AVERAGE_WEIGHT: f64 = 1.5;
-const IM_FIELD_IMPACT_SCALE_WEIGHT: f64 = 0.06;
-const IM_FIELD_IMPACT_MAX_BONUS: f64 = 0.5;
-const IM_TEXT_SIGNAL_KEYWORD_WEIGHT: f64 = 0.12;
-const IM_TEXT_SIGNAL_TITLE_WEIGHT: f64 = 0.2;
-const IM_TEXT_SIGNAL_SUMMARY_WEIGHT: f64 = 0.1;
-const IM_TEXT_SIGNAL_MAX_KEYWORD_HITS: usize = 4;
-const IM_TEXT_SIGNAL_MAX_TITLE_HITS: usize = 2;
-const IM_TEXT_SIGNAL_MAX_SUMMARY_HITS: usize = 2;
-const IM_TEXT_SIGNAL_MAX_BONUS: f64 = 1.0;
 
 static TEXT_SIGNAL_REGEXES: LazyLock<BTreeMap<&'static str, Regex>> = LazyLock::new(|| {
     FIELD_KEYWORDS
@@ -70,16 +22,19 @@ static TEXT_SIGNAL_REGEXES: LazyLock<BTreeMap<&'static str, Regex>> = LazyLock::
         .collect()
 });
 
-fn weight_lookup(table: &[(&str, f64)], key: &str, default: f64) -> f64 {
-    table
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, v)| *v)
-        .unwrap_or(default)
+// ── Backward-compatible entry points ──
+
+/// Score events using the default parameter set.
+pub fn score_events(events: &[NormalizedEvent]) -> Vec<ScoredEvent> {
+    score_events_with_params(events, &ScoreParams::default())
 }
 
-pub fn score_events(events: &[NormalizedEvent]) -> Vec<ScoredEvent> {
-    let mut scored: Vec<ScoredEvent> = events.iter().map(score_event).collect();
+/// Score events using a custom `ScoreParams` configuration.
+pub fn score_events_with_params(
+    events: &[NormalizedEvent],
+    params: &ScoreParams,
+) -> Vec<ScoredEvent> {
+    let mut scored: Vec<ScoredEvent> = events.iter().map(|e| score_event(e, params)).collect();
     scored.sort_by(|a, b| {
         b.divergence_score
             .partial_cmp(&a.divergence_score)
@@ -88,13 +43,15 @@ pub fn score_events(events: &[NormalizedEvent]) -> Vec<ScoredEvent> {
     scored
 }
 
-fn score_event(event: &NormalizedEvent) -> ScoredEvent {
+// ── Per-event scoring ──
+
+fn score_event(event: &NormalizedEvent, params: &ScoreParams) -> ScoredEvent {
     let (dominant_field, dominant_field_strength) = select_dominant_field(event);
-    let title_salience_bonus = compute_title_salience_bonus(event);
+    let title_salience_bonus = compute_title_salience_bonus(event, params);
     let field_impact_scaling_bonus =
-        compute_field_impact_scaling_bonus(&dominant_field, dominant_field_strength);
-    let text_signal_intensity = compute_text_signal_intensity(event, &dominant_field);
-    let fa_score = compute_fa(event, dominant_field_strength);
+        compute_field_impact_scaling_bonus(&dominant_field, dominant_field_strength, params);
+    let text_signal_intensity = compute_text_signal_intensity(event, &dominant_field, params);
+    let fa_score = compute_fa(event, dominant_field_strength, params);
     let im_score = compute_im(
         event,
         dominant_field_strength,
@@ -102,8 +59,9 @@ fn score_event(event: &NormalizedEvent) -> ScoredEvent {
         title_salience_bonus,
         field_impact_scaling_bonus,
         text_signal_intensity,
+        params,
     );
-    let divergence_score = compute_divergence_score(im_score, fa_score);
+    let divergence_score = compute_divergence_score(im_score, fa_score, params);
     let rationale = build_rationale(
         event,
         &dominant_field,
@@ -138,29 +96,30 @@ fn compute_im(
     title_salience_bonus: f64,
     field_impact_scaling_bonus: f64,
     text_signal_intensity: f64,
+    params: &ScoreParams,
 ) -> f64 {
     let actor_weight: f64 = event
         .actors
         .iter()
-        .map(|actor| weight_lookup(ACTOR_WEIGHTS, actor, 0.6))
+        .map(|actor| params.actor_weight(actor, 0.6))
         .sum();
     let region_weight: f64 = event
         .regions
         .iter()
-        .map(|region| weight_lookup(REGION_WEIGHTS, region, 0.5))
+        .map(|region| params.region_weight(region, 0.5))
         .sum();
     let keyword_density = (event.keywords.len() as f64 * 0.25).min(3.0);
     let nonzero_field_count = field_scores
         .values()
-        .filter(|score| **score >= IM_NONZERO_FIELD_MIN_SCORE)
+        .filter(|score| **score >= params.im_nonzero_field_min_score)
         .count();
     let nonzero_field_count = if nonzero_field_count == 0 && dominant_field_strength > 0.0 {
         1
     } else {
         nonzero_field_count
     };
-    let evidence_bonus = (dominant_field_strength * IM_DOMINANT_FIELD_WEIGHT)
-        + (nonzero_field_count as f64 * IM_NONZERO_FIELD_WEIGHT);
+    let evidence_bonus = (dominant_field_strength * params.im_dominant_field_weight)
+        + (nonzero_field_count as f64 * params.im_nonzero_field_weight);
 
     round2(
         3.0 + actor_weight
@@ -173,7 +132,7 @@ fn compute_im(
     )
 }
 
-fn compute_title_salience_bonus(event: &NormalizedEvent) -> f64 {
+fn compute_title_salience_bonus(event: &NormalizedEvent, params: &ScoreParams) -> f64 {
     let title_actors: Vec<String> = match_patterns(&event.title, &ACTOR_PATTERNS);
     let title_regions: Vec<String> = match_patterns(&event.title, &REGION_PATTERNS);
 
@@ -182,8 +141,8 @@ fn compute_title_salience_bonus(event: &NormalizedEvent) -> f64 {
         .iter()
         .filter(|actor| title_actors.contains(actor))
         .map(|actor| {
-            (weight_lookup(ACTOR_WEIGHTS, actor, 0.6) * IM_TITLE_SALIENCE_ACTOR_MULTIPLIER)
-                .min(IM_TITLE_SALIENCE_ACTOR_MAX_PER_MATCH)
+            (params.actor_weight(actor, 0.6) * params.im_title_salience_actor_multiplier)
+                .min(params.im_title_salience_actor_max_per_match)
         })
         .sum();
 
@@ -192,15 +151,19 @@ fn compute_title_salience_bonus(event: &NormalizedEvent) -> f64 {
         .iter()
         .filter(|region| title_regions.contains(region))
         .map(|region| {
-            (weight_lookup(REGION_WEIGHTS, region, 0.5) * IM_TITLE_SALIENCE_REGION_MULTIPLIER)
-                .min(IM_TITLE_SALIENCE_REGION_MAX_PER_MATCH)
+            (params.region_weight(region, 0.5) * params.im_title_salience_region_multiplier)
+                .min(params.im_title_salience_region_max_per_match)
         })
         .sum();
 
-    round2((actor_bonus + region_bonus).min(IM_TITLE_SALIENCE_MAX_BONUS))
+    round2((actor_bonus + region_bonus).min(params.im_title_salience_max_bonus))
 }
 
-fn compute_field_impact_scaling_bonus(dominant_field: &str, dominant_field_strength: f64) -> f64 {
+fn compute_field_impact_scaling_bonus(
+    dominant_field: &str,
+    dominant_field_strength: f64,
+    params: &ScoreParams,
+) -> f64 {
     let dominant_keywords = match FIELD_KEYWORDS
         .iter()
         .find(|(name, _)| *name == dominant_field)
@@ -214,14 +177,18 @@ fn compute_field_impact_scaling_bonus(dominant_field: &str, dominant_field_stren
     let average_keyword_weight: f64 =
         dominant_keywords.iter().map(|(_, w)| w).sum::<f64>() / dominant_keywords.len() as f64;
     round2(
-        ((average_keyword_weight - IM_FIELD_IMPACT_BASELINE_AVERAGE_WEIGHT).max(0.0)
+        ((average_keyword_weight - params.im_field_impact_baseline_average_weight).max(0.0)
             * dominant_field_strength
-            * IM_FIELD_IMPACT_SCALE_WEIGHT)
-            .min(IM_FIELD_IMPACT_MAX_BONUS),
+            * params.im_field_impact_scale_weight)
+            .min(params.im_field_impact_max_bonus),
     )
 }
 
-fn compute_text_signal_intensity(event: &NormalizedEvent, dominant_field: &str) -> f64 {
+fn compute_text_signal_intensity(
+    event: &NormalizedEvent,
+    dominant_field: &str,
+    params: &ScoreParams,
+) -> f64 {
     let dominant_keywords = match FIELD_KEYWORDS
         .iter()
         .find(|(name, _)| *name == dominant_field)
@@ -235,24 +202,24 @@ fn compute_text_signal_intensity(event: &NormalizedEvent, dominant_field: &str) 
         .iter()
         .filter(|keyword| dominant_keywords.iter().any(|(k, _)| *k == **keyword))
         .count()
-        .min(IM_TEXT_SIGNAL_MAX_KEYWORD_HITS);
+        .min(params.im_text_signal_max_keyword_hits);
 
     let title_hits = count_text_signal_surface_hits(
         &event.title,
         dominant_keywords,
-        IM_TEXT_SIGNAL_MAX_TITLE_HITS,
+        params.im_text_signal_max_title_hits,
     );
     let summary_hits = count_text_signal_surface_hits(
         &event.summary,
         dominant_keywords,
-        IM_TEXT_SIGNAL_MAX_SUMMARY_HITS,
+        params.im_text_signal_max_summary_hits,
     );
 
     round2(
-        ((keyword_hits as f64 * IM_TEXT_SIGNAL_KEYWORD_WEIGHT)
-            + (title_hits as f64 * IM_TEXT_SIGNAL_TITLE_WEIGHT)
-            + (summary_hits as f64 * IM_TEXT_SIGNAL_SUMMARY_WEIGHT))
-            .min(IM_TEXT_SIGNAL_MAX_BONUS),
+        ((keyword_hits as f64 * params.im_text_signal_keyword_weight)
+            + (title_hits as f64 * params.im_text_signal_title_weight)
+            + (summary_hits as f64 * params.im_text_signal_summary_weight))
+            .min(params.im_text_signal_max_bonus),
     )
 }
 
@@ -292,7 +259,7 @@ fn select_dominant_field(event: &NormalizedEvent) -> (String, f64) {
     (tied_fields[0].to_string(), round2(max_strength))
 }
 
-fn compute_fa(event: &NormalizedEvent, dominant_field_strength: f64) -> f64 {
+fn compute_fa(event: &NormalizedEvent, dominant_field_strength: f64, params: &ScoreParams) -> f64 {
     let mut ordered_scores: Vec<f64> = event.field_scores.values().copied().collect();
     ordered_scores.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -312,19 +279,19 @@ fn compute_fa(event: &NormalizedEvent, dominant_field_strength: f64) -> f64 {
     }
     let dominant_margin = (dominant_field_strength - second_best_strength).max(0.0);
 
-    let margin_bonus = (dominant_margin * FA_MARGIN_WEIGHT).min(FA_MAX_MARGIN_BONUS);
+    let margin_bonus = (dominant_margin * params.fa_margin_weight).min(params.fa_max_margin_bonus);
     let coherence_bonus = if total_strength > 0.0 {
-        (dominant_field_strength / total_strength) * FA_COHERENCE_WEIGHT
+        (dominant_field_strength / total_strength) * params.fa_coherence_weight
     } else {
         0.0
     };
-    let near_tie_penalty = ((FA_NEAR_TIE_MARGIN_THRESHOLD - dominant_margin).max(0.0)
-        * FA_NEAR_TIE_WEIGHT)
-        .min(FA_MAX_NEAR_TIE_PENALTY);
-    let diffuse_third_field_penalty = if dominant_margin >= FA_NEAR_TIE_MARGIN_THRESHOLD {
-        ((third_best_strength - FA_DIFFUSE_THIRD_FIELD_THRESHOLD).max(0.0)
-            * FA_DIFFUSE_THIRD_FIELD_WEIGHT)
-            .min(FA_MAX_DIFFUSE_THIRD_FIELD_PENALTY)
+    let near_tie_penalty = ((params.fa_near_tie_margin_threshold - dominant_margin).max(0.0)
+        * params.fa_near_tie_weight)
+        .min(params.fa_max_near_tie_penalty);
+    let diffuse_third_field_penalty = if dominant_margin >= params.fa_near_tie_margin_threshold {
+        ((third_best_strength - params.fa_diffuse_third_field_threshold).max(0.0)
+            * params.fa_diffuse_third_field_weight)
+            .min(params.fa_max_diffuse_third_field_penalty)
     } else {
         0.0
     };
@@ -336,8 +303,8 @@ fn compute_fa(event: &NormalizedEvent, dominant_field_strength: f64) -> f64 {
     )
 }
 
-fn compute_divergence_score(im_score: f64, fa_score: f64) -> f64 {
-    round2(im_score * IMPACT_WEIGHT + fa_score * FIELD_ATTRACTION_WEIGHT)
+fn compute_divergence_score(im_score: f64, fa_score: f64, params: &ScoreParams) -> f64 {
+    round2(im_score * params.impact_weight + fa_score * params.field_attraction_weight)
 }
 
 fn build_rationale(
@@ -453,7 +420,6 @@ pub fn summarize_scenario(
         })
         .collect();
 
-    // Python: sorted(tied_fields, key=lambda fn: (-best_div[field], field))
     let dominant_field = tied_fields
         .iter()
         .min_by(|a, b| {
@@ -473,9 +439,6 @@ pub fn summarize_scenario(
         top_events.len() - 1
     );
 
-    // Python Counter.most_common(3): sort by count desc, then insertion order for ties
-    // We preserve insertion order by using a Vec and only sorting by -count
-    // (ties remain in insertion order, matching Python Counter behavior)
     region_counts.sort_by(|a, b| b.1.cmp(&a.1));
     actor_counts.sort_by(|a, b| b.1.cmp(&a.1));
 
@@ -538,7 +501,7 @@ mod tests {
         let (dominant_field, strength) = select_dominant_field(&event);
         assert_eq!(dominant_field, "uncategorized");
         assert_eq!(strength, 0.0);
-        assert_eq!(compute_fa(&event, strength), 0.0);
+        assert_eq!(compute_fa(&event, strength, &ScoreParams::default()), 0.0);
     }
 
     #[test]
@@ -567,12 +530,13 @@ mod tests {
 
     #[test]
     fn divergence_score_formula() {
-        // divergence_score = Im * 0.65 + Fa * 1.35
+        let params = ScoreParams::default();
+        // divergence_score = Im * impact_weight + Fa * field_attraction_weight
         let im = 15.79;
         let fa = 7.75;
         assert_eq!(
-            compute_divergence_score(im, fa),
-            round2(im * 0.65 + fa * 1.35)
+            compute_divergence_score(im, fa, &params),
+            round2(im * params.impact_weight + fa * params.field_attraction_weight)
         );
     }
 }

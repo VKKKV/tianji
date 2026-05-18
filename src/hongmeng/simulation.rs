@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 use crate::worldline::types::{ActorId, Worldline};
 use crate::TianJiError;
@@ -210,7 +211,7 @@ impl Hongmeng {
                 // Save checkpoint to DB if connection available
                 if let Some(conn) = db_conn {
                     if let Err(e) = checkpoint.save(conn) {
-                        eprintln!(
+                        error!(
                             "checkpoint save failed at tick {} (sim={}): {e}",
                             self.tick, simulation_id
                         );

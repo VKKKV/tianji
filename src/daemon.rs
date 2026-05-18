@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::sync::Condvar;
 use std::sync::Mutex;
 
+use tracing::{error, warn};
+
 use crate::get_latest_run_id;
 use crate::run_fixture_path;
 use crate::run_fixture_path_with_alert_marking;
@@ -513,14 +515,14 @@ pub fn serve(
         // Spawn API server
         let api_handle = tokio::spawn(async move {
             if let Err(e) = crate::api::serve_api(&validated_host, port, &sqlite_path_owned).await {
-                eprintln!("API server error: {e}");
+                error!("API server error: {e}");
             }
         });
 
         // Spawn socket listener
         let socket_handle = tokio::spawn(async move {
             if let Err(e) = listen_socket(&socket_path_owned, &state_clone).await {
-                eprintln!("Socket listener error: {e}");
+                error!("Socket listener error: {e}");
             }
         });
 
@@ -560,7 +562,7 @@ async fn listen_socket(socket_path: &str, state: &Arc<DaemonState>) -> Result<()
                     std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
                 ) =>
             {
-                eprintln!("Transient socket accept error: {error}");
+                warn!("Transient socket accept error: {error}");
                 continue;
             }
             Err(error) => return Err(TianJiError::Io(error)),
