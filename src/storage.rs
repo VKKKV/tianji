@@ -144,9 +144,7 @@ fn insert_raw_items(
     for item in raw_items {
         let key = canonical_hashes_for_raw_item(item);
         let canonical_id = canonical_ids.get(&key).ok_or_else(|| {
-            TianJiError::Storage(rusqlite::Error::InvalidParameterName(
-                "missing canonical source item id".to_string(),
-            ))
+            TianJiError::DataIntegrity("missing canonical source item id".to_string())
         })?;
         connection.execute(
             "INSERT INTO raw_items (run_id, canonical_source_item_id, source, title, summary, link, published_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -182,9 +180,9 @@ fn insert_normalized_events(
             event.content_hash.clone(),
         );
         let canonical_id = canonical_ids.get(&key).ok_or_else(|| {
-            TianJiError::Storage(rusqlite::Error::InvalidParameterName(
+            TianJiError::DataIntegrity(
                 "missing canonical source item id for normalized event".to_string(),
-            ))
+            )
         })?;
         let keywords_json = serde_json::to_string(&event.keywords).map_err(TianJiError::Json)?;
         let actors_json = serde_json::to_string(&event.actors).map_err(TianJiError::Json)?;
@@ -1700,6 +1698,71 @@ pub fn clear_baseline(conn: &Connection) -> Result<(), TianJiError> {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod storage_integrity_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn raw_item_with_hashes(identity_hash: &str, content_hash: &str) -> RawItem {
+        RawItem {
+            source: "fixture:test.xml".to_string(),
+            title: "Test title".to_string(),
+            summary: "Test summary".to_string(),
+            link: "https://example.com/test".to_string(),
+            published_at: Some("2026-05-18T00:00:00Z".to_string()),
+            entry_identity_hash: identity_hash.to_string(),
+            content_hash: content_hash.to_string(),
+        }
+    }
+
+    fn normalized_event_with_hashes(identity_hash: &str, content_hash: &str) -> NormalizedEvent {
+        NormalizedEvent {
+            event_id: "event-1".to_string(),
+            source: "fixture:test.xml".to_string(),
+            title: "Test title".to_string(),
+            summary: "Test summary".to_string(),
+            link: "https://example.com/test".to_string(),
+            published_at: Some("2026-05-18T00:00:00Z".to_string()),
+            keywords: vec!["test".to_string()],
+            actors: Vec::new(),
+            regions: Vec::new(),
+            field_scores: BTreeMap::new(),
+            entry_identity_hash: identity_hash.to_string(),
+            content_hash: content_hash.to_string(),
+        }
+    }
+
+    #[test]
+    fn missing_raw_item_canonical_id_returns_data_integrity() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        let raw_items = vec![raw_item_with_hashes("identity-a", "content-a")];
+        let canonical_ids = BTreeMap::new();
+
+        let result = insert_raw_items(&conn, 1, &raw_items, &canonical_ids);
+
+        assert!(matches!(
+            result,
+            Err(TianJiError::DataIntegrity(message))
+                if message == "missing canonical source item id"
+        ));
+    }
+
+    #[test]
+    fn missing_normalized_event_canonical_id_returns_data_integrity() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        let normalized_events = vec![normalized_event_with_hashes("identity-a", "content-a")];
+        let canonical_ids = BTreeMap::new();
+
+        let result = insert_normalized_events(&conn, 1, &normalized_events, &canonical_ids);
+
+        assert!(matches!(
+            result,
+            Err(TianJiError::DataIntegrity(message))
+                if message == "missing canonical source item id for normalized event"
+        ));
+    }
+}
 
 #[cfg(test)]
 mod worldline_persistence_tests {

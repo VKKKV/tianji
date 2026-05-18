@@ -50,6 +50,7 @@ pub const MAX_SCORED_EVENTS: usize = 500;
 pub enum TianJiError {
     Usage(String),
     Input(String),
+    DataIntegrity(String),
     Io(std::io::Error),
     Json(serde_json::Error),
     Yaml(serde_yaml::Error, String),
@@ -62,6 +63,7 @@ impl std::fmt::Display for TianJiError {
         match self {
             Self::Usage(message) => write!(formatter, "{message}"),
             Self::Input(message) => write!(formatter, "{message}"),
+            Self::DataIntegrity(message) => write!(formatter, "{message}"),
             Self::Io(error) => write!(formatter, "{error}"),
             Self::Json(error) => write!(formatter, "{error}"),
             Self::Yaml(error, path) => write!(formatter, "{error} (in {path})"),
@@ -309,6 +311,13 @@ mod tests {
 
     const SAMPLE_FIXTURE: &str = "tests/fixtures/sample_feed.xml";
     const CONTRACT_FIXTURE: &str = "tests/fixtures/contracts/run_artifact_v1.json";
+
+    #[test]
+    fn data_integrity_error_displays_message_directly() {
+        let error = TianJiError::DataIntegrity("missing canonical source item id".to_string());
+
+        assert_eq!(error.to_string(), "missing canonical source item id");
+    }
 
     #[test]
     fn fixture_artifact_uses_current_top_level_contract_keys() {

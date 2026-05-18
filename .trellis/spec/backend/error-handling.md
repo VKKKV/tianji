@@ -13,6 +13,7 @@ The Rust implementation uses `Result<T, TianJiError>` with a custom error enum:
 pub enum TianJiError {
     Usage(String),   // CLI usage errors
     Input(String),   // Feed/input parse errors
+    DataIntegrity(String),  // Internal invariant / consistency failures
     Storage(rusqlite::Error),  // SQLite errors (Milestone 2+)
     Io(std::io::Error),
     Json(serde_json::Error),
@@ -22,8 +23,34 @@ pub enum TianJiError {
 - Library functions return `Result<T, TianJiError>`
 - `main()` maps errors to stderr + exit code 1
 - No `unwrap()` in library code — propagate errors through `Result`
+- `DataIntegrity` is for internal invariant failures where persisted or derived
+  data is inconsistent; do not encode these as `Storage(rusqlite::Error)` unless
+  the underlying failure actually came from SQLite
 - `Storage` variant wraps `rusqlite::Error`; "not found" cases are matched via `rusqlite::Error::QueryReturnedNoRows` and converted to `Option<T>::None` at the call site
 - Daemon worker catches broad `Exception` at the boundary (like Python oracle), stores formatted error string in `JobRecord.error`
+
+### DataIntegrity vs Storage
+
+Use `TianJiError::DataIntegrity(message)` when code detects a violated internal
+contract, such as a missing canonical source item ID after the write path already
+built the canonical ID map. These are not user-input errors and not SQLite API
+errors; they should surface as internal failures at API/daemon boundaries.
+
+#### Wrong
+
+```rust
+return Err(TianJiError::Storage(rusqlite::Error::InvalidParameterName(
+    "missing canonical source item id".to_string(),
+)));
+```
+
+#### Correct
+
+```rust
+return Err(TianJiError::DataIntegrity(
+    "missing canonical source item id".to_string(),
+));
+```
 
 ---
 
