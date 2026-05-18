@@ -240,6 +240,26 @@ impl HistoryViewState {
         self.staged_left_run_id = rows.get(selected).map(|row| row.run_id);
     }
 
+    pub fn open_selected_detail(
+        &mut self,
+        rows: &[HistoryRow],
+        selected: usize,
+        sqlite_path: Option<&str>,
+    ) -> Option<LoadingState> {
+        self.pending_g = false;
+        let run_id = rows.get(selected)?.run_id;
+        let sqlite_path = match sqlite_path {
+            Some(path) => path.to_string(),
+            None => return Some(LoadingState::ImmediateDetail(DetailState::missing(run_id))),
+        };
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let detail = load_detail_state(&sqlite_path, run_id);
+            let _ = tx.send(detail);
+        });
+        Some(LoadingState::Detail(rx))
+    }
+
     pub fn open_selected_compare(
         &mut self,
         rows: &[HistoryRow],
@@ -371,6 +391,13 @@ impl TuiState {
 
     pub fn selected(&self) -> usize {
         self.selected
+    }
+
+    pub fn dashboard_snapshot(&self) -> DashboardState {
+        match &self.view {
+            ViewState::Dashboard(dashboard) => dashboard.clone(),
+            _ => self.dashboard_cache.clone(),
+        }
     }
 
     pub fn select_next(&mut self) {
@@ -510,28 +537,18 @@ impl TuiState {
     }
 
     pub fn open_selected_detail(&mut self) {
-        if let ViewState::History(history) = &mut self.view {
-            history.pending_g = false;
-        } else {
-            return;
-        }
-        let Some(row) = self.rows.get(self.selected) else {
-            return;
-        };
-        let run_id = row.run_id;
-        let sqlite_path = match self.sqlite_path.as_deref() {
-            Some(path) => path.to_string(),
-            None => {
-                self.show_detail(DetailState::missing(run_id));
-                return;
+        let Some(loading) = (match &mut self.view {
+            ViewState::History(history) => {
+                history.open_selected_detail(&self.rows, self.selected, self.sqlite_path.as_deref())
             }
+            _ => None,
+        }) else {
+            return;
         };
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let detail = load_detail_state(&sqlite_path, run_id);
-            let _ = tx.send(detail);
-        });
-        self.pending_loading = Some(LoadingState::Detail(rx));
+        match loading {
+            LoadingState::ImmediateDetail(detail) => self.show_detail(detail),
+            other => self.pending_loading = Some(other),
+        }
     }
 
     pub fn open_selected_compare(&mut self) -> bool {

@@ -460,10 +460,8 @@ impl Drop for TerminalSession {
 }
 
 fn handle_key(state: &mut TuiState, key: &KeyEvent) -> bool {
-    let view = std::mem::replace(
-        &mut state.view,
-        ViewState::History(HistoryViewState::new(state.rows.clone())),
-    );
+    let dashboard_snapshot = state.dashboard_snapshot();
+    let view = std::mem::replace(&mut state.view, ViewState::Dashboard(dashboard_snapshot));
     match view {
         ViewState::Dashboard(dashboard) => {
             state.view = ViewState::Dashboard(dashboard.clone());
@@ -564,6 +562,8 @@ fn handle_history_key(
             true
         }
         KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Char('1') => {
+            history.pending_g = false;
+            state.view = ViewState::History(history.clone());
             state.show_dashboard();
             true
         }
@@ -574,6 +574,8 @@ fn handle_history_key(
         }
         KeyCode::Char('3') => {
             if state.has_simulation() {
+                history.pending_g = false;
+                state.view = ViewState::History(history.clone());
                 state.show_existing_simulation();
             } else {
                 state.view = ViewState::History(history.clone());
@@ -759,6 +761,21 @@ mod tests {
         state
     }
 
+    fn simulation_state() -> SimulationState {
+        SimulationState {
+            mode: "forward".to_string(),
+            target: "global.conflict".to_string(),
+            horizon: 10,
+            tick: 5,
+            total_ticks: 10,
+            status: "running".to_string(),
+            field_values: vec![],
+            agent_statuses: vec![],
+            event_log: vec![],
+            branches: vec![],
+        }
+    }
+
     #[test]
     fn key_handler_maps_navigation_and_quit() {
         let mut state = history_state(vec![row(1), row(2)]);
@@ -824,6 +841,41 @@ mod tests {
 
         assert!(handle_key(&mut state, &key(KeyCode::Char('d'))));
         assert_eq!(state.view, TuiView::Dashboard);
+    }
+
+    #[test]
+    fn history_staging_survives_dashboard_roundtrip() {
+        let mut state = history_state(vec![row(1), row(2)]);
+
+        assert!(handle_key(&mut state, &key(KeyCode::Char('c'))));
+        assert_eq!(state.history().unwrap().staged_left_run_id, Some(1));
+
+        assert!(handle_key(&mut state, &key(KeyCode::Char('d'))));
+        assert_eq!(state.view, TuiView::Dashboard);
+
+        assert!(handle_key(&mut state, &key(KeyCode::Char('h'))));
+        assert_eq!(state.view, TuiView::History);
+        assert_eq!(state.history().unwrap().staged_left_run_id, Some(1));
+        assert!(history_title(&state).contains("staged left #1"));
+    }
+
+    #[test]
+    fn history_staging_survives_simulation_roundtrip() {
+        let mut state = history_state(vec![row(1), row(2)]);
+        state.show_simulation(simulation_state());
+        assert!(handle_key(&mut state, &key(KeyCode::Esc)));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('h'))));
+
+        assert!(handle_key(&mut state, &key(KeyCode::Char('c'))));
+        assert_eq!(state.history().unwrap().staged_left_run_id, Some(1));
+
+        assert!(handle_key(&mut state, &key(KeyCode::Char('3'))));
+        assert_eq!(state.view, TuiView::Simulation);
+
+        assert!(handle_key(&mut state, &key(KeyCode::Esc)));
+        assert!(handle_key(&mut state, &key(KeyCode::Char('h'))));
+        assert_eq!(state.view, TuiView::History);
+        assert_eq!(state.history().unwrap().staged_left_run_id, Some(1));
     }
 
     #[test]
@@ -1037,18 +1089,7 @@ mod tests {
         assert_eq!(state.view, TuiView::Dashboard);
 
         // Add simulation state
-        state.show_simulation(SimulationState {
-            mode: "forward".to_string(),
-            target: "global.conflict".to_string(),
-            horizon: 10,
-            tick: 5,
-            total_ticks: 10,
-            status: "running".to_string(),
-            field_values: vec![],
-            agent_statuses: vec![],
-            event_log: vec![],
-            branches: vec![],
-        });
+        state.show_simulation(simulation_state());
 
         // Key 3 should now switch to Simulation view
         assert!(handle_key(&mut state, &key(KeyCode::Char('3'))));
@@ -1058,18 +1099,7 @@ mod tests {
     #[test]
     fn simulation_view_esc_returns_to_dashboard() {
         let mut state = TuiState::new(vec![row(1)], dashboard());
-        state.show_simulation(SimulationState {
-            mode: "forward".to_string(),
-            target: "global.conflict".to_string(),
-            horizon: 10,
-            tick: 5,
-            total_ticks: 10,
-            status: "running".to_string(),
-            field_values: vec![],
-            agent_statuses: vec![],
-            event_log: vec![],
-            branches: vec![],
-        });
+        state.show_simulation(simulation_state());
 
         assert!(handle_key(&mut state, &key(KeyCode::Esc)));
         assert_eq!(state.view, TuiView::Dashboard);
