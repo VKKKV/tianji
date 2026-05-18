@@ -1,19 +1,11 @@
 use std::collections::BTreeMap;
-use std::sync::LazyLock;
 
 use crate::models::{EventChainLink, EventGroupSummary, ScoredEvent};
-use crate::utils::{days_since_epoch, round2};
+use crate::time_utils::parse_event_timestamp_seconds;
+use crate::utils::round2;
 
 const MIN_SHARED_KEYWORDS: usize = 2;
 const MAX_GROUP_TIME_DELTA_SECS: i64 = 24 * 3600;
-static ISO_TIME_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})")
-        .expect("valid ISO time regex")
-});
-static RFC2822_TIME_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^(?:\w{3}, )?(\d{1,2}) (\w{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2})")
-        .expect("valid RFC2822 time regex")
-});
 
 pub fn group_events(scored_events: &[ScoredEvent]) -> Vec<EventGroupSummary> {
     let mut ordered_events: Vec<&ScoredEvent> = scored_events.iter().collect();
@@ -339,8 +331,8 @@ fn sort_group_for_causal_chain<'a>(
     // Sort children by (time, -divergence, event_id)
     for children in children_by_parent_id.values_mut() {
         children.sort_by(|a, b| {
-            let time_a = parse_event_time_rfc(&a.published_at);
-            let time_b = parse_event_time_rfc(&b.published_at);
+            let time_a = parse_event_timestamp_seconds(&a.published_at);
+            let time_b = parse_event_timestamp_seconds(&b.published_at);
             match (time_a, time_b) {
                 (Some(ta), Some(tb)) => ta.cmp(&tb),
                 (Some(_), None) => std::cmp::Ordering::Less,
@@ -426,8 +418,8 @@ fn compute_time_delta_hours(
     left_published_at: &Option<String>,
     right_published_at: &Option<String>,
 ) -> Option<f64> {
-    let left_time = parse_event_time_rfc(left_published_at)?;
-    let right_time = parse_event_time_rfc(right_published_at)?;
+    let left_time = parse_event_timestamp_seconds(left_published_at)?;
+    let right_time = parse_event_timestamp_seconds(right_published_at)?;
     let delta = if right_time >= left_time {
         right_time - left_time
     } else {
@@ -442,7 +434,7 @@ fn compute_group_causal_span_hours(group: &[&ScoredEvent]) -> Option<f64> {
     }
     let times: Vec<i64> = group
         .iter()
-        .filter_map(|e| parse_event_time_rfc(&e.published_at))
+        .filter_map(|e| parse_event_timestamp_seconds(&e.published_at))
         .collect();
     if times.len() < 2 {
         return None;
@@ -454,75 +446,11 @@ fn compute_group_causal_span_hours(group: &[&ScoredEvent]) -> Option<f64> {
 }
 
 fn is_within_group_time_window(event: &ScoredEvent, anchor: &ScoredEvent) -> bool {
-    let event_time = parse_event_time_rfc(&event.published_at);
-    let anchor_time = parse_event_time_rfc(&anchor.published_at);
+    let event_time = parse_event_timestamp_seconds(&event.published_at);
+    let anchor_time = parse_event_timestamp_seconds(&anchor.published_at);
     match (event_time, anchor_time) {
         (Some(et), Some(at)) => (et - at).abs() <= MAX_GROUP_TIME_DELTA_SECS,
         _ => true,
-    }
-}
-
-/// Parse event time from various formats and return unix timestamp in seconds.
-fn parse_event_time_rfc(value: &Option<String>) -> Option<i64> {
-    let value = value.as_ref()?;
-    // Try ISO format first
-    if let Ok(ts) = parse_iso_time(value) {
-        return Some(ts);
-    }
-    // Try RFC 2822 format (e.g. "Sun, 22 Mar 2026 07:00:00 GMT")
-    parse_rfc2822_time(value)
-}
-
-fn parse_iso_time(value: &str) -> Result<i64, ()> {
-    // Handle "2026-03-22T07:00:00Z" and similar
-    let value = value.replace('Z', "+00:00");
-    // Simple parser for common ISO formats
-    // We only need to handle the formats in our fixtures
-    if let Some(caps) = ISO_TIME_RE.captures(&value) {
-        let year: i64 = caps[1].parse().map_err(|_| ())?;
-        let month: i64 = caps[2].parse().map_err(|_| ())?;
-        let day: i64 = caps[3].parse().map_err(|_| ())?;
-        let hour: i64 = caps[4].parse().map_err(|_| ())?;
-        let minute: i64 = caps[5].parse().map_err(|_| ())?;
-        let second: i64 = caps[6].parse().map_err(|_| ())?;
-        // Approximate unix timestamp (sufficient for hour-level time deltas)
-        let days = days_since_epoch(year, month, day);
-        Ok(days * 86400 + hour * 3600 + minute * 60 + second)
-    } else {
-        Err(())
-    }
-}
-
-fn parse_rfc2822_time(value: &str) -> Option<i64> {
-    // Parse "Sun, 22 Mar 2026 07:00:00 GMT" format
-    let caps = RFC2822_TIME_RE.captures(value)?;
-    let day: i64 = caps[1].parse().ok()?;
-    let month_str = &caps[2];
-    let year: i64 = caps[3].parse().ok()?;
-    let hour: i64 = caps[4].parse().ok()?;
-    let minute: i64 = caps[5].parse().ok()?;
-    let second: i64 = caps[6].parse().ok()?;
-
-    let month = month_from_str(month_str)?;
-    let days = days_since_epoch(year, month, day);
-    Some(days * 86400 + hour * 3600 + minute * 60 + second)
-}
-
-fn month_from_str(s: &str) -> Option<i64> {
-    match s {
-        "Jan" => Some(1),
-        "Feb" => Some(2),
-        "Mar" => Some(3),
-        "Apr" => Some(4),
-        "May" => Some(5),
-        "Jun" => Some(6),
-        "Jul" => Some(7),
-        "Aug" => Some(8),
-        "Sep" => Some(9),
-        "Oct" => Some(10),
-        "Nov" => Some(11),
-        "Dec" => Some(12),
-        _ => None,
     }
 }
 
@@ -575,9 +503,11 @@ mod tests {
 
     #[test]
     fn parse_rfc2822_time_works() {
-        let ts = parse_rfc2822_time("Sun, 22 Mar 2026 07:00:00 GMT");
+        let ts =
+            crate::time_utils::parse_rfc2822_timestamp_seconds("Sun, 22 Mar 2026 07:00:00 GMT");
         assert!(ts.is_some());
-        let ts2 = parse_rfc2822_time("Sun, 22 Mar 2026 08:00:00 GMT");
+        let ts2 =
+            crate::time_utils::parse_rfc2822_timestamp_seconds("Sun, 22 Mar 2026 08:00:00 GMT");
         assert!(ts2.is_some());
         // Difference should be 3600 seconds (1 hour)
         assert_eq!((ts2.unwrap() - ts.unwrap()).abs(), 3600);

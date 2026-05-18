@@ -296,6 +296,36 @@ must be applied in multiple places.
 **Fix**: Extract shared helpers to `src/utils.rs` as `pub fn`. Import from `crate::utils`.
 Standardize on `.expect()` for consistency.
 
+### Over-broad shared parsers after utility extraction
+
+**Symptom**: A shared parser accepts inputs that one caller previously rejected, such as
+accepting timestamp strings with trailing junk or non-UTC offsets after centralizing time
+parsing.
+
+**Cause**: Utility extraction reuses a permissive helper for multiple call sites that had
+different boundary contracts. Prefix parsers are useful for loose feed parsing, but storage
+or delta-memory paths may require full-string validation.
+
+**Fix**: Preserve caller-specific strictness with separate public helpers when needed.
+For timestamp utilities, provide strict entry points for persisted state or alert decay,
+and cover both accepted and rejected formats in unit tests.
+
+#### Wrong
+
+```rust
+pub fn parse_delta_timestamp_seconds(value: &str) -> Option<i64> {
+    parse_iso_timestamp_seconds(value).or_else(|| value.parse().ok())
+}
+```
+
+#### Correct
+
+```rust
+pub fn parse_delta_timestamp_seconds(value: &str) -> Option<i64> {
+    parse_strict_utc_rfc3339_seconds(value).or_else(|| value.parse().ok())
+}
+```
+
 ### Hardcoding `include_str!` paths to external directories
 
 **Symptom**: Rust build breaks if an external directory is absent or reorganized.

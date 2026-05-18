@@ -347,7 +347,8 @@ mod tests {
     fn parse_llm_action_clamps_confidence_and_defaults_action() {
         let profile = sample_profile("usa", vec!["observe"]);
         let agent = Agent::from_profile(profile);
-        let action = agent.parse_llm_action(1, r#"{"confidence":2.5,"rationale":"x"}"#)
+        let action = agent
+            .parse_llm_action(1, r#"{"confidence":2.5,"rationale":"x"}"#)
             .expect("JSON with missing action_type should still parse");
 
         assert_eq!(action.action_type, "observe");

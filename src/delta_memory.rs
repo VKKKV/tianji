@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::delta::{DeltaReport, RiskDirection};
+use crate::time_utils::parse_unix_or_rfc3339_timestamp_seconds;
 use crate::utils::collect_string_array;
 use crate::TianJiError;
 
@@ -195,7 +196,8 @@ impl HotMemory {
         let Some(entry) = self.alerted_signals.get(signal_key) else {
             return false;
         };
-        let Some(last_alerted) = parse_rfc3339_utc_seconds(&entry.last_alerted) else {
+        let Some(last_alerted) = parse_unix_or_rfc3339_timestamp_seconds(&entry.last_alerted)
+        else {
             return false;
         };
         let cooldown_secs = decay.cooldown_for_count(entry.count) as i64;
@@ -208,7 +210,7 @@ impl HotMemory {
         decay: &AlertDecayModel,
         timestamp: &str,
     ) -> bool {
-        parse_rfc3339_utc_seconds(timestamp)
+        parse_unix_or_rfc3339_timestamp_seconds(timestamp)
             .map(|now_unix_secs| self.is_signal_suppressed_at(signal_key, decay, now_unix_secs))
             .unwrap_or(false)
     }
@@ -229,7 +231,8 @@ impl HotMemory {
 
     pub fn prune_stale_signals_at(&mut self, decay: &AlertDecayModel, now_unix_secs: i64) {
         self.alerted_signals.retain(|_, entry| {
-            let Some(last_alerted) = parse_rfc3339_utc_seconds(&entry.last_alerted) else {
+            let Some(last_alerted) = parse_unix_or_rfc3339_timestamp_seconds(&entry.last_alerted)
+            else {
                 return true;
             };
             let max_age_hours = if entry.count >= 2 {
@@ -242,7 +245,7 @@ impl HotMemory {
     }
 
     pub fn prune_stale_signals_at_timestamp(&mut self, decay: &AlertDecayModel, timestamp: &str) {
-        if let Some(now_unix_secs) = parse_rfc3339_utc_seconds(timestamp) {
+        if let Some(now_unix_secs) = parse_unix_or_rfc3339_timestamp_seconds(timestamp) {
             self.prune_stale_signals_at(decay, now_unix_secs);
         }
     }
@@ -387,48 +390,6 @@ pub fn compact_run_data(run: &Value) -> CompactRunData {
             })
             .collect(),
     }
-}
-
-fn parse_rfc3339_utc_seconds(timestamp: &str) -> Option<i64> {
-    if let Ok(raw) = timestamp.parse::<i64>() {
-        return Some(raw);
-    }
-    let normalized = timestamp.strip_suffix('Z').unwrap_or(timestamp);
-    let normalized = normalized.strip_suffix("+00:00").unwrap_or(normalized);
-    let (date, time) = normalized.split_once('T')?;
-    let mut date_parts = date.split('-');
-    let year = date_parts.next()?.parse::<i32>().ok()?;
-    let month = date_parts.next()?.parse::<u32>().ok()?;
-    let day = date_parts.next()?.parse::<u32>().ok()?;
-    let mut time_parts = time.split(':');
-    let hour = time_parts.next()?.parse::<u32>().ok()?;
-    let minute = time_parts.next()?.parse::<u32>().ok()?;
-    let second = time_parts.next()?.parse::<u32>().ok()?;
-    Some(datetime_to_unix_seconds(
-        year, month, day, hour, minute, second,
-    ))
-}
-
-fn datetime_to_unix_seconds(
-    year: i32,
-    month: u32,
-    day: u32,
-    hour: u32,
-    minute: u32,
-    second: u32,
-) -> i64 {
-    let days = days_from_civil(year, month, day);
-    days * 86_400 + hour as i64 * 3_600 + minute as i64 * 60 + second as i64
-}
-
-fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
-    let year = year - i32::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month = month as i32;
-    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i32 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    (era * 146_097 + doe - 719_468) as i64
 }
 
 #[cfg(test)]

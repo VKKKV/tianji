@@ -408,8 +408,7 @@ impl TerminalSession {
                         }
                     }
                     Event::Resize(cols, rows) => {
-                        self.terminal
-                            .resize(Rect::new(0, 0, cols, rows))?;
+                        self.terminal.resize(Rect::new(0, 0, cols, rows))?;
                     }
                     _ => {}
                 }

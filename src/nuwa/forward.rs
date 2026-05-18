@@ -531,10 +531,12 @@ pub async fn run_interactive_forward(
         // Pruning check
         if pruning_interval > 0 && tick.is_multiple_of(pruning_interval) {
             let (resp_tx, resp_rx) = oneshot::channel();
-            let _ = tx.send(SimUpdate::PruneRequest {
-                state: sim_state,
-                response: resp_tx,
-            }).await;
+            let _ = tx
+                .send(SimUpdate::PruneRequest {
+                    state: sim_state,
+                    response: resp_tx,
+                })
+                .await;
 
             if let Ok(PruningDecision::Prune(indices)) = resp_rx.await {
                 branches.retain(|b| !indices.contains(&b.index));

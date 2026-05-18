@@ -178,8 +178,7 @@ pub struct TuiState {
     pub glyphs: &'static GlyphSet,
     pub prune_mode: bool,
     pub prune_selected: Vec<usize>,
-    pub pending_sim_rx:
-        Option<tokio::sync::mpsc::Receiver<crate::nuwa::outcome::SimUpdate>>,
+    pub pending_sim_rx: Option<tokio::sync::mpsc::Receiver<crate::nuwa::outcome::SimUpdate>>,
     pub pending_prune_tx: Option<tokio::sync::oneshot::Sender<crate::nuwa::PruningDecision>>,
 }
 

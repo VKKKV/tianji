@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::LazyLock;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::fetch::{derive_canonical_content_hash, derive_canonical_entry_identity_hash};
 use crate::models::{InterventionCandidate, NormalizedEvent, RawItem, RunArtifact, ScoredEvent};
-use crate::utils::{days_since_epoch, round2};
+use crate::time_utils::parse_iso_rfc3339_timestamp_seconds;
+use crate::utils::round2;
 use crate::worldline::baseline::Baseline;
 use crate::worldline::types::Worldline;
 use crate::TianJiError;
@@ -15,11 +15,6 @@ pub const DEFAULT_RUN_SUMMARY_EVENT_LIMIT: usize = 200;
 pub const MAX_RUN_SUMMARY_EVENT_LIMIT: usize = 500;
 pub const DEFAULT_RUN_SUMMARY_GROUP_LIMIT: usize = 200;
 pub const MAX_RUN_SUMMARY_GROUP_LIMIT: usize = 500;
-
-static HISTORY_TIMESTAMP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})")
-        .expect("valid history timestamp regex")
-});
 
 const RUN_LIST_FILTER_PAGE_SIZE: usize = 100;
 
@@ -1539,20 +1534,8 @@ fn is_numeric_at_or_below(value: &serde_json::Value, threshold: f64) -> bool {
     value.as_f64().is_some_and(|v| v <= threshold)
 }
 
-/// Parse ISO timestamp to approximate unix seconds for comparison.
 fn parse_history_timestamp(value: Option<&str>) -> Option<i64> {
-    let value = value?;
-    let value = value.replace('Z', "+00:00");
-    // Simple parser for ISO timestamp prefix
-    let caps = HISTORY_TIMESTAMP_RE.captures(&value)?;
-    let year: i64 = caps[1].parse().ok()?;
-    let month: i64 = caps[2].parse().ok()?;
-    let day: i64 = caps[3].parse().ok()?;
-    let hour: i64 = caps[4].parse().ok()?;
-    let minute: i64 = caps[5].parse().ok()?;
-    let second: i64 = caps[6].parse().ok()?;
-    let days = days_since_epoch(year, month, day);
-    Some(days * 86400 + hour * 3600 + minute * 60 + second)
+    parse_iso_rfc3339_timestamp_seconds(value?)
 }
 
 fn is_history_timestamp_on_or_after(value: &serde_json::Value, threshold: &i64) -> bool {

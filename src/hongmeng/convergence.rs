@@ -89,12 +89,10 @@ pub fn check_convergence(
                 let fields_stable = if prev_fields.is_empty() {
                     true // first tick with delta data, accept
                 } else {
-                    prev_fields
-                        .iter()
-                        .all(|(key, prev_val)| {
-                            let curr = hongmeng.worldline.fields.get(key).copied().unwrap_or(0.0);
-                            (curr - prev_val).abs() < config.convergence_epsilon
-                        })
+                    prev_fields.iter().all(|(key, prev_val)| {
+                        let curr = hongmeng.worldline.fields.get(key).copied().unwrap_or(0.0);
+                        (curr - prev_val).abs() < config.convergence_epsilon
+                    })
                 };
                 if fields_stable {
                     return Some(ConvergenceReason::FieldStabilized(

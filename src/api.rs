@@ -184,7 +184,8 @@ async fn get_runs(
     };
 
     let filters = crate::storage::RunListFilters::default();
-    let items = crate::list_runs(&state.sqlite_path, limit, &filters).map_err(tianji_error_to_api)?;
+    let items =
+        crate::list_runs(&state.sqlite_path, limit, &filters).map_err(tianji_error_to_api)?;
 
     let data = serde_json::json!({
         "resource": "/api/v1/runs",
@@ -227,7 +228,8 @@ async fn get_run_by_id(
 }
 
 async fn get_latest_run(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
-    let latest_run_id = crate::get_latest_run_id(&state.sqlite_path).map_err(tianji_error_to_api)?;
+    let latest_run_id =
+        crate::get_latest_run_id(&state.sqlite_path).map_err(tianji_error_to_api)?;
 
     let run_id = match latest_run_id {
         Some(id) => id,
@@ -346,9 +348,7 @@ async fn get_compare(
     }
 }
 
-async fn get_latest_delta(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ApiError> {
+async fn get_latest_delta(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
     let sqlite_path = &state.sqlite_path;
     let memory = crate::HotMemory::load(&crate::delta_memory_path(sqlite_path));
     let Some(run) = memory.runs.front() else {

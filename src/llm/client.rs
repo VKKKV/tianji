@@ -120,9 +120,9 @@ impl LlmClient {
         let json: serde_json::Value = serde_json::from_str(&text)
             .map_err(|e| LlmError::ChatFailed(format!("failed to parse response: {e}")))?;
 
-        let choices = json["choices"].as_array().ok_or_else(|| {
-            LlmError::ChatFailed("no choices in response".into())
-        })?;
+        let choices = json["choices"]
+            .as_array()
+            .ok_or_else(|| LlmError::ChatFailed("no choices in response".into()))?;
         let content = choices
             .first()
             .and_then(|c| c["message"]["content"].as_str())
