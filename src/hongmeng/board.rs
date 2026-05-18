@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::worldline::types::ActorId;
 
@@ -22,9 +22,6 @@ pub struct BoardMessage {
 }
 
 /// Strongly typed private stick value.
-///
-/// The legacy `value` JSON field remains on `StickEntry` for backward-compatible
-/// serialization while consumers migrate to this type.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum StickValue {
@@ -43,16 +40,65 @@ impl StickValue {
             Self::List(values) => serde_json::json!(values),
         }
     }
+
+    pub fn from_json_lossy(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::String(value) => Self::Text(value),
+            serde_json::Value::Number(value) => value
+                .as_f64()
+                .map(Self::Number)
+                .unwrap_or_else(|| Self::Text(value.to_string())),
+            serde_json::Value::Bool(value) => Self::Flag(value),
+            serde_json::Value::Array(values) => Self::List(
+                values
+                    .into_iter()
+                    .map(|value| match value {
+                        serde_json::Value::String(text) => text,
+                        other => other.to_string(),
+                    })
+                    .collect(),
+            ),
+            serde_json::Value::Null => Self::Text("null".to_string()),
+            serde_json::Value::Object(value) => {
+                Self::Text(serde_json::Value::Object(value).to_string())
+            }
+        }
+    }
 }
 
 /// A private stick entry — per-actor scratch space not visible to other agents.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StickEntry {
     pub tick: u64,
     pub key: String,
-    pub value: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub typed_value: Option<StickValue>,
+    pub typed_value: StickValue,
+}
+
+impl<'de> Deserialize<'de> for StickEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct StickEntryCompat {
+            tick: u64,
+            key: String,
+            typed_value: Option<StickValue>,
+            value: Option<serde_json::Value>,
+        }
+
+        let compat = StickEntryCompat::deserialize(deserializer)?;
+        let typed_value = compat
+            .typed_value
+            .or_else(|| compat.value.map(StickValue::from_json_lossy))
+            .unwrap_or_else(|| StickValue::Text(String::new()));
+
+        Ok(Self {
+            tick: compat.tick,
+            key: compat.key,
+            typed_value,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -92,8 +138,7 @@ mod tests {
         let entry = StickEntry {
             tick: 3,
             key: "threat_level".to_string(),
-            value: serde_json::json!({"level": "high", "confidence": 0.8}),
-            typed_value: None,
+            typed_value: StickValue::Text("high".to_string()),
         };
 
         assert_eq!(entry.tick, 3);
@@ -119,13 +164,37 @@ mod tests {
         let entry = StickEntry {
             tick: 5,
             key: "negotiation_stance".to_string(),
-            value: serde_json::json!("cautious"),
-            typed_value: Some(StickValue::Text("cautious".to_string())),
+            typed_value: StickValue::Text("cautious".to_string()),
         };
 
         let json = serde_json::to_string(&entry).unwrap();
         let deserialized: StickEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, entry);
+    }
+
+    #[test]
+    fn stick_entry_deserializes_legacy_json_value() {
+        let json = serde_json::json!({
+            "tick": 5,
+            "key": "negotiation_stance",
+            "value": "cautious"
+        });
+
+        let deserialized: StickEntry = serde_json::from_value(json).unwrap();
+
+        assert_eq!(deserialized.tick, 5);
+        assert_eq!(deserialized.key, "negotiation_stance");
+        assert_eq!(
+            deserialized.typed_value,
+            StickValue::Text("cautious".to_string())
+        );
+    }
+
+    #[test]
+    fn stick_value_representable_json_number_becomes_number() {
+        let json = serde_json::json!(1.25);
+
+        assert_eq!(StickValue::from_json_lossy(json), StickValue::Number(1.25));
     }
 
     #[test]

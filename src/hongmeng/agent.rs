@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 
 use crate::llm::client::{ChatMessage, LlmClient};
@@ -51,15 +51,98 @@ struct LlmActionEnvelope {
 }
 
 /// An agent in the Hongmeng simulation — wraps an ActorProfile with runtime state.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Agent {
     pub actor_id: ActorId,
     pub profile: ActorProfile,
     pub status: AgentStatus,
     pub action_history: Vec<AgentAction>,
-    pub private_state: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub private_state_typed: Option<AgentPrivateState>,
+    pub private_state_typed: AgentPrivateState,
+}
+
+impl<'de> Deserialize<'de> for Agent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct AgentCompat {
+            actor_id: ActorId,
+            profile: ActorProfile,
+            status: AgentStatus,
+            action_history: Vec<AgentAction>,
+            #[serde(default)]
+            private_state_typed: Option<AgentPrivateState>,
+            #[serde(default)]
+            private_state: Option<serde_json::Value>,
+        }
+
+        let compat = AgentCompat::deserialize(deserializer)?;
+        let private_state_typed = compat
+            .private_state_typed
+            .or_else(|| {
+                compat
+                    .private_state
+                    .map(agent_private_state_from_json_lossy)
+            })
+            .unwrap_or_default();
+
+        Ok(Self {
+            actor_id: compat.actor_id,
+            profile: compat.profile,
+            status: compat.status,
+            action_history: compat.action_history,
+            private_state_typed,
+        })
+    }
+}
+
+fn agent_private_state_from_json_lossy(value: serde_json::Value) -> AgentPrivateState {
+    let Some(object) = value.as_object() else {
+        return AgentPrivateState::default();
+    };
+
+    let objectives = object
+        .get("objectives")
+        .and_then(|value| value.as_array())
+        .filter(|values| values.iter().all(|value| value.as_str().is_some()))
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let memory = object
+        .get("memory")
+        .and_then(|value| value.as_object())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|(key, value)| {
+                    value.as_str().map(|text| (key.clone(), text.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let numeric_state = object
+        .get("numeric_state")
+        .and_then(|value| value.as_object())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|(key, value)| value.as_f64().map(|number| (key.clone(), number)))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    AgentPrivateState {
+        objectives,
+        memory,
+        numeric_state,
+    }
 }
 
 impl Agent {
@@ -72,8 +155,7 @@ impl Agent {
             profile,
             status: AgentStatus::Idle,
             action_history: Vec::new(),
-            private_state: serde_json::Value::Null,
-            private_state_typed: None,
+            private_state_typed: AgentPrivateState::default(),
         }
     }
 
@@ -89,9 +171,7 @@ impl Agent {
 
     /// Set typed private state and keep the legacy JSON field in sync.
     pub fn set_private_state_typed(&mut self, private_state_typed: AgentPrivateState) {
-        self.private_state = serde_json::to_value(&private_state_typed)
-            .expect("AgentPrivateState serialization should not fail");
-        self.private_state_typed = Some(private_state_typed);
+        self.private_state_typed = private_state_typed;
     }
 
     /// Pick a stub action from the profile's behavior_patterns.
@@ -187,24 +267,14 @@ impl Agent {
             .stick
             .iter()
             .map(|entry| {
-                let value = entry
-                    .typed_value
-                    .as_ref()
-                    .map(|typed| typed.to_json_value())
-                    .unwrap_or_else(|| entry.value.clone());
+                let value = entry.typed_value.to_json_value();
                 json!({"tick": entry.tick, "key": entry.key, "value": value})
             })
             .collect();
 
-        let private_state = self
-            .private_state_typed
-            .as_ref()
-            .map(serde_json::to_value)
-            .transpose()
-            .map_err(|error| {
-                LlmError::ChatFailed(format!("private state serialization failed: {error}"))
-            })?
-            .unwrap_or_else(|| self.private_state.clone());
+        let private_state = serde_json::to_value(&self.private_state_typed).map_err(|error| {
+            LlmError::ChatFailed(format!("private state serialization failed: {error}"))
+        })?;
 
         let fields: Vec<serde_json::Value> = context
             .fields
@@ -336,8 +406,7 @@ mod tests {
         assert_eq!(agent.profile, profile);
         assert_eq!(agent.status, AgentStatus::Idle);
         assert!(agent.action_history.is_empty());
-        assert!(agent.private_state.is_null());
-        assert!(agent.private_state_typed.is_none());
+        assert_eq!(agent.private_state_typed, AgentPrivateState::default());
     }
 
     #[test]
@@ -353,10 +422,64 @@ mod tests {
 
         let agent = Agent::from_profile_with_private_state(profile, typed.clone());
 
-        assert_eq!(agent.private_state_typed, Some(typed));
+        assert_eq!(agent.private_state_typed, typed);
+    }
+
+    #[test]
+    fn agent_deserializes_legacy_private_state_json() {
+        let profile = sample_profile("china", vec!["observe"]);
+        let json = serde_json::json!({
+            "actor_id": "china",
+            "profile": profile,
+            "status": "idle",
+            "action_history": [],
+            "private_state": {
+                "objectives": ["de-escalate"],
+                "memory": {"last_signal": "cautious"},
+                "numeric_state": {"risk": 0.7}
+            }
+        });
+
+        let agent: Agent = serde_json::from_value(json).expect("legacy agent JSON");
+
+        assert_eq!(agent.private_state_typed.objectives, vec!["de-escalate"]);
         assert_eq!(
-            agent.private_state["objectives"],
-            serde_json::json!(["de-escalate"])
+            agent.private_state_typed.memory.get("last_signal"),
+            Some(&"cautious".to_string())
+        );
+        assert_eq!(
+            agent.private_state_typed.numeric_state.get("risk"),
+            Some(&0.7)
+        );
+    }
+
+    #[test]
+    fn agent_deserializes_malformed_legacy_private_state_lossily() {
+        let profile = sample_profile("china", vec!["observe"]);
+        let json = serde_json::json!({
+            "actor_id": "china",
+            "profile": profile,
+            "status": "idle",
+            "action_history": [],
+            "private_state": {
+                "objectives": ["keep-talks-open", 42],
+                "memory": {"last_signal": "cautious", "bad": true},
+                "numeric_state": {"risk": 0.7, "bad": "high"}
+            }
+        });
+
+        let agent: Agent = serde_json::from_value(json).expect("lossy legacy agent JSON");
+
+        assert!(agent.private_state_typed.objectives.is_empty());
+        assert_eq!(agent.private_state_typed.memory.len(), 1);
+        assert_eq!(
+            agent.private_state_typed.memory.get("last_signal"),
+            Some(&"cautious".to_string())
+        );
+        assert_eq!(agent.private_state_typed.numeric_state.len(), 1);
+        assert_eq!(
+            agent.private_state_typed.numeric_state.get("risk"),
+            Some(&0.7)
         );
     }
 

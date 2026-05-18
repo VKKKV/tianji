@@ -113,8 +113,7 @@ impl Hongmeng {
         stick.push(StickEntry {
             tick: self.tick,
             key,
-            value: value.to_json_value(),
-            typed_value: Some(value),
+            typed_value: value,
         });
     }
 
@@ -124,8 +123,7 @@ impl Hongmeng {
         stick.push(StickEntry {
             tick: self.tick,
             key,
-            value,
-            typed_value: None,
+            typed_value: StickValue::from_json_lossy(value),
         });
     }
 
@@ -416,11 +414,9 @@ mod tests {
         assert_eq!(china_stick.len(), 1);
         assert_eq!(china_stick[0].key, "threat_assessment");
 
-        // Verify values are different (isolation)
-        assert_ne!(usa_stick[0].value, china_stick[0].value);
         assert_eq!(
             usa_stick[0].typed_value,
-            Some(StickValue::Text("elevated".to_string()))
+            StickValue::Text("elevated".to_string())
         );
 
         // Agent without stick entries returns empty
