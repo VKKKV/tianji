@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -187,13 +186,6 @@ impl HotMemory {
         }
     }
 
-    #[deprecated(
-        note = "use `is_signal_suppressed_at` with a persisted timestamp for deterministic behavior"
-    )]
-    pub fn is_signal_suppressed(&self, signal_key: &str, decay: &AlertDecayModel) -> bool {
-        self.is_signal_suppressed_at(signal_key, decay, unix_now())
-    }
-
     pub fn is_signal_suppressed_at(
         &self,
         signal_key: &str,
@@ -221,13 +213,6 @@ impl HotMemory {
             .unwrap_or(false)
     }
 
-    #[deprecated(
-        note = "use `mark_alerted_at` with a persisted timestamp for deterministic behavior"
-    )]
-    pub fn mark_alerted(&mut self, signal_key: &str) {
-        self.mark_alerted_at(signal_key, &unix_now().to_string());
-    }
-
     pub fn mark_alerted_at(&mut self, signal_key: &str, timestamp: &str) {
         self.alerted_signals
             .entry(signal_key.to_string())
@@ -240,13 +225,6 @@ impl HotMemory {
                 last_alerted: timestamp.to_string(),
                 count: 1,
             });
-    }
-
-    #[deprecated(
-        note = "use `prune_stale_signals_at` with a persisted timestamp for deterministic behavior"
-    )]
-    pub fn prune_stale_signals(&mut self, decay: &AlertDecayModel) {
-        self.prune_stale_signals_at(decay, unix_now());
     }
 
     pub fn prune_stale_signals_at(&mut self, decay: &AlertDecayModel, now_unix_secs: i64) {
@@ -409,13 +387,6 @@ pub fn compact_run_data(run: &Value) -> CompactRunData {
             })
             .collect(),
     }
-}
-
-fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 fn parse_rfc3339_utc_seconds(timestamp: &str) -> Option<i64> {
