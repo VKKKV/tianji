@@ -7,7 +7,8 @@ It defines the four subsystems (Cangjie, Fuxi, Hongmeng, Nuwa), the project stru
 the dependency list, the TUI design spec (§9), and the phased build order.
 
 **Python oracle retired in Phase 6 (v0.2.0).** All Rust parity gates have passed.
-The project is now a pure Rust binary.
+The project is now a pure Rust binary. Current verified snapshot: 55 Rust source files,
+21,722 Rust source lines, 23 manifest dependencies, and 321 tests passing.
 
 ## Migration Alignment
 
@@ -18,11 +19,14 @@ The project is now a pure Rust binary.
 | 1 | Worldline core + pipeline (Cangjie/Fuxi) | Milestone 1A+1B complete |
 | 2 | Storage + History | Milestone 2 complete |
 | 3 | Local Runtime (daemon + API + webui) | Milestone 3 complete |
-| - | Hongmeng orchestration layer | Deferred |
-| 3 | Nuwa simulation sandbox | Deferred |
+| 3.5 | Crucix Delta Engine | Complete |
 | 4 | TUI (ratatui + Kanagawa Dark) | Milestone 4 complete |
-| 5 | Daemon + Web UI | Absorbed by Milestone 3 |
+| 5 | Hongmeng orchestration + Nuwa simulation | Complete |
 | 6 | Cleanup + docs (Python retirement) | Phase 6 complete |
+| A | Immediate cleanup hardening | Complete |
+| B | Code quality hardening | Complete |
+| C | Architecture cleanup | Complete |
+| D1 | Storage history integration coverage | Complete |
 
 ### Milestone 1A — Feed + Normalization Parity
 
@@ -42,7 +46,7 @@ feed parsing, canonical hashing, and normalized event emission.
 - Event grouping, causal/evidence summaries ✅
 - Backtrack intervention candidates ✅
 - Full `RunArtifact` field-for-field parity verified ✅
-- 18 Rust tests pass, `cargo fmt --check` clean, `cargo clippy` clean ✅
+- 18 Rust tests passed at milestone completion; current full-suite baseline is 321 tests ✅
 
 ### Milestone 2 — Storage + History Parity
 
@@ -55,7 +59,7 @@ feed parsing, canonical hashing, and normalized event emission.
 - `history-show`: single-run detail with 8-key vocabulary, scored-event/intervention/event-group projection lenses ✅
 - `history-compare`: pair comparison with 5-key vocabulary, diff computation, presets (--latest-pair, --against-latest, --against-previous) ✅
 - CLI: clap subcommands (`run`, `history`, `history-show`, `history-compare`), `--sqlite-path` optional for `run` ✅
-- 33 tests pass, `cargo fmt --check` clean, `cargo clippy -- -D warnings` clean ✅
+- 33 tests passed at milestone completion; current full-suite baseline is 321 tests ✅
 
 #### Storage Read-Model Paging Contract
 
@@ -91,7 +95,7 @@ Tests must cover a filtered match that appears beyond the first SQL page.
 - Web UI: compile-time embedded static files, reverse proxy, /queue-run with 2s retry ✅
 - CLI: `daemon start/stop/status/run/serve`, `webui`, PID file management ✅
 - Loopback enforcement, schedule deferred (D5) ✅
-- 52 tests pass, `cargo fmt --check` clean, `cargo clippy -- -D warnings` clean ✅
+- 52 tests passed at milestone completion; current full-suite baseline is 321 tests ✅
 
 ### Milestone 3.5 — Cross-Run Delta Engine
 
@@ -305,6 +309,58 @@ After TUI is stable.
 - Delete `.venv/`, `.pytest_cache/`, `__pycache__/` ✅
 - Update README ✅
 - Shell completions (clap_complete) ✅
+
+## Post-v0.2.0 Hardening Progress
+
+Root `plan.md` remains the authority for the current roadmap. As of 2026-05-18:
+
+### Phase A — Immediate Cleanup
+
+**Complete.** Input bounds and cleanup guardrails are in place.
+
+- `MAX_RAW_ITEMS` limits feed parsing to 500 raw items ✅
+- `MAX_SCORED_EVENTS` limits pipeline/persistence output to 500 scored events ✅
+- Deprecated delta-memory wall-clock helpers removed from public use ✅
+- `fetch` and `normalize` share `utils::clean_text` trim/collapse semantics ✅
+- `TianJiError::DataIntegrity` represents integrity failures directly ✅
+
+### Phase B — Code Quality
+
+**Complete.** Code-quality cleanup is landed.
+
+- Shared `time_utils` module for ISO/RFC timestamp parsing and day math ✅
+- Async TUI detail/compare data loading with loading indicators ✅
+- Structured logging through `tracing` / `RUST_LOG` ✅
+- Configurable `ScoreParams` with default backward-compatible scoring ✅
+
+### Phase C — Architecture
+
+**Complete.** Architecture cleanup is landed.
+
+- C1: Hongmeng agent private state and board stick values use strong types while keeping JSON compatibility at boundaries ✅
+- C2: TUI view-state dispatch preserves per-view state and reduces monolithic state coupling ✅
+- C3: Nuwa forward loop shares `tick_simulation` core logic ✅
+- C4: `sandbox::fork_worldline` and `WorldlineStore` unify worldline branching; Nuwa signatures no longer depend on `rusqlite::Connection` ✅
+
+### Phase D — Production & Features
+
+**In progress.** D1 is complete; D2+ remain planned.
+
+- D1: storage history integration coverage for `persist_run → get_run_summary → compare_runs` ✅
+- D2: ActorProfile YAML validation ⏳
+- D3: SQLite connection pool for long-lived API/daemon paths ⏳
+- D4: Ollama `/api/chat` structured-message migration ⏳
+- D5: LLM concurrency limiting via `tokio::sync::Semaphore` ⏳
+- D6: explicit worldline `causal_graph` serialization contract ⏳
+- D7: alert dispatch to external channels ⏳
+- D8: fast/slow feed tier separation ⏳
+
+### Current Verification Baseline
+
+- `cargo test --quiet`: 321 passed / 0 failed ✅
+- `cargo fmt --check`: required before code commits
+- `cargo clippy -- -D warnings`: required before code commits
+- Documentation-only plan updates must at minimum pass `cargo test --quiet` and `git diff --check`.
 
 ## Dependency Guidance
 

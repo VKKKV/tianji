@@ -1,9 +1,9 @@
 # TianJi (天机) — Development Plan v5
 
-> Branch: `main` | Updated: 2026-05-17
+> Branch: `main` | Updated: 2026-05-18
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: ALL PHASES COMPLETE. 22 bugs fixed post-review. Phase B code-quality improvements ongoing.
-> Tests: 310 pass / 0 fail
+> Current: Core product complete. Phase A/B/C hardening complete; Phase D1 coverage complete. Next: selective production features.
+> Tests: 321 pass / 0 fail
 
 ---
 
@@ -39,29 +39,64 @@ TUI ████████████████████ ✅ 4 views + s
 Bugfix ████████████████████ ✅ 22 bugs (15C+7H), 4 commits, 2026-05-17
 ```
 
-  源码: ~20K 行 Rust / 52 源文件
-  测试: 310 pass / 0 fail
+  源码: 21,722 行 Rust / 55 源文件
+  测试: 321 pass / 0 fail
   构建: cargo build + clippy -D warnings zero
-  依赖: 18 crates
+  依赖: 23 manifest dependencies
   Python: 已退役
+
+### Phase A — Immediate Cleanup (COMPLETE)
+
+**A1. Input size limits** ✅
+- `MAX_RAW_ITEMS` and `MAX_SCORED_EVENTS` cap oversized feeds/pipeline output.
+
+**A2. Remove deprecated delta_memory functions** ✅
+- Timestamp-injected `_at` variants are the only public alert suppression/marking path.
+
+**A3. Unify clean_text** ✅
+- `fetch` and `normalize` share `utils::clean_text` with trim/collapse semantics.
+
+**A4. TianJiError::DataIntegrity variant** ✅
+- Storage/worldline integrity failures now use a first-class error variant.
 
 ### Phase B — Code Quality (COMPLETE)
 
 **B1. Extract time_utils module** ✅
-- Consolidated ISO parsing, days_since_epoch into src/time_utils.rs
+- Consolidated ISO/RFC timestamp parsing and days-since-epoch helpers into `src/time_utils.rs`.
 
 **B2. Async TUI data loading** ✅
-- Background threads for detail/compare SQLite queries
-- mpsc channel polling in event loop, "loading..." indicator in title bar
+- Background threads for detail/compare SQLite queries.
+- mpsc channel polling in event loop, "loading..." indicator in title bar.
 
 **B3. Structured logging** ✅
-- All eprintln! calls replaced with tracing::{error,warn}
-- tracing_subscriber::fmt with RUST_LOG env-var support
+- All `eprintln!` calls replaced with `tracing::{error,warn}`.
+- `tracing_subscriber::fmt` with `RUST_LOG` env-var support.
 
 **B4. Scoring parameters configurable** ✅
-- NEW src/scoring_params.rs: ScoreParams struct with Default + YAML deserialization
-- All scoring functions threaded with &ScoreParams
-- Backward-compat score_events() uses default params
+- `src/scoring_params.rs`: `ScoreParams` with `Default` + YAML deserialization.
+- All scoring functions threaded with `&ScoreParams`.
+- Backward-compat `score_events()` uses default params.
+
+### Phase C — Architecture (COMPLETE)
+
+**C1. H8: serde_json::Value → strong types** ✅
+- Hongmeng agent private state and board stick values use typed Rust structures.
+- Legacy JSON compatibility remains at API/prompt boundaries.
+
+**C2. TUI view state decoupling** ✅
+- View state preserved through dispatch; TUI state no longer relies on one monolithic mode bag.
+
+**C3. forward.rs deduplication** ✅
+- Shared Nuwa forward tick logic extracted into `tick_simulation`.
+
+**C4. fork_worldline unification** ✅
+- Worldline branching flows through `sandbox::fork_worldline` and `WorldlineStore`.
+- Failure contract documented; SQLite coupling removed from Nuwa simulation signatures.
+
+### Phase D — Production & Features (IN PROGRESS)
+
+**D1. Integration test coverage** ✅
+- Added end-to-end storage history coverage for `persist_run → get_run_summary → compare_runs`.
 
 ---
 
@@ -104,95 +139,58 @@ RunArtifact JSON ─────────────────────
 
 ## 3. Next Development Plan (v5)
 
-After the bugfix blitz (22 bugs, 4 commits), the project needs polish, hardening,
-and selective feature work. Ordered by priority.
+The core Rust engine is complete and the post-review A/B/C hardening pass is
+finished. Development now moves from correctness/architecture cleanup to
+selective production features. Ordered by priority.
 
-### Phase A — Immediate Cleanup (low risk, high impact)
+### Completed hardening
 
-**A1. Input size limits** (H9 from review)
-Files: `src/fetch.rs`, `src/lib.rs`
-- `const MAX_RAW_ITEMS: usize = 500;` — truncate in parse_feed
-- `const MAX_SCORED_EVENTS: usize = 500;` — enforce in pipeline
+- Phase A: input limits, delta-memory cleanup, shared text normalization,
+  first-class data-integrity errors.
+- Phase B: shared time utilities, async TUI data loading, structured logging,
+  configurable scoring parameters.
+- Phase C: typed Hongmeng state, TUI view-state decoupling, Nuwa tick
+  deduplication, unified worldline forking.
+- Phase D1: storage history integration coverage.
 
-**A2. Remove deprecated delta_memory functions**
-Files: `src/delta_memory.rs`
-- Delete `is_signal_suppressed`, `mark_alerted`, `prune_stale_signals`
-- All callers already use `_at` timestamp-persisted variants
-
-**A3. Unify clean_text**
-Files: `src/fetch.rs:161`, `src/normalize.rs:150`, `src/utils.rs`
-- Two implementations with different whitespace semantics
-- Merge into single `utils::clean_text` with `trim()` behavior
-
-**A4. TianJiError::DataIntegrity variant**
-Files: `src/lib.rs`, `src/storage.rs`
-- Replace `rusqlite::Error::InvalidParameterName("missing canonical...")` hack
-- Add proper error variant for data integrity failures
-
-### Phase B — Code Quality (medium risk)
-
-**B1. Extract time_utils module**
-Files: NEW `src/time_utils.rs`, modify 4 files
-- Consolidate ISO parsing (3 implementations), days_since_epoch (2 implementations)
-- Standardize on Howard Hinnant's `days_from_civil` algorithm
-
-**B2. C7: Async TUI data loading**
-Files: `src/tui/mod.rs`, `src/tui/state.rs`
-- Wrap SQLite queries in `tokio::task::spawn_blocking`
-- Poll JoinHandle in main loop, display "Loading..." placeholder
-- Only applies to detail/compare views (history already in-memory)
-
-**B3. Structured logging**
-Files: `src/daemon.rs`, `src/api.rs`, `src/webui.rs`, `src/main.rs`
-- Replace `eprintln!` with `tracing` (already in deps)
-- Spans for daemon's 3 components; `RUST_LOG` env var
-
-**B4. Scoring parameters configurable**
-Files: `src/scoring.rs`, NEW `src/scoring_params.rs`
-- Extract 29 constants into `ScoreParams` struct with Default
-- YAML deserialization for per-environment tuning
-
-### Phase C — Architecture (medium-high risk)
-
-**C1. H8: serde_json::Value → strong types (incremental)**
-Files: `src/models.rs`, `src/lib.rs`, `src/delta.rs`, `src/delta_memory.rs`, `src/storage.rs`
-- Phase 1: Add typed fields alongside Value (backward compat)
-- Phase 2: Migrate delta computation to typed
-- Phase 3: Remove Value fields
-
-**C2. TUI view state decoupling**
-Files: `src/tui/state.rs`, `src/tui/mod.rs`
-- Replace monolithic `TuiState` with `enum ViewState`
-- Move search/prune into separate modules
-- Simplify `handle_key` via view dispatch
-
-**C3. forward.rs deduplication**
-Files: `src/nuwa/forward.rs`
-- `run_forward` and `run_interactive_forward` share ~80% of loop
-- Extract `tick_simulation` core function
-
-**C4. fork_worldline unification**
-Files: `src/nuwa/sandbox.rs`, `src/nuwa/forward.rs`, `src/nuwa/backward.rs`
-- All worldline branching through `sandbox::fork_worldline`
-- Decouple from `rusqlite::Connection` via `WorldlineStore` trait
-
-### Phase D — Production & Features (lower priority)
-
-**D1. Integration test coverage**
-- persist_run → get_run_summary → compare_runs full flow
-- In-memory SQLite, parallel to existing worldline persistence tests
+### Phase D — Remaining Production & Features
 
 **D2. ActorProfile YAML validation**
-- `validate()` method: salience ∈ [0,1], Capabilities ∈ [0,1]
-- Call in `ProfileRegistry::load_yaml_files_from_dir`
+Files: `src/profile/types.rs`, `src/profile/registry.rs`
+- `validate()` method: salience ∈ [0,1], capabilities ∈ [0,1]
+- Reject malformed profiles at `ProfileRegistry::load_from_dir`
+- Tests for good/base/bad YAML profiles
 
-**D3. SQLite connection pool** — `r2d2-sqlite` replacing per-request `Connection::open`
+**D3. SQLite connection pool**
+Files: `src/api.rs`, `src/daemon.rs`, `src/storage.rs`
+- Replace per-request `Connection::open` in API paths with a small pool
+- Keep CLI one-shot storage simple; pool only long-lived runtime paths
+- Preserve SQLite foreign-key and read-limit contracts
 
-**D4. Ollama /api/chat migration** — structured messages instead of plain-text /api/generate
+**D4. Ollama /api/chat migration**
+Files: `src/llm/*`, `src/hongmeng/agent.rs`
+- Prefer structured chat messages over plain-text `/api/generate`
+- Preserve provider registry compatibility and deterministic test clients
 
-**D5. LLM concurrency limiting** — implement `max_concurrency` with `tokio::sync::Semaphore`
+**D5. LLM concurrency limiting**
+Files: `src/llm/*`, `src/hongmeng/*`, `src/nuwa/*`
+- Implement `max_concurrency` with `tokio::sync::Semaphore`
+- Tests must prove bounded concurrent calls without serializing deterministic paths
 
-**D6. Worldline causal_graph serialization** — custom serde for DiGraph
+**D6. Worldline causal_graph serialization**
+Files: `src/worldline/types.rs`, `src/nuwa/*`
+- Add explicit serde contract for `petgraph::DiGraph`
+- Verify snapshot round-trip and compatibility with stored worldlines
+
+**D7. Alert dispatch to external channels**
+Files: NEW `src/alert_dispatch.rs`, config docs
+- Map `AlertTier` to Telegram/Discord/webhook delivery policies
+- Include chunking, dry-run mode, and no-secret logging rules
+
+**D8. Fast/slow feed tier separation**
+Files: `src/daemon.rs`, config docs
+- Extend daemon scheduling config with fast/slow intervals
+- Group watched feeds by urgency to reduce API/LLM cost
 
 ---
 
@@ -298,7 +296,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 296)
+- `cargo test` all green (currently 321)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
