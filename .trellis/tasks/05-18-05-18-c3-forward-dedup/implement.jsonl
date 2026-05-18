@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "plan.md", "reason": "Authoritative architecture and current Phase C development plan."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend pre-development checklist and spec index."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Rust quality bar, forbidden patterns, and verification expectations."}
+{"file": ".trellis/spec/backend/phase-c3-forward-dedup.md", "reason": "Task-specific design for extracting tick_simulation from forward.rs."}
+{"file": ".trellis/spec/backend/phase-2.5-nuwa-sandbox.md", "reason": "Nuwa simulation sandbox context for forward simulation behavior."}
