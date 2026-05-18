@@ -6,9 +6,8 @@ use sha2::{Digest, Sha256};
 
 use crate::fetch::{derive_canonical_content_hash, derive_canonical_entry_identity_hash};
 use crate::models::{NormalizedEvent, RawItem};
+use crate::utils::clean_text;
 
-static WHITESPACE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\s+").expect("valid whitespace regex"));
 static TOKEN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z][a-zA-Z0-9_-]+").expect("valid token regex"));
 /// Pre-compiled actor pattern regexes. Use this (not the old string-typed constant).
@@ -145,10 +144,6 @@ pub fn normalize_item(item: &RawItem) -> NormalizedEvent {
         entry_identity_hash,
         content_hash,
     }
-}
-
-pub fn clean_text(text: &str) -> String {
-    WHITESPACE_RE.replace_all(text, " ").trim().to_string()
 }
 
 pub fn extract_keywords(text: &str, limit: usize) -> Vec<String> {

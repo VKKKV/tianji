@@ -3,6 +3,7 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use crate::models::RawItem;
+use crate::utils::clean_text;
 use crate::TianJiError;
 
 const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
@@ -163,10 +164,6 @@ fn none_if_empty(value: String) -> Option<String> {
     } else {
         Some(value)
     }
-}
-
-fn clean_text(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn sha256_hex(text: &str) -> String {

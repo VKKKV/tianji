@@ -8,9 +8,12 @@ pub fn round2(value: f64) -> f64 {
     if !value.is_finite() {
         return value;
     }
-    format!("{:.2}", value)
-        .parse::<f64>()
-        .unwrap_or(value)
+    format!("{:.2}", value).parse::<f64>().unwrap_or(value)
+}
+
+/// Collapse runs of whitespace to a single space and trim boundaries.
+pub fn clean_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Compute the number of days since Unix epoch (1970-01-01) for the given
@@ -59,6 +62,17 @@ mod tests {
         assert_eq!(round2(15.79), 15.79);
         // Negative value
         assert_eq!(round2(-1.5), -1.5);
+    }
+
+    #[test]
+    fn clean_text_collapses_whitespace_runs() {
+        assert_eq!(clean_text("alpha\n\t beta   gamma"), "alpha beta gamma");
+    }
+
+    #[test]
+    fn clean_text_trims_leading_and_trailing_whitespace() {
+        assert_eq!(clean_text("  \n alpha beta \t "), "alpha beta");
+        assert_eq!(clean_text(" \n\t "), "");
     }
 
     #[test]
