@@ -56,6 +56,65 @@
 - Clean up `#[serde(skip)]` markers
 - Bump schema version
 
+### Compatibility Contract
+
+Removing the legacy fields must not make existing serialized Hongmeng state
+unreadable. Keep custom deserializers at the boundary until there is a formal
+schema migration.
+
+#### Agent payloads
+
+Accepted inputs:
+
+- `private_state_typed` with the new typed object.
+- Legacy `private_state` JSON object.
+- Missing private state, which defaults to `AgentPrivateState::default()`.
+
+`private_state` objects map into `AgentPrivateState` as:
+
+- `objectives`: string arrays only; missing or malformed values become `[]`.
+- `memory`: string-to-string object entries only; non-string values are skipped.
+- `numeric_state`: string-to-number object entries only; non-number values are skipped.
+
+#### StickEntry payloads
+
+Accepted inputs:
+
+- `typed_value` with the new enum representation.
+- Legacy `value` JSON scalar/array.
+- Missing value, which defaults to `StickValue::Text(String::new())`.
+
+Legacy JSON maps into `StickValue` as:
+
+- String -> `Text`.
+- Number -> `Number` when representable as `f64`, otherwise `Text` with JSON text.
+- Bool -> `Flag`.
+- Array -> `List`, stringifying non-string elements.
+- Object/null -> `Text` with JSON text.
+
+Wrong:
+
+```rust
+#[derive(Deserialize)]
+pub struct StickEntry {
+    pub typed_value: StickValue,
+}
+```
+
+Correct:
+
+```rust
+impl<'de> Deserialize<'de> for StickEntry {
+    // Accept both typed_value and legacy value at the serialization boundary.
+}
+```
+
+Required tests:
+
+- `Agent` deserializes a legacy `private_state` JSON payload.
+- `StickEntry` deserializes a legacy `value` JSON payload.
+- Prompt/API output continues to serialize typed state as JSON only at boundaries.
+
 ## Verification
 
 ```bash
