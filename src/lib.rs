@@ -38,11 +38,12 @@ use normalize::normalize_items;
 use scoring::{score_events, summarize_scenario};
 use serde_json::Value as JsonValue;
 pub use storage::{
-    clear_baseline, compare_runs, get_latest_run_id, get_latest_run_pair, get_next_run_id,
-    get_previous_run_id, get_run_summary, list_runs, load_baseline, load_latest_worldlines,
-    load_worldline, next_worldline_id, persist_run, save_baseline, save_worldline,
-    EventGroupFilters, RunListFilters, ScoredEventFilters, MAX_RUN_SUMMARY_EVENT_LIMIT,
-    MAX_RUN_SUMMARY_GROUP_LIMIT,
+    clear_baseline, compare_runs, compare_runs_with_conn, get_latest_run_id,
+    get_latest_run_id_with_conn, get_latest_run_pair, get_next_run_id, get_previous_run_id,
+    get_run_summary, get_run_summary_with_conn, list_runs, list_runs_with_conn, load_baseline,
+    load_latest_worldlines, load_worldline, next_worldline_id, persist_run, save_baseline,
+    save_worldline, EventGroupFilters, RunListFilters, ScoredEventFilters, SqlitePool,
+    DEFAULT_SQLITE_POOL_SIZE, MAX_RUN_SUMMARY_EVENT_LIMIT, MAX_RUN_SUMMARY_GROUP_LIMIT,
 };
 
 pub const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";
@@ -698,14 +699,17 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = format!("/tmp/tianji_test_{}.sqlite3", id);
+        let process_id = std::process::id();
+        let path = format!("/tmp/tianji_test_{process_id}_{id}.sqlite3");
         // Ensure clean slate — previous runs may have left stale files
-        let _ = std::fs::remove_file(&path);
+        cleanup_db(&path);
         path
     }
 
     fn cleanup_db(path: &str) {
         let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(format!("{path}-wal"));
+        let _ = std::fs::remove_file(format!("{path}-shm"));
     }
 
     #[test]
@@ -1865,9 +1869,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         rt.block_on(async {
-            let state = api::AppState {
-                sqlite_path: db_path.clone(),
-            };
+            let state = api::AppState::new(db_path.clone()).expect("api state");
             let app = api::build_router().with_state(state);
 
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1913,9 +1915,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         rt.block_on(async {
-            let state = api::AppState {
-                sqlite_path: db_path.clone(),
-            };
+            let state = api::AppState::new(db_path.clone()).expect("api state");
             let app = api::build_router().with_state(state);
 
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1956,6 +1956,52 @@ mod tests {
     }
 
     #[test]
+    fn api_latest_run_reads_through_pooled_state() {
+        let db_path = temp_sqlite_path();
+        let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run + persist");
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        rt.block_on(async {
+            let state = api::AppState::new(db_path.clone()).expect("api state");
+            let pooled = state.sqlite_pool.get().expect("pooled connection");
+            let latest = storage::get_latest_run_id_with_conn(&pooled)
+                .expect("latest through pooled connection");
+            assert_eq!(latest, Some(1));
+            drop(pooled);
+
+            let app = api::build_router().with_state(state);
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let addr = listener.local_addr().expect("addr");
+
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("serve");
+            });
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .get(format!("http://{addr}/api/v1/runs/latest"))
+                .send()
+                .await
+                .expect("request");
+
+            let body: serde_json::Value =
+                serde_json::from_str(&resp.text().await.expect("text")).expect("json");
+            assert_eq!(body["api_version"], "v1");
+            assert_eq!(body["error"], serde_json::Value::Null);
+            assert_eq!(body["data"]["run_id"], 1);
+
+            server.abort();
+        });
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
     fn api_compare_returns_envelope_with_diff() {
         let db_path = temp_sqlite_path();
         let _ = run_fixture_path(SAMPLE_FIXTURE, Some(&db_path)).expect("run 1");
@@ -1963,9 +2009,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         rt.block_on(async {
-            let state = api::AppState {
-                sqlite_path: db_path.clone(),
-            };
+            let state = api::AppState::new(db_path.clone()).expect("api state");
             let app = api::build_router().with_state(state);
 
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -2009,9 +2053,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         rt.block_on(async {
-            let state = api::AppState {
-                sqlite_path: db_path.clone(),
-            };
+            let state = api::AppState::new(db_path.clone()).expect("api state");
             let app = api::build_router().with_state(state);
 
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

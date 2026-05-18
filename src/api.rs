@@ -8,6 +8,8 @@ use axum::{
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
+use crate::storage::SqlitePool;
+
 const JSON_CONTENT_TYPE: &str = "application/json; charset=utf-8";
 
 /// Wrapper that ensures `Content-Type: application/json; charset=utf-8`.
@@ -91,7 +93,18 @@ fn api_meta_data() -> JsonValue {
 
 #[derive(Clone)]
 pub struct AppState {
+    pub sqlite_pool: SqlitePool,
     pub sqlite_path: String,
+}
+
+impl AppState {
+    pub fn new(sqlite_path: impl Into<String>) -> Result<Self, crate::TianJiError> {
+        let sqlite_path = sqlite_path.into();
+        Ok(Self {
+            sqlite_pool: SqlitePool::default(&sqlite_path)?,
+            sqlite_path,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,8 +197,9 @@ async fn get_runs(
     };
 
     let filters = crate::storage::RunListFilters::default();
-    let items =
-        crate::list_runs(&state.sqlite_path, limit, &filters).map_err(tianji_error_to_api)?;
+    let connection = state.sqlite_pool.get().map_err(tianji_error_to_api)?;
+    let items = crate::storage::list_runs_with_conn(&connection, limit, &filters)
+        .map_err(tianji_error_to_api)?;
 
     let data = serde_json::json!({
         "resource": "/api/v1/runs",
@@ -209,8 +223,9 @@ async fn get_run_by_id(
 
     let scored_filters = api_scored_event_filters();
     let group_filters = api_event_group_filters();
-    let payload = crate::get_run_summary(
-        &state.sqlite_path,
+    let connection = state.sqlite_pool.get().map_err(tianji_error_to_api)?;
+    let payload = crate::storage::get_run_summary_with_conn(
+        &connection,
         run_id,
         &scored_filters,
         false,
@@ -228,8 +243,9 @@ async fn get_run_by_id(
 }
 
 async fn get_latest_run(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let connection = state.sqlite_pool.get().map_err(tianji_error_to_api)?;
     let latest_run_id =
-        crate::get_latest_run_id(&state.sqlite_path).map_err(tianji_error_to_api)?;
+        crate::storage::get_latest_run_id_with_conn(&connection).map_err(tianji_error_to_api)?;
 
     let run_id = match latest_run_id {
         Some(id) => id,
@@ -243,8 +259,8 @@ async fn get_latest_run(State(state): State<AppState>) -> Result<impl IntoRespon
 
     let scored_filters = api_scored_event_filters();
     let group_filters = api_event_group_filters();
-    let payload = crate::get_run_summary(
-        &state.sqlite_path,
+    let payload = crate::storage::get_run_summary_with_conn(
+        &connection,
         run_id,
         &scored_filters,
         false,
@@ -315,8 +331,9 @@ async fn get_compare(
 
     let scored_filters = api_scored_event_filters();
     let group_filters = api_event_group_filters();
-    let result = crate::compare_runs(
-        &state.sqlite_path,
+    let connection = state.sqlite_pool.get().map_err(tianji_error_to_api)?;
+    let result = crate::storage::compare_runs_with_conn(
+        &connection,
         left_run_id,
         right_run_id,
         &scored_filters,
@@ -422,10 +439,13 @@ pub fn build_router() -> Router<AppState> {
 }
 
 pub async fn serve_api(host: &str, port: u16, sqlite_path: &str) -> Result<(), String> {
-    let state = AppState {
-        sqlite_path: sqlite_path.to_string(),
-    };
+    let state =
+        AppState::new(sqlite_path).map_err(|e| format!("Failed to initialize API state: {e}"))?;
 
+    serve_api_with_state(host, port, state).await
+}
+
+pub async fn serve_api_with_state(host: &str, port: u16, state: AppState) -> Result<(), String> {
     let app = build_router().with_state(state);
 
     let addr = crate::daemon::loopback_socket_addr(host, port);

@@ -23,10 +23,15 @@ pub struct Interest {
 /// Corporation-tier actors additionally set `market_share` and `supply_chain`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {
+    #[serde(default)]
     pub military: f64,
+    #[serde(default)]
     pub economic: f64,
+    #[serde(default)]
     pub technological: f64,
+    #[serde(default)]
     pub diplomatic: f64,
+    #[serde(default)]
     pub cyber: f64,
     #[serde(default)]
     pub market_share: f64,

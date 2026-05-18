@@ -503,6 +503,7 @@ pub fn serve(
     let state = Arc::new(DaemonState::new());
     let sqlite_path_owned = sqlite_path.to_string();
     let socket_path_owned = socket_path.to_string();
+    let api_state = crate::api::AppState::new(sqlite_path_owned.clone())?;
 
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| TianJiError::Usage(format!("Failed to create tokio runtime: {e}")))?;
@@ -514,7 +515,8 @@ pub fn serve(
 
         // Spawn API server
         let api_handle = tokio::spawn(async move {
-            if let Err(e) = crate::api::serve_api(&validated_host, port, &sqlite_path_owned).await {
+            if let Err(e) = crate::api::serve_api_with_state(&validated_host, port, api_state).await
+            {
                 error!("API server error: {e}");
             }
         });

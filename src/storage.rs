@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -17,6 +19,106 @@ pub const DEFAULT_RUN_SUMMARY_GROUP_LIMIT: usize = 200;
 pub const MAX_RUN_SUMMARY_GROUP_LIMIT: usize = 500;
 
 const RUN_LIST_FILTER_PAGE_SIZE: usize = 100;
+pub const DEFAULT_SQLITE_POOL_SIZE: usize = 4;
+
+// ---------------------------------------------------------------------------
+// SQLite connection pool
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct SqlitePool {
+    inner: Arc<SqlitePoolInner>,
+}
+
+struct SqlitePoolInner {
+    connections: Mutex<Vec<Connection>>,
+    condvar: Condvar,
+}
+
+pub struct PooledConnection {
+    connection: Option<Connection>,
+    inner: Arc<SqlitePoolInner>,
+}
+
+impl SqlitePool {
+    pub fn new(path: impl Into<PathBuf>, max_connections: usize) -> Result<Self, TianJiError> {
+        if max_connections == 0 {
+            return Err(TianJiError::Usage(
+                "SQLite pool size must be greater than zero".to_string(),
+            ));
+        }
+
+        let path = path.into();
+        let mut connections = Vec::with_capacity(max_connections);
+        for _ in 0..max_connections {
+            connections.push(open_initialized_connection(&path)?);
+        }
+
+        Ok(Self {
+            inner: Arc::new(SqlitePoolInner {
+                connections: Mutex::new(connections),
+                condvar: Condvar::new(),
+            }),
+        })
+    }
+
+    pub fn default(path: impl Into<PathBuf>) -> Result<Self, TianJiError> {
+        Self::new(path, DEFAULT_SQLITE_POOL_SIZE)
+    }
+
+    pub fn get(&self) -> Result<PooledConnection, TianJiError> {
+        let mut connections = self
+            .inner
+            .connections
+            .lock()
+            .map_err(|_| TianJiError::Usage("SQLite pool lock poisoned".to_string()))?;
+        while connections.is_empty() {
+            connections = self
+                .inner
+                .condvar
+                .wait(connections)
+                .map_err(|_| TianJiError::Usage("SQLite pool lock poisoned".to_string()))?;
+        }
+
+        Ok(PooledConnection {
+            connection: connections.pop(),
+            inner: self.inner.clone(),
+        })
+    }
+}
+
+impl Deref for PooledConnection {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        self.connection
+            .as_ref()
+            .expect("pooled connection missing before drop")
+    }
+}
+
+impl Drop for PooledConnection {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            if let Ok(mut connections) = self.inner.connections.lock() {
+                connections.push(connection);
+                self.inner.condvar.notify_one();
+            }
+        }
+    }
+}
+
+fn open_initialized_connection(path: &Path) -> Result<Connection, TianJiError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let connection = Connection::open(path)?;
+    connection.execute_batch("PRAGMA foreign_keys = ON")?;
+    connection.execute_batch("PRAGMA journal_mode = WAL")?;
+    initialize_schema(&connection)?;
+    Ok(connection)
+}
 
 // ---------------------------------------------------------------------------
 // Write path
@@ -30,15 +132,7 @@ pub fn persist_run(
     scored_events: &[ScoredEvent],
     intervention_candidates: &[InterventionCandidate],
 ) -> Result<(), TianJiError> {
-    let db_path = Path::new(sqlite_path);
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut connection = Connection::open(db_path)?;
-    connection.execute_batch("PRAGMA foreign_keys = ON")?;
-    connection.execute_batch("PRAGMA journal_mode = WAL")?;
-    initialize_schema(&connection)?;
+    let mut connection = open_initialized_connection(Path::new(sqlite_path))?;
 
     let tx = connection.transaction()?;
     let run_id = insert_run(&tx, artifact)?;
@@ -463,29 +557,35 @@ pub fn list_runs(
     limit: usize,
     filters: &RunListFilters,
 ) -> Result<Vec<serde_json::Value>, TianJiError> {
+    let connection = open_initialized_connection(Path::new(sqlite_path))?;
+    list_runs_with_conn(&connection, limit, filters)
+}
+
+pub fn list_runs_with_conn(
+    connection: &Connection,
+    limit: usize,
+    filters: &RunListFilters,
+) -> Result<Vec<serde_json::Value>, TianJiError> {
     if limit == 0 {
         return Ok(Vec::new());
     }
 
-    let connection = Connection::open(sqlite_path)?;
-    connection.execute_batch("PRAGMA foreign_keys = ON")?;
-
     let has_filters = has_run_list_filters(filters);
     if !has_filters {
-        let run_rows = query_run_list_rows(&connection, limit, 0)?;
-        return build_run_list_items(&connection, &run_rows);
+        let run_rows = query_run_list_rows(connection, limit, 0)?;
+        return build_run_list_items(connection, &run_rows);
     }
 
     let mut items: Vec<serde_json::Value> = Vec::new();
     let mut offset = 0usize;
     while items.len() < limit {
-        let run_rows = query_run_list_rows(&connection, RUN_LIST_FILTER_PAGE_SIZE, offset)?;
+        let run_rows = query_run_list_rows(connection, RUN_LIST_FILTER_PAGE_SIZE, offset)?;
         if run_rows.is_empty() {
             break;
         }
         offset += run_rows.len();
 
-        let page_items = build_run_list_items(&connection, &run_rows)?;
+        let page_items = build_run_list_items(connection, &run_rows)?;
         items.extend(filter_run_list_items(page_items, filters));
 
         if run_rows.len() < RUN_LIST_FILTER_PAGE_SIZE {
@@ -661,9 +761,23 @@ pub fn get_run_summary(
     only_matching_interventions: bool,
     group_filters: &EventGroupFilters,
 ) -> Result<Option<serde_json::Value>, TianJiError> {
-    let connection = Connection::open(sqlite_path)?;
-    connection.execute_batch("PRAGMA foreign_keys = ON")?;
+    let connection = open_initialized_connection(Path::new(sqlite_path))?;
+    get_run_summary_with_conn(
+        &connection,
+        run_id,
+        scored_filters,
+        only_matching_interventions,
+        group_filters,
+    )
+}
 
+pub fn get_run_summary_with_conn(
+    connection: &Connection,
+    run_id: i64,
+    scored_filters: &ScoredEventFilters,
+    only_matching_interventions: bool,
+    group_filters: &EventGroupFilters,
+) -> Result<Option<serde_json::Value>, TianJiError> {
     let run_row: (i64, String, String, String, String, String) = match connection.query_row(
         "SELECT id, schema_version, mode, generated_at, input_summary_json, scenario_summary_json FROM runs WHERE id = ?1",
         params![run_id],
@@ -808,7 +922,11 @@ pub fn get_run_summary(
 // ---------------------------------------------------------------------------
 
 pub fn get_latest_run_id(sqlite_path: &str) -> Result<Option<i64>, TianJiError> {
-    let connection = Connection::open(sqlite_path)?;
+    let connection = open_initialized_connection(Path::new(sqlite_path))?;
+    get_latest_run_id_with_conn(&connection)
+}
+
+pub fn get_latest_run_id_with_conn(connection: &Connection) -> Result<Option<i64>, TianJiError> {
     match connection.query_row("SELECT id FROM runs ORDER BY id DESC LIMIT 1", [], |row| {
         row.get(0)
     }) {
@@ -871,15 +989,34 @@ pub fn compare_runs(
     only_matching_interventions: bool,
     group_filters: &EventGroupFilters,
 ) -> Result<Option<CompareResult>, TianJiError> {
-    let left = get_run_summary(
-        sqlite_path,
+    let connection = open_initialized_connection(Path::new(sqlite_path))?;
+    compare_runs_with_conn(
+        &connection,
+        left_run_id,
+        right_run_id,
+        scored_filters,
+        only_matching_interventions,
+        group_filters,
+    )
+}
+
+pub fn compare_runs_with_conn(
+    connection: &Connection,
+    left_run_id: i64,
+    right_run_id: i64,
+    scored_filters: &ScoredEventFilters,
+    only_matching_interventions: bool,
+    group_filters: &EventGroupFilters,
+) -> Result<Option<CompareResult>, TianJiError> {
+    let left = get_run_summary_with_conn(
+        connection,
         left_run_id,
         scored_filters,
         only_matching_interventions,
         group_filters,
     )?;
-    let right = get_run_summary(
-        sqlite_path,
+    let right = get_run_summary_with_conn(
+        connection,
         right_run_id,
         scored_filters,
         only_matching_interventions,
@@ -1686,6 +1823,23 @@ pub fn clear_baseline(conn: &Connection) -> Result<(), TianJiError> {
 mod storage_integrity_tests {
     use super::*;
     use std::collections::BTreeMap;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn temp_sqlite_path(label: &str) -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = format!("/tmp/tianji_storage_{label}_{id}.sqlite3");
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    fn cleanup_db(path: &str) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(format!("{path}-wal"));
+        let _ = std::fs::remove_file(format!("{path}-shm"));
+    }
 
     fn raw_item_with_hashes(identity_hash: &str, content_hash: &str) -> RawItem {
         RawItem {
@@ -1744,6 +1898,64 @@ mod storage_integrity_tests {
             Err(TianJiError::DataIntegrity(message))
                 if message == "missing canonical source item id for normalized event"
         ));
+    }
+
+    #[test]
+    fn sqlite_pool_initializes_schema_and_pragmas() {
+        let db_path = temp_sqlite_path("pool_init");
+        let pool = SqlitePool::new(&db_path, 1).expect("pool");
+        let connection = pool.get().expect("connection");
+
+        let foreign_keys: i64 = connection
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign keys pragma");
+        let journal_mode: String = connection
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .expect("journal mode pragma");
+        let runs_exists: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'runs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("runs table exists");
+
+        assert_eq!(foreign_keys, 1);
+        assert_eq!(journal_mode.to_lowercase(), "wal");
+        assert_eq!(runs_exists, 1);
+
+        drop(connection);
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn sqlite_pool_is_bounded_and_reuses_returned_connections() {
+        let db_path = temp_sqlite_path("pool_bounded");
+        let pool = SqlitePool::new(&db_path, 1).expect("pool");
+        let first = pool.get().expect("first connection");
+        first
+            .execute("CREATE TEMP TABLE pool_marker (value INTEGER)", [])
+            .expect("create temp marker");
+        first
+            .execute("INSERT INTO pool_marker (value) VALUES (42)", [])
+            .expect("insert marker");
+
+        let pool_clone = pool.clone();
+        let (tx, rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let second = pool_clone.get().expect("second connection");
+            let marker: i64 = second
+                .query_row("SELECT value FROM pool_marker", [], |row| row.get(0))
+                .expect("marker survives reuse");
+            tx.send(marker).expect("send marker");
+        });
+
+        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+        drop(first);
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).expect("marker"), 42);
+        handle.join().expect("thread join");
+
+        cleanup_db(&db_path);
     }
 }
 
