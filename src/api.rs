@@ -718,6 +718,53 @@ mod tests {
     }
 
     #[test]
+    fn api_agent_command_contract_accepts_signed_command_and_rejects_bad_signature() {
+        let accepted = run_agent_command_request(
+            "full",
+            "simulate",
+            current_test_timestamp(),
+            "contract-accepted-nonce",
+            TEST_SECRET,
+        );
+        let rejected = run_agent_command_request(
+            "full",
+            "simulate",
+            current_test_timestamp(),
+            "contract-rejected-nonce",
+            b"wrong-contract-secret",
+        );
+
+        assert_eq!(accepted.status, StatusCode::OK);
+        assert_eq!(
+            accepted.body,
+            serde_json::json!({
+                "api_version": "v1",
+                "data": {
+                    "accepted": true,
+                    "command_id": "cmd-test-1",
+                    "agent_id": "agent-a",
+                    "tier": "full",
+                    "command_type": "simulate"
+                },
+                "error": null
+            })
+        );
+
+        assert_eq!(rejected.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            rejected.body,
+            serde_json::json!({
+                "api_version": "v1",
+                "data": null,
+                "error": {
+                    "code": "agent_auth_failed",
+                    "message": "Agent command authentication failed"
+                }
+            })
+        );
+    }
+
+    #[test]
     fn agent_command_bad_signature_is_rejected() {
         let response = run_agent_command_request(
             "restricted",

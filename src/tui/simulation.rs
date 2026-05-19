@@ -365,6 +365,25 @@ mod tests {
     }
 
     #[test]
+    fn tui_replay_contract_formats_cursor_and_metadata() {
+        let mut view = SimulationViewState::new(Some(sample_simulation()));
+
+        assert_eq!(view.replay_cursor, 2);
+        assert_eq!(view.replay_frame_count, 30);
+        assert_eq!(
+            format_simulation_view(&view).lines().next(),
+            Some("mode: forward  field: east-asia.conflict  tick 3/30  frame 3/30")
+        );
+
+        view.previous_replay_frame();
+        assert_eq!(view.replay_cursor, 1);
+        assert_eq!(
+            format_simulation_view(&view).lines().next(),
+            Some("mode: forward  field: east-asia.conflict  tick 3/30  frame 2/30")
+        );
+    }
+
+    #[test]
     fn simulation_format_shows_delta_arrows() {
         let sim = sample_simulation();
         let formatted = format_simulation(&sim);

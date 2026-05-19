@@ -315,6 +315,7 @@ mod tests {
 
     const SAMPLE_FIXTURE: &str = "tests/fixtures/sample_feed.xml";
     const CONTRACT_FIXTURE: &str = "tests/fixtures/contracts/run_artifact_v1.json";
+    const LOCAL_API_META_CONTRACT_FIXTURE: &str = "tests/fixtures/contracts/local_api_meta_v1.json";
 
     #[test]
     fn data_integrity_error_displays_message_directly() {
@@ -1902,6 +1903,13 @@ mod tests {
             );
             assert_eq!(body["data"]["cli_source_of_truth"], true);
             assert_eq!(body["data"]["persistence"]["sqlite_optional"], true);
+
+            let contract: serde_json::Value = serde_json::from_str(
+                &fs::read_to_string(LOCAL_API_META_CONTRACT_FIXTURE)
+                    .expect("meta contract fixture"),
+            )
+            .expect("meta contract json");
+            assert_eq!(body, contract);
 
             server.abort();
         });

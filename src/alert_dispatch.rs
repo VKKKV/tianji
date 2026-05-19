@@ -735,6 +735,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn alert_dispatch_contract_dry_run_report_redacts_endpoints() {
+        let config = dispatch_config(true, "https://alerts.example.test/SECRET_BASE");
+        let dispatcher = AlertDispatcher::new(config);
+
+        let report = dispatcher
+            .dispatch(&message(AlertTier::Flash))
+            .await
+            .expect("dry-run dispatch report");
+
+        assert!(report.dry_run);
+        assert_eq!(report.deliveries.len(), 2);
+        assert_eq!(report.deliveries[0].channel_name, "ops-telegram");
+        assert_eq!(
+            report.deliveries[0].channel_kind,
+            AlertChannelKind::Telegram
+        );
+        assert_eq!(report.deliveries[0].status, DeliveryStatus::Planned);
+        assert_eq!(report.deliveries[0].chunks, 1);
+        assert_eq!(
+            report.deliveries[0].endpoint,
+            "https://alerts.example.test/SECRET_BASE/bot<redacted>/sendMessage"
+        );
+        assert_eq!(report.deliveries[1].channel_name, "ops-discord");
+        assert_eq!(report.deliveries[1].channel_kind, AlertChannelKind::Discord);
+        assert_eq!(report.deliveries[1].status, DeliveryStatus::Planned);
+        assert_eq!(report.deliveries[1].endpoint, "https://<redacted>");
+
+        let rendered = format!("{report}");
+        assert!(!rendered.contains("123456:SECRET_TOKEN"));
+        assert!(!rendered.contains("SECRET_WEBHOOK"));
+        assert!(rendered.contains("<redacted>"));
+    }
+
+    #[tokio::test]
+    async fn alert_dispatch_contract_mock_webhook_payload_shape() {
+        let (base_url, receiver) = spawn_mock_server(1);
+        let config = AlertDispatchConfig {
+            dry_run: false,
+            channels: dispatch_config(false, &base_url).channels,
+            policy: AlertDispatchPolicy {
+                flash: Vec::new(),
+                priority: vec!["ops-webhook".to_string()],
+                routine: Vec::new(),
+            },
+        };
+        let dispatcher = AlertDispatcher::new(config);
+
+        let report = dispatcher
+            .dispatch(&message(AlertTier::Priority))
+            .await
+            .expect("mock webhook dispatch");
+        let requests = receiver.recv().expect("captured request");
+
+        assert_eq!(report.deliveries.len(), 1);
+        assert_eq!(report.deliveries[0].channel_kind, AlertChannelKind::Webhook);
+        assert_eq!(report.deliveries[0].status, DeliveryStatus::Sent);
+        assert_eq!(report.deliveries[0].endpoint, "http://<redacted>");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].path, "/webhook/SECRET_WEBHOOK");
+        assert!(requests[0]
+            .headers
+            .to_ascii_lowercase()
+            .contains("content-type: application/json"));
+        assert_eq!(
+            requests[0].body,
+            serde_json::json!({
+                "tier": "priority",
+                "title": "Escalation",
+                "summary": "Priority movement",
+                "body": "Detailed signal body"
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn alert_dispatch_redacts_secrets_in_debug_report_and_errors() {
         let secret_token = "123456:SECRET_TOKEN";
         let secret_webhook = "SECRET_WEBHOOK";
