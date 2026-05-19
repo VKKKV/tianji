@@ -250,9 +250,10 @@ Borrowing adoption status after Phase D/E:
 - Added `examples/config.example.yaml` as a user-safe provider template.
 - Added `tianji doctor [--config <PATH>] [--sqlite-path <PATH>] [--json]` for config parse, provider reference, env-var presence, and SQLite path readiness checks without leaking secrets.
 
-**F2. API contract fixtures for Phase D/E surfaces**
-- Add contract fixtures/tests for `/api/v1/meta`, `/api/v1/agent/command`, alert dispatch payload builders, and TUI replay formatting.
-- Keep external-service behavior mocked/dry-run only.
+**F2. API contract fixtures for Phase D/E surfaces** ✅
+- Added stable contract coverage for `/api/v1/meta` and `/api/v1/agent/command` accepted/rejected envelopes.
+- Added alert dispatch dry-run/redaction and mocked webhook payload contract tests.
+- Added TUI replay cursor/frame formatting contract coverage.
 
 **F3. README operator quickstart refresh**
 - Document current LLM config, daemon API, signed command channel, alert dispatch dry-run, and TUI replay keybindings.
@@ -303,7 +304,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 337 unit + 32 integration)
+- `cargo test` all green (currently 341 unit + 39 integration)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
