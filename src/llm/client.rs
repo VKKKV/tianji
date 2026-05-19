@@ -1,7 +1,9 @@
 use super::config::{ProviderConfig, ProviderType};
 use super::error::LlmError;
 use serde_json::json;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
@@ -16,8 +18,8 @@ pub struct LlmClient {
     model: String,
     base_url: Option<String>,
     api_key: Option<String>,
-    #[allow(dead_code)] // Reserved for concurrent request limiting
     max_concurrency: usize,
+    semaphore: Arc<Semaphore>,
     client: reqwest::Client,
 }
 
@@ -29,13 +31,15 @@ impl LlmClient {
             .timeout(Duration::from_secs(120))
             .build()
             .map_err(|e| LlmError::Config(format!("failed to build HTTP client: {e}")))?;
+        let max_concurrency = config.max_concurrency.max(1);
         Ok(Self {
             provider_name: name.to_string(),
             provider_type: config.provider_type.clone(),
             model: config.model.clone(),
             base_url: config.base_url.clone(),
             api_key,
-            max_concurrency: config.max_concurrency,
+            max_concurrency,
+            semaphore: Arc::new(Semaphore::new(max_concurrency)),
             client,
         })
     }
@@ -52,12 +56,22 @@ impl LlmClient {
         &self.provider_type
     }
 
+    pub fn max_concurrency(&self) -> usize {
+        self.max_concurrency
+    }
+
     pub async fn chat(
         &self,
         messages: Vec<ChatMessage>,
         model: Option<&str>,
     ) -> Result<String, LlmError> {
         let model = model.unwrap_or(&self.model);
+        let _permit = self
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|e| LlmError::ChatFailed(format!("concurrency limiter closed: {e}")))?;
         match &self.provider_type {
             ProviderType::OpenAI => self.chat_openai_compatible(messages, model).await,
             ProviderType::Ollama => self.chat_ollama(messages, model).await,
@@ -189,8 +203,11 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Receiver};
+    use std::sync::{Arc, Barrier};
     use std::thread;
+    use std::time::{Duration, Instant};
 
     fn ollama_config() -> ProviderConfig {
         ProviderConfig {
@@ -278,12 +295,105 @@ mod tests {
         (format!("http://{addr}"), receiver)
     }
 
+    #[derive(Debug)]
+    struct ConcurrencyStats {
+        max_active: usize,
+    }
+
+    fn spawn_concurrency_server(
+        request_count: usize,
+        response_delay: Duration,
+    ) -> (String, Receiver<ConcurrencyStats>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind concurrency test server");
+        let addr = listener.local_addr().expect("concurrency server addr");
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(AtomicUsize::new(0));
+        let (sender, receiver) = mpsc::channel();
+
+        thread::spawn(move || {
+            let mut handles = Vec::new();
+            for _ in 0..request_count {
+                let (mut stream, _) = listener.accept().expect("accept concurrency request");
+                let active = Arc::clone(&active);
+                let max_active = Arc::clone(&max_active);
+                let finished = Arc::clone(&finished);
+                handles.push(thread::spawn(move || {
+                    let _ = read_http_request(&stream);
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(current, Ordering::SeqCst);
+                    thread::sleep(response_delay);
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    finished.fetch_add(1, Ordering::SeqCst);
+                    let body = r#"{"message":{"role":"assistant","content":"ok"}}"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    stream.write_all(response.as_bytes()).expect("write response");
+                }));
+            }
+
+            for handle in handles {
+                handle.join().expect("concurrency request handler");
+            }
+
+            sender
+                .send(ConcurrencyStats {
+                    max_active: max_active.load(Ordering::SeqCst),
+                })
+                .expect("send concurrency stats");
+        });
+
+        (format!("http://{addr}"), receiver)
+    }
+
+    async fn run_concurrent_chats(client: LlmClient, request_count: usize) -> Vec<String> {
+        let barrier = Arc::new(Barrier::new(request_count));
+        let mut handles = Vec::new();
+        for _ in 0..request_count {
+            let client = client.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                tokio::task::spawn_blocking(move || barrier.wait())
+                    .await
+                    .expect("wait for chat start barrier");
+                client
+                    .chat(
+                        vec![ChatMessage {
+                            role: "user".to_string(),
+                            content: "Hello".to_string(),
+                        }],
+                        None,
+                    )
+                    .await
+                    .expect("concurrent chat")
+            }));
+        }
+
+        let mut results = Vec::new();
+        for handle in handles {
+            results.push(handle.await.expect("chat task join"));
+        }
+        results
+    }
+
     #[test]
     fn new_creates_client_from_config() {
         let config = ollama_config();
         let client = LlmClient::new("ollama_local", &config).expect("create client");
         assert_eq!(client.provider_name(), "ollama_local");
         assert_eq!(client.model(), "qwen3:14b");
+        assert_eq!(client.max_concurrency(), 3);
+    }
+
+    #[test]
+    fn new_normalizes_zero_max_concurrency_to_one() {
+        let mut config = ollama_config();
+        config.max_concurrency = 0;
+        let client = LlmClient::new("ollama_local", &config).expect("create client");
+        assert_eq!(client.max_concurrency(), 1);
     }
 
     #[test]
@@ -381,6 +491,63 @@ mod tests {
         assert!(
             message.contains("ollama failed"),
             "missing response body: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_max_concurrency_one_serializes_requests() {
+        let (base_url, stats_receiver) = spawn_concurrency_server(3, Duration::from_millis(75));
+        let mut config = ollama_config();
+        config.base_url = Some(base_url);
+        config.max_concurrency = 1;
+        let client = LlmClient::new("ollama_local", &config).expect("create client");
+
+        let started = Instant::now();
+        let results = run_concurrent_chats(client, 3).await;
+        let elapsed = started.elapsed();
+        let stats = stats_receiver.recv().expect("concurrency stats");
+
+        assert_eq!(
+            results,
+            vec!["ok".to_string(), "ok".to_string(), "ok".to_string()]
+        );
+        assert_eq!(stats.max_active, 1);
+        assert!(
+            elapsed >= Duration::from_millis(200),
+            "serialized calls finished too quickly: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_max_concurrency_two_bounds_requests() {
+        let (base_url, stats_receiver) = spawn_concurrency_server(4, Duration::from_millis(100));
+        let mut config = ollama_config();
+        config.base_url = Some(base_url);
+        config.max_concurrency = 2;
+        let client = LlmClient::new("ollama_local", &config).expect("create client");
+
+        let started = Instant::now();
+        let results = run_concurrent_chats(client, 4).await;
+        let elapsed = started.elapsed();
+        let stats = stats_receiver.recv().expect("concurrency stats");
+
+        assert_eq!(
+            results,
+            vec![
+                "ok".to_string(),
+                "ok".to_string(),
+                "ok".to_string(),
+                "ok".to_string()
+            ]
+        );
+        assert_eq!(stats.max_active, 2);
+        assert!(
+            elapsed >= Duration::from_millis(175),
+            "bounded calls finished too quickly: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(350),
+            "max_concurrency=2 appears serialized: {elapsed:?}"
         );
     }
 }
