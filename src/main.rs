@@ -775,6 +775,83 @@ mod tests {
     }
 
     #[test]
+    fn tiered_watch_rejects_invalid_intervals() {
+        let feeds = vec![WatchedFeed {
+            source_url: "https://example.com/fast.xml".to_string(),
+            tier: FeedTier::Fast,
+        }];
+
+        let too_fast = validate_tiered_watch(
+            &feeds,
+            WatchSchedulerConfig {
+                fast_interval: 9,
+                slow_interval: 300,
+            },
+        );
+        assert!(matches!(too_fast, Err(TianJiError::Usage(msg)) if msg.contains("at least 10")));
+
+        let slow_below_fast = validate_tiered_watch(
+            &feeds,
+            WatchSchedulerConfig {
+                fast_interval: 60,
+                slow_interval: 30,
+            },
+        );
+        assert!(
+            matches!(slow_below_fast, Err(TianJiError::Usage(msg)) if msg.contains("below fast"))
+        );
+    }
+
+    #[test]
+    fn tiered_watch_rejects_missing_or_empty_feeds() {
+        let config = WatchSchedulerConfig::default();
+        let no_feeds = validate_tiered_watch(&[], config);
+        assert!(matches!(no_feeds, Err(TianJiError::Usage(msg)) if msg.contains("at least one")));
+
+        let empty_url = validate_tiered_watch(
+            &[WatchedFeed {
+                source_url: "  ".to_string(),
+                tier: FeedTier::Slow,
+            }],
+            config,
+        );
+        assert!(matches!(empty_url, Err(TianJiError::Usage(msg)) if msg.contains("non-empty")));
+    }
+
+    #[test]
+    fn tiered_watch_schedules_fast_more_often_than_slow() {
+        let feeds = vec![
+            WatchedFeed {
+                source_url: "https://example.com/fast.xml".to_string(),
+                tier: FeedTier::Fast,
+            },
+            WatchedFeed {
+                source_url: "https://example.com/slow.xml".to_string(),
+                tier: FeedTier::Slow,
+            },
+        ];
+        let config = WatchSchedulerConfig {
+            fast_interval: 10,
+            slow_interval: 30,
+        };
+
+        let mut fast_count = 0;
+        let mut slow_count = 0;
+        for iteration in 1..=4 {
+            for feed in due_feeds_for_iteration(&feeds, config, iteration) {
+                match feed.tier {
+                    FeedTier::Fast => fast_count += 1,
+                    FeedTier::Slow => slow_count += 1,
+                }
+            }
+        }
+
+        assert_eq!(fast_count, 4);
+        assert_eq!(slow_count, 2);
+        assert!(fast_count > slow_count);
+    }
+
+    #[test]
     fn watch_injected_fetcher_runs_real_feed_pipeline() {
         let fixture = std::fs::read_to_string(SAMPLE_FIXTURE).expect("fixture feed");
         let output = handle_watch_with_fetcher(
@@ -821,6 +898,73 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("network down"));
+    }
+
+    #[test]
+    fn tiered_watch_injected_fetcher_outputs_feed_metadata() {
+        let fixture = std::fs::read_to_string(SAMPLE_FIXTURE).expect("fixture feed");
+        let feeds = vec![
+            WatchedFeed {
+                source_url: "https://example.com/fast.xml".to_string(),
+                tier: FeedTier::Fast,
+            },
+            WatchedFeed {
+                source_url: "https://example.com/slow.xml".to_string(),
+                tier: FeedTier::Slow,
+            },
+        ];
+        let config = WatchSchedulerConfig {
+            fast_interval: 10,
+            slow_interval: 30,
+        };
+        let mut fetched_urls = Vec::new();
+        let mut sleep_calls = Vec::new();
+
+        let output = handle_tiered_watch_with_fetcher(
+            &feeds,
+            config,
+            4,
+            None,
+            |source_url| {
+                fetched_urls.push(source_url.to_string());
+                Ok(fixture.clone())
+            },
+            |duration| sleep_calls.push(duration),
+        )
+        .expect("tiered watch output");
+        let payload: Value = serde_json::from_str(&output).expect("watch json");
+
+        assert_eq!(payload["watch"]["fast_interval"], 10);
+        assert_eq!(payload["watch"]["slow_interval"], 30);
+        assert_eq!(payload["watch"]["iterations"], 4);
+        assert_eq!(payload["watch"]["feeds"].as_array().unwrap().len(), 2);
+        assert_eq!(payload["watch"]["feeds"][0]["tier"], "fast");
+        assert_eq!(payload["watch"]["feeds"][1]["tier"], "slow");
+
+        let results = payload["results"].as_array().expect("results");
+        assert_eq!(results.len(), 6);
+        assert_eq!(results[0]["source_url"], "https://example.com/fast.xml");
+        assert_eq!(results[0]["tier"], "fast");
+        assert_eq!(results[0]["interval"], 10);
+        assert_eq!(results[0]["status"], "ok");
+        assert_eq!(results[1]["source_url"], "https://example.com/slow.xml");
+        assert_eq!(results[1]["tier"], "slow");
+        assert_eq!(results[1]["interval"], 30);
+        assert_eq!(results[1]["raw_item_count"], 3);
+        assert_eq!(results.last().unwrap()["tier"], "slow");
+
+        assert_eq!(
+            fetched_urls,
+            vec![
+                "https://example.com/fast.xml",
+                "https://example.com/slow.xml",
+                "https://example.com/fast.xml",
+                "https://example.com/fast.xml",
+                "https://example.com/fast.xml",
+                "https://example.com/slow.xml",
+            ]
+        );
+        assert_eq!(sleep_calls, vec![std::time::Duration::from_secs(10); 3]);
     }
 
     #[test]
@@ -1777,6 +1921,178 @@ fn handle_watch(
     )
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FeedTier {
+    Fast,
+    Slow,
+}
+
+impl FeedTier {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Slow => "slow",
+        }
+    }
+}
+
+fn supported_feed_tiers() -> [FeedTier; 2] {
+    [FeedTier::Fast, FeedTier::Slow]
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WatchedFeed {
+    source_url: String,
+    tier: FeedTier,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WatchSchedulerConfig {
+    fast_interval: u64,
+    slow_interval: u64,
+}
+
+impl Default for WatchSchedulerConfig {
+    fn default() -> Self {
+        Self {
+            fast_interval: 30,
+            slow_interval: 300,
+        }
+    }
+}
+
+fn validate_tiered_watch(
+    feeds: &[WatchedFeed],
+    config: WatchSchedulerConfig,
+) -> Result<(), TianJiError> {
+    if feeds.is_empty() {
+        return Err(TianJiError::Usage(
+            "watch requires at least one feed.".to_string(),
+        ));
+    }
+    if feeds.iter().any(|feed| feed.source_url.trim().is_empty()) {
+        return Err(TianJiError::Usage(
+            "watch feed URLs must be non-empty.".to_string(),
+        ));
+    }
+    if config.fast_interval < 10 {
+        return Err(TianJiError::Usage(
+            "fast interval must be at least 10 seconds.".to_string(),
+        ));
+    }
+    if config.slow_interval < config.fast_interval {
+        return Err(TianJiError::Usage(
+            "slow interval cannot be below fast interval.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn due_feeds_for_iteration(
+    feeds: &[WatchedFeed],
+    config: WatchSchedulerConfig,
+    iteration: usize,
+) -> Vec<&WatchedFeed> {
+    let elapsed = (iteration.saturating_sub(1) as u64) * config.fast_interval;
+    feeds
+        .iter()
+        .filter(|feed| match feed.tier {
+            FeedTier::Fast => true,
+            FeedTier::Slow => elapsed.is_multiple_of(config.slow_interval),
+        })
+        .collect()
+}
+
+fn feed_interval(feed: &WatchedFeed, config: WatchSchedulerConfig) -> u64 {
+    match feed.tier {
+        FeedTier::Fast => config.fast_interval,
+        FeedTier::Slow => config.slow_interval,
+    }
+}
+
+fn watch_result_for_feed<F>(
+    fetcher: &mut F,
+    source_url: &str,
+    sqlite_path: Option<&str>,
+    iteration: usize,
+) -> serde_json::Value
+where
+    F: FnMut(&str) -> Result<String, TianJiError>,
+{
+    match fetcher(source_url)
+        .and_then(|feed_text| run_feed_text(&feed_text, source_url, sqlite_path))
+    {
+        Ok(run_result) => serde_json::json!({
+            "iteration": iteration,
+            "source_url": source_url,
+            "status": "ok",
+            "raw_item_count": run_result.artifact.input_summary.raw_item_count,
+            "normalized_event_count": run_result.artifact.input_summary.normalized_event_count,
+            "dominant_field": run_result.artifact.scenario_summary.dominant_field,
+            "risk_level": run_result.artifact.scenario_summary.risk_level,
+            "headline": run_result.artifact.scenario_summary.headline,
+        }),
+        Err(e) => serde_json::json!({
+            "iteration": iteration,
+            "source_url": source_url,
+            "status": "error",
+            "error": e.to_string(),
+        }),
+    }
+}
+
+#[cfg(test)]
+fn handle_tiered_watch_with_fetcher<F, S>(
+    feeds: &[WatchedFeed],
+    config: WatchSchedulerConfig,
+    max_iterations: usize,
+    sqlite_path: Option<&str>,
+    mut fetcher: F,
+    mut sleeper: S,
+) -> Result<String, TianJiError>
+where
+    F: FnMut(&str) -> Result<String, TianJiError>,
+    S: FnMut(std::time::Duration),
+{
+    validate_tiered_watch(feeds, config)?;
+
+    let mut results = Vec::new();
+    for iteration in 1..=max_iterations {
+        for feed in due_feeds_for_iteration(feeds, config, iteration) {
+            let interval = feed_interval(feed, config);
+            let mut result =
+                watch_result_for_feed(&mut fetcher, &feed.source_url, sqlite_path, iteration);
+            result["tier"] = serde_json::Value::String(feed.tier.as_str().to_string());
+            result["interval"] = serde_json::Value::from(interval);
+            results.push(result);
+        }
+        if iteration < max_iterations {
+            sleeper(std::time::Duration::from_secs(config.fast_interval));
+        }
+    }
+
+    let feed_metadata: Vec<_> = feeds
+        .iter()
+        .map(|feed| {
+            serde_json::json!({
+                "source_url": feed.source_url,
+                "tier": feed.tier.as_str(),
+                "interval": feed_interval(feed, config),
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "watch": {
+            "fast_interval": config.fast_interval,
+            "slow_interval": config.slow_interval,
+            "iterations": max_iterations,
+            "feeds": feed_metadata,
+        },
+        "results": results,
+    });
+    Ok(serde_json::to_string_pretty(&payload)?)
+}
+
 fn handle_watch_with_fetcher<F, S>(
     source_url: &str,
     interval: u64,
@@ -1793,45 +2109,50 @@ where
             "--interval must be at least 10 seconds.".to_string(),
         ));
     }
+    let single_feed = WatchedFeed {
+        source_url: source_url.to_string(),
+        tier: FeedTier::Fast,
+    };
+    let scheduler_config = WatchSchedulerConfig {
+        fast_interval: interval,
+        slow_interval: interval,
+    };
+    validate_tiered_watch(std::slice::from_ref(&single_feed), scheduler_config)?;
 
     let max_iterations = 3;
     let mut results = Vec::new();
 
     for i in 1..=max_iterations {
-        match fetcher(source_url)
-            .and_then(|feed_text| run_feed_text(&feed_text, source_url, sqlite_path))
+        for feed in due_feeds_for_iteration(std::slice::from_ref(&single_feed), scheduler_config, i)
         {
-            Ok(run_result) => {
-                results.push(serde_json::json!({
-                    "iteration": i,
-                    "source_url": source_url,
-                    "status": "ok",
-                    "raw_item_count": run_result.artifact.input_summary.raw_item_count,
-                    "normalized_event_count": run_result.artifact.input_summary.normalized_event_count,
-                    "dominant_field": run_result.artifact.scenario_summary.dominant_field,
-                    "risk_level": run_result.artifact.scenario_summary.risk_level,
-                    "headline": run_result.artifact.scenario_summary.headline,
-                }));
-            }
-            Err(e) => {
-                results.push(serde_json::json!({
-                    "iteration": i,
-                    "source_url": source_url,
-                    "status": "error",
-                    "error": e.to_string(),
-                }));
-            }
+            results.push(watch_result_for_feed(
+                &mut fetcher,
+                &feed.source_url,
+                sqlite_path,
+                i,
+            ));
         }
         if i < max_iterations {
             sleeper(std::time::Duration::from_secs(interval));
         }
     }
 
+    let supported_tiers: Vec<_> = supported_feed_tiers()
+        .into_iter()
+        .map(FeedTier::as_str)
+        .collect();
+
     let payload = serde_json::json!({
         "watch": {
             "source_url": source_url,
             "interval": interval,
             "iterations": max_iterations,
+            "supported_tiers": supported_tiers,
+            "feeds": [{
+                "source_url": single_feed.source_url,
+                "tier": single_feed.tier.as_str(),
+                "interval": feed_interval(&single_feed, scheduler_config),
+            }],
         },
         "results": results,
     });
