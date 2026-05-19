@@ -2,9 +2,9 @@
 
 TianJi is a geopolitical intelligence engine — ingest signals, compute divergence, generate intervention candidates, and track changes across runs. Deterministic by default. Daemon-ready. Single binary.
 
-## Current State (2026-05-15)
+## Current State (2026-05-19)
 
-Pure Rust project. 111 tests, zero failures. Single binary, no Python dependencies.
+Pure Rust project. 337 unit tests + 32 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, and TUI replay are implemented.
 
 | Milestone | Status |
 |-----------|--------|
@@ -108,10 +108,10 @@ $ cargo run -- run --fixture tests/fixtures/sample_feed.xml
 }
 ```
 
-**No OpenAI-compatible API is used or needed.** The Cangjie/Fuxi pipeline (feed → scoring → backtrack) is 100% deterministic rule-based. LLM integration is planned for the deferred Hongmeng (orchestration) and Nuwa (simulation) phases, where multi-agent game-theoretic reasoning will call external models. When that ships, the provider config will follow the YAML spec in `plan.md` §7:
+**No LLM is required for the Cangjie/Fuxi pipeline.** Feed → scoring → backtrack remains 100% deterministic and can run with no API key. Optional Hongmeng/Nuwa simulation can call configured LLM providers when provider config is present:
 
 ```yaml
-# ~/.tianji/config.yaml  (future, not yet implemented)
+# ~/.tianji/config.yaml
 providers:
   openai_compatible:
     type: openai
@@ -120,7 +120,7 @@ providers:
     base_url: https://api.openai.com   # or any compatible endpoint
 ```
 
-For now: **no LLM, no API key, no network calls**. Everything runs locally from fixture files.
+For deterministic fixture runs: **no LLM, no API key, no network calls**. LLM/network access is only used by optional provider-backed simulation or external alert dispatch paths.
 
 ---
 
@@ -136,7 +136,9 @@ tianji history-compare  Compare two persisted runs side-by-side
 tianji delta            Show cross-run change tracking between two runs
 tianji daemon           Daemon lifecycle and job queue
 tianji webui            Serve the optional local web dashboard
-tianji tui              Browse persisted runs in a read-only terminal UI
+tianji tui              Browse persisted runs and simulation replay in a terminal UI
+tianji predict          Run Hongmeng/Nuwa simulation against configured actor profiles
+tianji watch            Poll feeds with fast/slow scheduling helpers
 tianji completions      Generate shell completion scripts (bash/zsh/fish)
 ```
 
@@ -273,6 +275,7 @@ The daemon exposes a read-first HTTP API at `http://127.0.0.1:8765`:
 | `GET /api/v1/runs/{run_id}` | Single run detail |
 | `GET /api/v1/compare?left_run_id=1&right_run_id=2` | Compare two runs |
 | `GET /api/v1/delta/latest` | Latest delta report from hot memory |
+| `POST /api/v1/agent/command` | HMAC-signed local agent command ingress |
 
 All responses use a JSON envelope: `{"api_version": "v1", "data": {...}, "error": null}`.
 
@@ -295,7 +298,7 @@ Read-only terminal UI for browsing persisted runs. ratatui + Kanagawa Dark.
 tianji tui --sqlite-path <PATH> [--limit 20]
 ```
 
-Keybindings: `j/k` navigate, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` detail view, `q` quit.
+Keybindings: `j/k` navigate, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` detail view, `q` quit. In simulation view, `Left`/`h` and `Right`/`l` scrub replay frames.
 
 ### `tianji completions`
 
@@ -387,10 +390,10 @@ RunArtifact JSON (stdout) + optional SQLite persistence + optional DeltaReport
 
 ```
 tianji/
-├── Cargo.toml                  # 16 deps (see plan.md §7 for current vs target)
+├── Cargo.toml                  # Rust crate manifest
 ├── src/
 │   ├── main.rs                 # CLI entry (9 subcommands)
-│   ├── lib.rs                  # Pipeline + 111 integration tests
+│   ├── lib.rs                  # Pipeline library + integration tests
 │   ├── models.rs               # RawItem → NormalizedEvent → ScoredEvent → RunArtifact
 │   ├── fetch.rs                # RSS/Atom parsing + SHA-256 canonical hash
 │   ├── normalize.rs            # Keyword/actor/region extraction (LazyLock regexes)
@@ -401,7 +404,7 @@ tianji/
 │   ├── daemon.rs               # UNIX socket + job queue + serve + mark_delta_signals_alerted
 │   ├── api.rs                  # axum 6-route HTTP API + response envelope
 │   ├── webui.rs                # Embedded static files + API proxy + /queue-run
-│   ├── tui.rs                  # ratatui history browser (Kanagawa Dark, Vim keys)
+│   ├── tui/                    # ratatui history/simulation browser (Kanagawa Dark, Vim keys)
 │   ├── delta.rs                # Crucix Delta Engine: compute_delta, MetricSnapshot, severity
 │   ├── delta_memory.rs         # HotMemory, AlertDecayModel, AlertTier, atomic I/O
 │   └── utils.rs                # round2, days_since_epoch, collect_string_array
@@ -419,4 +422,4 @@ tianji/
 2. **Deterministic First** — BTreeMap (not HashMap), LazyLock regex, no wall-clock in pipeline. Same input always produces same output.
 3. **CLI First** — every feature ships as a CLI subcommand before any UI or service layer.
 4. **Single Binary** — `cargo build` produces one binary. Web UI assets are `include_str!` embedded.
-5. **No LLM required** — the current pipeline is 100% rule-based. LLM integration is planned for future multi-agent simulation phases only.
+5. **No LLM required for core runs** — the deterministic pipeline is rule-based; LLM-backed multi-agent simulation is optional and configured separately.

@@ -1,6 +1,6 @@
 # TianJi (天机) — Development Plan v5
 
-> Branch: `main` | Updated: 2026-05-18
+> Branch: `main` | Updated: 2026-05-19
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
 > Current: Core product complete. Phase A/B/C/D/E hardening, production features, agent integration, and simulation auditability complete. Next: update roadmap before starting new feature phase.
 > Tests: 337 unit + 32 integration pass / 0 fail
@@ -218,61 +218,49 @@ Files: `src/tui/*`, `src/storage.rs`, `src/worldline/*`
 > Full analysis: `.trellis/reviews/shadowbroker-cross-project-analysis.md`
 > Repo: `/home/kita/code/Shadowbroker`
 
-ShadowBroker is a 60+ feed real-time OSINT geospatial dashboard
-(Next.js + MapLibre + FastAPI + Rust privacy-core). Six patterns
-are worth adapting for TianJi, ordered by priority:
+Borrowing adoption status after Phase D/E:
 
-### Borrowing 1 (high): Alert Dispatch to External Channels
-ShadowBroker's `AlertDispatcher` sends branded alerts to Discord
-webhooks, Telegram bots, and generic webhooks — with automatic
-message chunking for platform character limits.
+- Borrowing 1: Alert Dispatch to External Channels ✅
+  - Landed in D7 as `src/alert_dispatch.rs`.
+  - Telegram, Discord, generic webhook, chunking, dry-run, and secret redaction.
 
-**TianJi adoption:** Wire `AlertTier` (Flash/Priority/Routine) to
-real delivery channels. New file `src/alert_dispatch.rs`, config
-in `~/.tianji/config.yaml`. Reuses existing `reqwest` dep.
+- Borrowing 2: HMAC-Signed Agent Command Channel ✅
+  - Landed in E1 as `POST /api/v1/agent/command`.
+  - HMAC-SHA256 over timestamp + nonce + body digest with replay protection.
 
-### Borrowing 2 (medium): HMAC-Signed Agent Command Channel
-ShadowBroker exposes `POST /api/ai/channel/command` and `/batch`
-endpoints with HMAC-SHA256 signing (timestamp + nonce + body digest),
-tier-gated access (restricted/full), and SSE push for layer changes.
+- Borrowing 3: Typed Data Model reference ✅
+  - Landed across Phase C/D.
+  - Hongmeng private state, board stick values, worldline snapshots, and API boundaries use typed Rust structures where stable contracts matter.
 
-**TianJi adoption:** Add `/api/v1/agent/command` to daemon's axum
-router, enabling external AI agents (Hermes, OpenClaw, etc.) to
-participate in Hongmeng simulations as first-class actors.
+- Borrowing 4: Fast/Slow Feed Tier Separation ✅
+  - Landed in D8.
+  - Deterministic fast/slow scheduling helpers preserve existing single-feed watch behavior.
 
-### Borrowing 3 (medium): Typed Data Model (H8 fix reference)
-ShadowBroker's frontend has ~1100 lines of TypeScript interfaces
-covering every entity (Flight, Ship, Satellite, Earthquake, GDELT, ...).
-Every field is typed. No `any` overuse.
+- Borrowing 5: Structured Agent Output ✅
+  - Landed in E2.
+  - `AgentAction` now carries `assessment`, `category`, `confidence`, and `drivers[]`.
 
-**TianJi adoption:** This is the reference pattern for fixing H8
-(`serde_json::Value` → strong types). Define `#[derive(Serialize,
-Deserialize)]` structs for ScoredEvent, InterventionCandidate,
-EventGroupSummary, etc. Phase C1 in this plan.
+- Borrowing 6: Snapshot Timeline Replay ✅
+  - Landed in E3.
+  - Simulation TUI exposes replay cursor/frame position and keyboard scrubbing.
 
-### Borrowing 4 (medium): Fast/Slow Feed Tier Separation
-ShadowBroker splits 60+ feeds: fast tier (15-30s: flights, ships,
-satellites) vs slow tier (5-15min: GDELT, news, earthquakes, fires).
+### Phase F — Product Polish & Operator Readiness (NEXT)
 
-**TianJi adoption:** Extend `DaemonConfig` with `fast_interval_secs`
-and `slow_interval_secs`. Group watched feeds by urgency. Lowers
-API costs and LLM token consumption in Hongmeng simulations.
+**F1. Config sample and doctor command**
+- Add a user-safe config template covering providers, alert dispatch, daemon, and agent command secret env vars.
+- Add or extend a `doctor`-style command that validates config shape, env-var presence, sqlite path writability, and optional endpoint reachability without leaking secrets.
 
-### Borrowing 5 (low): Structured Agent Output (Analysis Zones)
-ShadowBroker agents place analysis zones on the map with category
-(contradiction/warning/observation/hypothesis), severity, cell size,
-and evidence drivers.
+**F2. API contract fixtures for Phase D/E surfaces**
+- Add contract fixtures/tests for `/api/v1/meta`, `/api/v1/agent/command`, alert dispatch payload builders, and TUI replay formatting.
+- Keep external-service behavior mocked/dry-run only.
 
-**TianJi adoption:** Enrich `AgentAction` with structured rationale:
-`{assessment, category, confidence, drivers[]}`. Makes Nuwa
-simulation paths auditable and the TUI simulation view richer.
+**F3. README operator quickstart refresh**
+- Document current LLM config, daemon API, signed command channel, alert dispatch dry-run, and TUI replay keybindings.
+- Keep examples local-first and credential-free.
 
-### Borrowing 6 (low): Snapshot Timeline Replay
-ShadowBroker's Time Machine captures hourly snapshots with frame
-interpolation for moving entities, variable playback speed.
-
-**TianJi adoption:** Extend TUI history mode with arrow-key timeline
-scrubbing through persisted runs, replaying field changes tick-by-tick.
+**F4. Release readiness check**
+- Verify `cargo build --release`, binary size target, shell completions, and a fixture-based smoke run.
+- Produce a concise release checklist in the repo.
 
 ---
 
@@ -315,7 +303,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 324 unit + 32 integration)
+- `cargo test` all green (currently 337 unit + 32 integration)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
