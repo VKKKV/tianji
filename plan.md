@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-18
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core product complete. Phase A/B/C hardening complete; Phase D1 coverage complete. Next: selective production features.
-> Tests: 321 pass / 0 fail
+> Current: Core product complete. Phase A/B/C/D hardening and production feature pass complete. Next: Phase E agent integration and simulation auditability.
+> Tests: 324 unit + 32 integration pass / 0 fail
 
 ---
 
@@ -40,7 +40,7 @@ Bugfix ████████████████████ ✅ 22 bugs 
 ```
 
   源码: 21,722 行 Rust / 55 源文件
-  测试: 321 pass / 0 fail
+  测试: 324 unit + 32 integration pass / 0 fail
   构建: cargo build + clippy -D warnings zero
   依赖: 23 manifest dependencies
   Python: 已退役
@@ -93,7 +93,7 @@ Bugfix ████████████████████ ✅ 22 bugs 
 - Worldline branching flows through `sandbox::fork_worldline` and `WorldlineStore`.
 - Failure contract documented; SQLite coupling removed from Nuwa simulation signatures.
 
-### Phase D — Production & Features (IN PROGRESS)
+### Phase D — Production & Features (COMPLETE)
 
 **D1. Integration test coverage** ✅
 - Added end-to-end storage history coverage for `persist_run → get_run_summary → compare_runs`.
@@ -151,46 +151,65 @@ selective production features. Ordered by priority.
   configurable scoring parameters.
 - Phase C: typed Hongmeng state, TUI view-state decoupling, Nuwa tick
   deduplication, unified worldline forking.
-- Phase D1: storage history integration coverage.
+- Phase D: D1-D8 production features complete.
+- Phase E: agent command channel, structured simulation auditability, timeline replay.
 
-### Phase D — Remaining Production & Features
+### Phase D — Completed Production & Features
 
-**D2. ActorProfile YAML validation**
+**D2. ActorProfile YAML validation** ✅
 Files: `src/profile/types.rs`, `src/profile/registry.rs`
-- `validate()` method: salience ∈ [0,1], capabilities ∈ [0,1]
-- Reject malformed profiles at `ProfileRegistry::load_from_dir`
-- Tests for good/base/bad YAML profiles
+- Profile semantic validation at load time.
+- Rejects malformed salience/capability values with path/id/field context.
 
-**D3. SQLite connection pool**
+**D3. SQLite connection pool** ✅
 Files: `src/api.rs`, `src/daemon.rs`, `src/storage.rs`
-- Replace per-request `Connection::open` in API paths with a small pool
-- Keep CLI one-shot storage simple; pool only long-lived runtime paths
-- Preserve SQLite foreign-key and read-limit contracts
+- Long-lived API/daemon paths use a bounded SQLite pool.
+- CLI path-based helpers remain available for one-shot usage.
 
-**D4. Ollama /api/chat migration**
-Files: `src/llm/*`, `src/hongmeng/agent.rs`
-- Prefer structured chat messages over plain-text `/api/generate`
-- Preserve provider registry compatibility and deterministic test clients
+**D4. Ollama /api/chat migration** ✅
+Files: `src/llm/*`
+- Ollama uses structured `/api/chat` messages instead of flattened `/api/generate` prompts.
+- Provider registry and `LlmClient::chat` compatibility preserved.
 
-**D5. LLM concurrency limiting**
-Files: `src/llm/*`, `src/hongmeng/*`, `src/nuwa/*`
-- Implement `max_concurrency` with `tokio::sync::Semaphore`
-- Tests must prove bounded concurrent calls without serializing deterministic paths
+**D5. LLM concurrency limiting** ✅
+Files: `src/llm/*`
+- `ProviderConfig.max_concurrency` enforced with per-provider semaphores.
+- Deterministic/no-provider simulation paths are not serialized.
 
-**D6. Worldline causal_graph serialization**
-Files: `src/worldline/types.rs`, `src/nuwa/*`
-- Add explicit serde contract for `petgraph::DiGraph`
-- Verify snapshot round-trip and compatibility with stored worldlines
+**D6. Worldline causal_graph serialization** ✅
+Files: `src/worldline/types.rs`
+- Explicit stable serde contract for worldline causal graphs.
+- Snapshot round-trip coverage added.
 
-**D7. Alert dispatch to external channels**
-Files: NEW `src/alert_dispatch.rs`, config docs
-- Map `AlertTier` to Telegram/Discord/webhook delivery policies
-- Include chunking, dry-run mode, and no-secret logging rules
+**D7. Alert dispatch to external channels** ✅
+Files: `src/alert_dispatch.rs`
+- Telegram, Discord, and generic webhook payloads with chunking, dry-run, and secret redaction.
 
-**D8. Fast/slow feed tier separation**
-Files: `src/daemon.rs`, config docs
-- Extend daemon scheduling config with fast/slow intervals
-- Group watched feeds by urgency to reduce API/LLM cost
+**D8. Fast/slow feed tier separation** ✅
+Files: `src/main.rs`
+- Deterministic fast/slow feed scheduling helpers.
+- Existing single-feed watch contract preserved.
+
+### Phase E — Agent Integration & Simulation Auditability
+
+**E1. HMAC-Signed Agent Command Channel**
+Files: `src/api.rs`, `src/daemon.rs`, `src/hongmeng/*`
+- Add `/api/v1/agent/command` to daemon axum router.
+- Verify commands with HMAC-SHA256 over timestamp + nonce + body digest.
+- Gate command scopes by restricted/full access tier.
+- Keep replay protection testable without external services.
+
+**E2. Structured Agent Output / Simulation Auditability**
+Files: `src/hongmeng/*`, `src/nuwa/*`, TUI simulation view if needed
+- Enrich `AgentAction` with structured rationale: assessment, category, confidence, drivers.
+- Preserve compatibility at prompt/API boundaries.
+- Make simulation paths auditable in JSON and TUI.
+
+**E3. TUI Snapshot Timeline Replay**
+Files: `src/tui/*`, `src/storage.rs`, `src/worldline/*`
+- Extend TUI history/simulation views with run timeline scrubbing.
+- Replay persisted field changes and worldline snapshots with keyboard navigation.
+- Keep existing TUI keybindings and fallback rendering stable.
 
 ---
 
@@ -296,7 +315,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 321)
+- `cargo test` all green (currently 324 unit + 32 integration)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
