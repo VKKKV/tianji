@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-18
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core product complete. Phase A/B/C/D hardening and production feature pass complete. Next: Phase E agent integration and simulation auditability.
-> Tests: 324 unit + 32 integration pass / 0 fail
+> Current: Core product complete. Phase A/B/C/D/E hardening, production features, agent integration, and simulation auditability complete. Next: update roadmap before starting new feature phase.
+> Tests: 337 unit + 32 integration pass / 0 fail
 
 ---
 
@@ -40,7 +40,7 @@ Bugfix ████████████████████ ✅ 22 bugs 
 ```
 
   源码: 21,722 行 Rust / 55 源文件
-  测试: 324 unit + 32 integration pass / 0 fail
+  测试: 337 unit + 32 integration pass / 0 fail
   构建: cargo build + clippy -D warnings zero
   依赖: 23 manifest dependencies
   Python: 已退役
@@ -190,26 +190,26 @@ Files: `src/main.rs`
 - Deterministic fast/slow feed scheduling helpers.
 - Existing single-feed watch contract preserved.
 
-### Phase E — Agent Integration & Simulation Auditability
+### Phase E — Agent Integration & Simulation Auditability (COMPLETE)
 
-**E1. HMAC-Signed Agent Command Channel**
+**E1. HMAC-Signed Agent Command Channel** ✅
 Files: `src/api.rs`, `src/daemon.rs`, `src/hongmeng/*`
-- Add `/api/v1/agent/command` to daemon axum router.
-- Verify commands with HMAC-SHA256 over timestamp + nonce + body digest.
-- Gate command scopes by restricted/full access tier.
-- Keep replay protection testable without external services.
+- Added `/api/v1/agent/command` to daemon axum router.
+- Verifies commands with HMAC-SHA256 over timestamp + nonce + body digest.
+- Rejects replayed nonce/timestamp combinations and unsigned command ingress.
+- Keeps replay protection testable without external services.
 
-**E2. Structured Agent Output / Simulation Auditability**
+**E2. Structured Agent Output / Simulation Auditability** ✅
 Files: `src/hongmeng/*`, `src/nuwa/*`, TUI simulation view if needed
-- Enrich `AgentAction` with structured rationale: assessment, category, confidence, drivers.
-- Preserve compatibility at prompt/API boundaries.
-- Make simulation paths auditable in JSON and TUI.
+- Enriched `AgentAction` with structured rationale: assessment, category, confidence, drivers.
+- Preserves compatibility at prompt/API boundaries.
+- Makes simulation paths auditable in JSON and TUI.
 
-**E3. TUI Snapshot Timeline Replay**
+**E3. TUI Snapshot Timeline Replay** ✅
 Files: `src/tui/*`, `src/storage.rs`, `src/worldline/*`
-- Extend TUI history/simulation views with run timeline scrubbing.
-- Replay persisted field changes and worldline snapshots with keyboard navigation.
-- Keep existing TUI keybindings and fallback rendering stable.
+- Extended TUI simulation view with replay cursor/frame metadata.
+- Supports `Left`/`h` and `Right`/`l` keyboard timeline scrubbing.
+- Keeps existing TUI keybindings and fallback rendering stable.
 
 ---
 
