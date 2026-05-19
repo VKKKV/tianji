@@ -4,16 +4,36 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
-use super::state::SimulationState;
+use super::state::{SimulationState, SimulationViewState};
 use super::theme::KANAGAWA;
 
 pub fn format_simulation(sim: &SimulationState) -> String {
+    format_simulation_with_replay(sim, 0, 0)
+}
+
+pub fn format_simulation_view(simulation: &SimulationViewState) -> String {
+    match simulation.sim_state.as_ref() {
+        Some(sim) => format_simulation_with_replay(
+            sim,
+            simulation.replay_cursor,
+            simulation.replay_frame_count,
+        ),
+        None => "No simulation loaded.\n".to_string(),
+    }
+}
+
+fn format_simulation_with_replay(
+    sim: &SimulationState,
+    replay_cursor: usize,
+    replay_frame_count: usize,
+) -> String {
     let mut output = String::new();
+    let (frame_number, frame_count) = timeline_position(replay_cursor, replay_frame_count, sim);
 
     // Header
     output.push_str(&format!(
-        "mode: {}  field: {}  tick {}/{}\n",
-        sim.mode, sim.target, sim.tick, sim.total_ticks
+        "mode: {}  field: {}  tick {}/{}  frame {}/{}\n",
+        sim.mode, sim.target, sim.tick, sim.total_ticks, frame_number, frame_count
     ));
     output.push_str(&format!("status: {}\n", sim.status));
 
@@ -68,10 +88,22 @@ pub fn format_simulation(sim: &SimulationState) -> String {
     output
 }
 
+fn timeline_position(
+    replay_cursor: usize,
+    replay_frame_count: usize,
+    sim: &SimulationState,
+) -> (usize, usize) {
+    let frame_count = replay_frame_count.max(sim.total_ticks.max(sim.tick).max(1) as usize);
+    let frame_number = replay_cursor.min(frame_count - 1) + 1;
+    (frame_number, frame_count)
+}
+
 pub fn render_simulation(
     frame: &mut Frame<'_>,
     area: Rect,
     simulation: Option<&SimulationState>,
+    replay_cursor: usize,
+    replay_frame_count: usize,
     prune_mode: bool,
     prune_selected: &[usize],
 ) {
@@ -92,6 +124,7 @@ pub fn render_simulation(
     };
 
     let mut lines: Vec<Line<'_>> = Vec::new();
+    let (frame_number, frame_count) = timeline_position(replay_cursor, replay_frame_count, sim);
 
     // Header section
     lines.push(Line::from(vec![
@@ -108,6 +141,11 @@ pub fn render_simulation(
         Span::styled("tick ", Style::default().fg(KANAGAWA.label)),
         Span::styled(
             format!("{}/{}", sim.tick, sim.total_ticks),
+            Style::default().fg(KANAGAWA.value),
+        ),
+        Span::styled("  frame ", Style::default().fg(KANAGAWA.label)),
+        Span::styled(
+            format!("{frame_number}/{frame_count}"),
             Style::default().fg(KANAGAWA.value),
         ),
     ]));
@@ -315,6 +353,15 @@ mod tests {
         assert!(formatted.contains("naval exercise"));
         assert!(formatted.contains("Events"));
         assert!(formatted.contains("conflict increased by 0.15"));
+    }
+
+    #[test]
+    fn simulation_format_includes_timeline_position() {
+        let sim = sample_simulation();
+        let view = SimulationViewState::new(Some(sim));
+        let formatted = format_simulation_view(&view);
+
+        assert!(formatted.contains("frame 3/30"));
     }
 
     #[test]

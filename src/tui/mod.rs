@@ -12,7 +12,7 @@ pub use dashboard::{format_dashboard, render_dashboard};
 pub use detail::{format_detail, render_detail};
 pub use history::{format_history_row, history_title, render_history};
 pub use render::{base_style, render};
-pub use simulation::{format_simulation, render_simulation};
+pub use simulation::{format_simulation, format_simulation_view, render_simulation};
 pub use state::{
     array_string_field, bool_field, capitalize_first, compact_json_field, compact_json_value,
     compact_stick_value, compact_timestamp, detect_glyph_mode, format_alert_tier, numeric_field,
@@ -385,23 +385,24 @@ impl TerminalSession {
         loop {
             // Poll simulation channel for live updates (non-blocking)
             if let ViewState::Simulation(sim_view) = &mut state.view {
-                if let Some(ref mut rx) = sim_view.pending_sim_rx {
+                if let Some(mut rx) = sim_view.pending_sim_rx.take() {
                     while let Ok(update) = rx.try_recv() {
                         match update {
                             crate::nuwa::outcome::SimUpdate::Tick { state: sim_state } => {
-                                sim_view.sim_state = Some(sim_state);
+                                sim_view.set_sim_state(sim_state);
                             }
                             crate::nuwa::outcome::SimUpdate::PruneRequest {
                                 state: sim_state,
                                 response,
                             } => {
-                                sim_view.sim_state = Some(sim_state);
+                                sim_view.set_sim_state(sim_state);
                                 sim_view.prune_mode = true;
                                 sim_view.pending_prune_tx = Some(response);
                             }
                             crate::nuwa::outcome::SimUpdate::Completed => {}
                         }
                     }
+                    sim_view.pending_sim_rx = Some(rx);
                 }
             }
 
@@ -708,7 +709,23 @@ fn handle_simulation_key(
 
     match key.code {
         KeyCode::Char('q') => false,
-        KeyCode::Esc | KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('2') => {
+        KeyCode::Left | KeyCode::Char('h') => {
+            simulation.previous_replay_frame();
+            state.view = ViewState::Simulation(std::mem::replace(
+                simulation,
+                SimulationViewState::new(None),
+            ));
+            true
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            simulation.next_replay_frame();
+            state.view = ViewState::Simulation(std::mem::replace(
+                simulation,
+                SimulationViewState::new(None),
+            ));
+            true
+        }
+        KeyCode::Esc | KeyCode::Char('H') | KeyCode::Char('2') => {
             state.view = ViewState::Simulation(std::mem::replace(
                 simulation,
                 SimulationViewState::new(None),
@@ -1103,6 +1120,28 @@ mod tests {
 
         assert!(handle_key(&mut state, &key(KeyCode::Esc)));
         assert_eq!(state.view, TuiView::Dashboard);
+    }
+
+    #[test]
+    fn simulation_key_handler_moves_replay_cursor() {
+        let mut state = TuiState::new(vec![row(1)], dashboard());
+        state.show_simulation(simulation_state());
+        let ViewState::Simulation(simulation) = &state.view else {
+            panic!("expected simulation view");
+        };
+        assert_eq!(simulation.replay_cursor, 4);
+
+        assert!(handle_key(&mut state, &key(KeyCode::Left)));
+        let ViewState::Simulation(simulation) = &state.view else {
+            panic!("expected simulation view");
+        };
+        assert_eq!(simulation.replay_cursor, 3);
+
+        assert!(handle_key(&mut state, &key(KeyCode::Char('l'))));
+        let ViewState::Simulation(simulation) = &state.view else {
+            panic!("expected simulation view");
+        };
+        assert_eq!(simulation.replay_cursor, 4);
     }
 
     #[tokio::test]

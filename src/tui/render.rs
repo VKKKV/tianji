@@ -41,6 +41,8 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
             frame,
             root[1],
             simulation.sim_state.as_ref(),
+            simulation.replay_cursor,
+            simulation.replay_frame_count,
             simulation.prune_mode,
             &simulation.prune_selected,
         ),
@@ -83,14 +85,20 @@ pub fn render(frame: &mut Frame<'_>, state: &TuiState) {
             Span::styled("[/]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" search  "),
         ]);
-    } else if matches!(
-        state.view,
-        ViewState::Detail(_) | ViewState::Compare(_) | ViewState::Simulation(_)
-    ) {
+    } else if matches!(state.view, ViewState::Detail(_) | ViewState::Compare(_)) {
         spans.extend(vec![
             Span::styled("[Esc]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw("/"),
             Span::styled("[h]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" back  "),
+        ]);
+    } else if matches!(state.view, ViewState::Simulation(_)) {
+        spans.extend(vec![
+            Span::styled("[Left/h]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" prev frame  "),
+            Span::styled("[Right/l]", Style::default().fg(KANAGAWA.key_hint)),
+            Span::raw(" next frame  "),
+            Span::styled("[Esc]", Style::default().fg(KANAGAWA.key_hint)),
             Span::raw(" back  "),
         ]);
     }

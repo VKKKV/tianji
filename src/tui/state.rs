@@ -289,6 +289,8 @@ impl HistoryViewState {
 
 pub struct SimulationViewState {
     pub sim_state: Option<SimulationState>,
+    pub replay_cursor: usize,
+    pub replay_frame_count: usize,
     pub prune_mode: bool,
     pub prune_selected: Vec<usize>,
     pub pending_sim_rx: Option<tokio::sync::mpsc::Receiver<crate::nuwa::outcome::SimUpdate>>,
@@ -299,6 +301,8 @@ impl std::fmt::Debug for SimulationViewState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SimulationViewState")
             .field("sim_state", &self.sim_state)
+            .field("replay_cursor", &self.replay_cursor)
+            .field("replay_frame_count", &self.replay_frame_count)
             .field("prune_mode", &self.prune_mode)
             .field("prune_selected", &self.prune_selected)
             .field(
@@ -315,14 +319,43 @@ impl std::fmt::Debug for SimulationViewState {
 
 impl SimulationViewState {
     pub fn new(sim_state: Option<SimulationState>) -> Self {
+        let (replay_cursor, replay_frame_count) =
+            sim_state.as_ref().map(replay_bounds).unwrap_or((0, 0));
         Self {
             sim_state,
+            replay_cursor,
+            replay_frame_count,
             prune_mode: false,
             prune_selected: Vec::new(),
             pending_sim_rx: None,
             pending_prune_tx: None,
         }
     }
+
+    pub fn set_sim_state(&mut self, sim_state: SimulationState) {
+        let (replay_cursor, replay_frame_count) = replay_bounds(&sim_state);
+        self.sim_state = Some(sim_state);
+        self.replay_cursor = replay_cursor;
+        self.replay_frame_count = replay_frame_count;
+    }
+
+    pub fn previous_replay_frame(&mut self) {
+        self.replay_cursor = self.replay_cursor.saturating_sub(1);
+    }
+
+    pub fn next_replay_frame(&mut self) {
+        if self.replay_frame_count == 0 {
+            self.replay_cursor = 0;
+        } else {
+            self.replay_cursor = (self.replay_cursor + 1).min(self.replay_frame_count - 1);
+        }
+    }
+}
+
+fn replay_bounds(sim_state: &SimulationState) -> (usize, usize) {
+    let frame_count = sim_state.total_ticks.max(sim_state.tick).max(1) as usize;
+    let latest_cursor = sim_state.tick.saturating_sub(1) as usize;
+    (latest_cursor.min(frame_count - 1), frame_count)
 }
 
 /// Background loading handle for async detail/compare view population.
@@ -1808,6 +1841,42 @@ mod tests {
         assert_eq!(state.view, TuiView::Simulation);
         assert!(state.simulation().is_some());
         assert_eq!(state.simulation().unwrap().target, "global.conflict");
+    }
+
+    #[test]
+    fn simulation_view_replay_starts_latest_and_clamps() {
+        let sim = SimulationState {
+            mode: "forward".to_string(),
+            target: "global.conflict".to_string(),
+            horizon: 10,
+            tick: 3,
+            total_ticks: 10,
+            status: "running".to_string(),
+            field_values: vec![],
+            agent_statuses: vec![],
+            event_log: vec![],
+            branches: vec![],
+        };
+        let mut view = SimulationViewState::new(Some(sim));
+
+        assert_eq!(view.replay_frame_count, 10);
+        assert_eq!(view.replay_cursor, 2);
+        view.previous_replay_frame();
+        view.previous_replay_frame();
+        view.previous_replay_frame();
+        assert_eq!(view.replay_cursor, 0);
+        for _ in 0..20 {
+            view.next_replay_frame();
+        }
+        assert_eq!(view.replay_cursor, 9);
+    }
+
+    #[test]
+    fn simulation_view_empty_replay_state_is_zero() {
+        let view = SimulationViewState::new(None);
+
+        assert_eq!(view.replay_frame_count, 0);
+        assert_eq!(view.replay_cursor, 0);
     }
 
     #[test]
