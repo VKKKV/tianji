@@ -30,6 +30,12 @@ pub struct AgentAction {
     pub board_message: Option<BoardMessage>,
     pub confidence: f64,
     pub rationale: String,
+    #[serde(default)]
+    pub assessment: String,
+    #[serde(default = "default_action_category")]
+    pub category: String,
+    #[serde(default)]
+    pub drivers: Vec<String>,
 }
 
 /// Visible simulation context passed to an LLM-backed agent decision.
@@ -48,6 +54,13 @@ struct LlmActionEnvelope {
     board_message: Option<String>,
     confidence: Option<f64>,
     rationale: Option<String>,
+    assessment: Option<String>,
+    category: Option<String>,
+    drivers: Option<Vec<String>>,
+}
+
+fn default_action_category() -> String {
+    "uncategorized".to_string()
 }
 
 /// An agent in the Hongmeng simulation — wraps an ActorProfile with runtime state.
@@ -192,6 +205,12 @@ impl Agent {
             board_message: None,
             confidence: 0.5,
             rationale: "stub action (no LLM)".to_string(),
+            assessment: "deterministic stub fallback; no LLM assessment available".to_string(),
+            category: "stub_fallback".to_string(),
+            drivers: vec![
+                "no_llm_provider".to_string(),
+                "deterministic_profile_pattern".to_string(),
+            ],
         }
     }
 
@@ -215,7 +234,7 @@ impl Agent {
         clients: &[&LlmClient],
         context: AgentDecisionContext<'_>,
     ) -> Result<AgentAction, LlmError> {
-        let system = "You are a geopolitical simulation agent. Return ONLY strict JSON: {\"action_type\": string, \"target\": string|null, \"board_message\": string|null, \"confidence\": number between 0 and 1, \"rationale\": string}. Keep action_type concise and machine-readable.";
+        let system = "You are a geopolitical simulation agent. Return ONLY strict JSON: {\"action_type\": string, \"target\": string|null, \"board_message\": string|null, \"confidence\": number between 0 and 1, \"rationale\": string, \"assessment\": string, \"category\": string, \"drivers\": string[]}. Keep action_type and category concise and machine-readable; drivers must be ordered, non-empty causal factors.";
         let user = self.build_llm_prompt(tick, context)?;
         let mut last_error = None;
 
@@ -328,10 +347,6 @@ impl Agent {
 
         match parsed {
             Ok(envelope) => {
-                let action_type = envelope
-                    .action_type
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "observe".to_string());
                 let confidence = envelope.confidence.unwrap_or(0.6).clamp(0.0, 1.0);
                 let board_message = envelope.board_message.and_then(|content| {
                     let trimmed = content.trim();
@@ -349,20 +364,40 @@ impl Agent {
 
                 Ok(AgentAction {
                     tick,
-                    action_type,
-                    target: envelope.target.filter(|value| !value.trim().is_empty()),
+                    action_type: trim_or_default(envelope.action_type, "observe"),
+                    target: envelope.target.and_then(trim_optional),
                     board_message,
                     confidence,
-                    rationale: envelope
-                        .rationale
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or_else(|| "LLM action".to_string()),
+                    rationale: trim_or_default(envelope.rationale, "LLM action"),
+                    assessment: trim_or_default(envelope.assessment, ""),
+                    category: trim_or_default(envelope.category, "uncategorized"),
+                    drivers: envelope
+                        .drivers
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(trim_optional)
+                        .collect(),
                 })
             }
             Err(e) => Err(LlmError::ChatFailed(format!(
                 "failed to parse LLM response as JSON: {e}"
             ))),
         }
+    }
+}
+
+fn trim_or_default(value: Option<String>, default: &str) -> String {
+    value
+        .and_then(trim_optional)
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn trim_optional(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -499,6 +534,24 @@ mod tests {
     }
 
     #[test]
+    fn agent_pick_stub_action_includes_audit_metadata() {
+        let profile = sample_profile("usa", vec!["diplomatic_protest"]);
+        let agent = Agent::from_profile(profile);
+
+        let action = agent.pick_stub_action(0);
+
+        assert_eq!(
+            action.assessment,
+            "deterministic stub fallback; no LLM assessment available"
+        );
+        assert_eq!(action.category, "stub_fallback");
+        assert_eq!(
+            action.drivers,
+            vec!["no_llm_provider", "deterministic_profile_pattern"]
+        );
+    }
+
+    #[test]
     fn agent_pick_stub_action_without_patterns() {
         let profile = sample_profile("test", vec![]);
         let agent = Agent::from_profile(profile);
@@ -524,6 +577,72 @@ mod tests {
         let message = action.board_message.expect("board message");
         assert_eq!(message.sender, "usa");
         assert_eq!(message.content, "We seek talks.");
+    }
+
+    #[test]
+    fn agent_action_deserializes_old_json_with_audit_defaults() {
+        let action: AgentAction = serde_json::from_str(
+            r#"{"tick":3,"action_type":"observe","target":null,"board_message":null,"confidence":0.4,"rationale":"legacy"}"#,
+        )
+        .expect("old action JSON should deserialize");
+
+        assert_eq!(action.assessment, "");
+        assert_eq!(action.category, "uncategorized");
+        assert!(action.drivers.is_empty());
+    }
+
+    #[test]
+    fn parse_llm_action_structured_fields() {
+        let profile = sample_profile("usa", vec!["observe"]);
+        let agent = Agent::from_profile(profile);
+        let action = agent
+            .parse_llm_action(
+                7,
+                r#"{
+                    "action_type":" diplomatic_signal ",
+                    "target":" china ",
+                    "board_message":" We seek talks. ",
+                    "confidence":0.82,
+                    "rationale":" de-escalation ",
+                    "assessment":" Escalation risk is rising but still controllable. ",
+                    "category":" diplomacy ",
+                    "drivers":[" public pressure ", "", " alliance signaling ", "   "]
+                }"#,
+            )
+            .expect("structured JSON should parse");
+
+        assert_eq!(action.action_type, "diplomatic_signal");
+        assert_eq!(action.target.as_deref(), Some("china"));
+        assert_eq!(action.rationale, "de-escalation");
+        assert_eq!(
+            action.assessment,
+            "Escalation risk is rising but still controllable."
+        );
+        assert_eq!(action.category, "diplomacy");
+        assert_eq!(
+            action.drivers,
+            vec!["public pressure", "alliance signaling"]
+        );
+        assert_eq!(
+            action.board_message.expect("board message").content,
+            "We seek talks."
+        );
+    }
+
+    #[test]
+    fn parse_llm_action_blank_structured_fields_default() {
+        let profile = sample_profile("usa", vec!["observe"]);
+        let agent = Agent::from_profile(profile);
+        let action = agent
+            .parse_llm_action(
+                1,
+                r#"{"assessment":"   ","category":"","drivers":[" ","valid driver"],"confidence":0.5}"#,
+            )
+            .expect("blank structured fields should default");
+
+        assert_eq!(action.assessment, "");
+        assert_eq!(action.category, "uncategorized");
+        assert_eq!(action.drivers, vec!["valid driver"]);
     }
 
     #[test]
