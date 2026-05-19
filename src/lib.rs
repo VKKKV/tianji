@@ -1,3 +1,4 @@
+pub mod alert_dispatch;
 pub mod api;
 pub mod backtrack;
 pub mod daemon;
