@@ -122,6 +122,15 @@ providers:
 
 For deterministic fixture runs: **no LLM, no API key, no network calls**. LLM/network access is only used by optional provider-backed simulation or external alert dispatch paths.
 
+A complete credential-free template is available at `examples/config.example.yaml`. Validate local readiness with:
+
+```bash
+tianji doctor --config examples/config.example.yaml --sqlite-path runs/tianji.sqlite3
+tianji doctor --config examples/config.example.yaml --json
+```
+
+`doctor` reports config parse status, provider references, env-var presence, and SQLite path readiness. It never prints raw API keys.
+
 ---
 
 ## Full CLI Reference
@@ -139,6 +148,7 @@ tianji webui            Serve the optional local web dashboard
 tianji tui              Browse persisted runs and simulation replay in a terminal UI
 tianji predict          Run Hongmeng/Nuwa simulation against configured actor profiles
 tianji watch            Poll feeds with fast/slow scheduling helpers
+tianji doctor           Validate local config readiness without printing secrets
 tianji completions      Generate shell completion scripts (bash/zsh/fish)
 ```
 

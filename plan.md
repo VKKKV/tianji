@@ -246,9 +246,9 @@ Borrowing adoption status after Phase D/E:
 
 ### Phase F — Product Polish & Operator Readiness (NEXT)
 
-**F1. Config sample and doctor command**
-- Add a user-safe config template covering providers, alert dispatch, daemon, and agent command secret env vars.
-- Add or extend a `doctor`-style command that validates config shape, env-var presence, sqlite path writability, and optional endpoint reachability without leaking secrets.
+**F1. Config sample and doctor command** ✅
+- Added `examples/config.example.yaml` as a user-safe provider template.
+- Added `tianji doctor [--config <PATH>] [--sqlite-path <PATH>] [--json]` for config parse, provider reference, env-var presence, and SQLite path readiness checks without leaking secrets.
 
 **F2. API contract fixtures for Phase D/E surfaces**
 - Add contract fixtures/tests for `/api/v1/meta`, `/api/v1/agent/command`, alert dispatch payload builders, and TUI replay formatting.

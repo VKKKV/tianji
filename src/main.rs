@@ -1,13 +1,14 @@
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use rusqlite::Connection;
+use serde::Serialize;
 use tianji::{
     artifact_json, classify_delta_tier, clear_baseline, compare_runs, compute_delta,
     get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary,
@@ -320,6 +321,18 @@ enum Cli {
         #[arg(long)]
         config: Option<String>,
     },
+    /// Validate local configuration readiness without printing secrets
+    Doctor {
+        /// Optional path to TianJi config YAML
+        #[arg(long)]
+        config: Option<String>,
+        /// Optional SQLite database path to check for parent readiness
+        #[arg(long = "sqlite-path")]
+        sqlite_path: Option<String>,
+        /// Emit JSON instead of human-readable output
+        #[arg(long = "json")]
+        json: bool,
+    },
     /// Generate shell completion scripts
     Completions {
         /// Shell to generate completions for
@@ -454,6 +467,27 @@ mod tests {
         if let Some(parent) = memory_path.parent() {
             let _ = std::fs::remove_dir_all(parent);
         }
+    }
+
+    fn temp_doctor_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "tianji_doctor_{label}_{}_{}.yaml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ))
+    }
+
+    fn write_doctor_config(label: &str, yaml: &str) -> PathBuf {
+        let path = temp_doctor_path(label);
+        std::fs::write(&path, yaml).expect("write doctor config");
+        path
+    }
+
+    fn cleanup_doctor_path(path: &Path) {
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]
@@ -1062,6 +1096,184 @@ mod tests {
     }
 
     #[test]
+    fn cli_parse_doctor() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "doctor",
+            "--config",
+            "tests/config.yaml",
+            "--sqlite-path",
+            "runs/tianji.sqlite3",
+            "--json",
+        ])
+        .expect("parse doctor");
+        match cli {
+            Cli::Doctor {
+                config,
+                sqlite_path,
+                json,
+            } => {
+                assert_eq!(config.as_deref(), Some("tests/config.yaml"));
+                assert_eq!(sqlite_path.as_deref(), Some("runs/tianji.sqlite3"));
+                assert!(json);
+            }
+            _ => panic!("expected Doctor variant"),
+        }
+    }
+
+    #[test]
+    fn doctor_missing_config_succeeds_with_warning() {
+        let path = temp_doctor_path("missing");
+        cleanup_doctor_path(&path);
+
+        let report = build_doctor_report(Some(&path.to_string_lossy()), None).expect("report");
+
+        assert!(report.ok);
+        assert!(!report.config_present);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "config_present" && check.severity == DoctorSeverity::Warning
+        }));
+    }
+
+    #[test]
+    fn doctor_malformed_config_returns_error() {
+        let path = write_doctor_config("malformed", "providers: [not: valid: yaml");
+
+        let result = build_doctor_report(Some(&path.to_string_lossy()), None);
+
+        assert!(
+            matches!(result, Err(TianJiError::Usage(message)) if message.contains("Failed to parse config YAML"))
+        );
+        cleanup_doctor_path(&path);
+    }
+
+    #[test]
+    fn doctor_valid_config_reports_providers_and_json_without_secrets() {
+        std::env::set_var("TIANJI_DOCTOR_SET_KEY", "secret-do-not-print");
+        let path = write_doctor_config(
+            "valid",
+            r#"
+providers:
+  local:
+    type: ollama
+    model: qwen3:14b
+    base_url: http://localhost:11434
+    max_concurrency: 2
+  remote:
+    type: openai
+    model: gpt-4o
+    api_key_env: TIANJI_DOCTOR_SET_KEY
+    api_key: inline-secret-do-not-print
+    fallback: local
+agent_model_map:
+  forward_default: local
+  backward_fine: remote
+"#,
+        );
+
+        let output = handle_doctor(Some(&path.to_string_lossy()), None, true).expect("json output");
+        let value: Value = serde_json::from_str(&output).expect("doctor json");
+
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["provider_count"], 2);
+        assert!(output.contains("inline_api_key_present"));
+        assert!(!output.contains("secret-do-not-print"));
+        assert!(!output.contains("inline-secret-do-not-print"));
+
+        std::env::remove_var("TIANJI_DOCTOR_SET_KEY");
+        cleanup_doctor_path(&path);
+    }
+
+    #[test]
+    fn doctor_missing_env_is_warning_without_secret_value() {
+        std::env::remove_var("TIANJI_DOCTOR_MISSING_KEY");
+        let path = write_doctor_config(
+            "missing_env",
+            r#"
+providers:
+  remote:
+    type: openai
+    model: gpt-4o
+    api_key_env: TIANJI_DOCTOR_MISSING_KEY
+"#,
+        );
+
+        let report = build_doctor_report(Some(&path.to_string_lossy()), None).expect("report");
+        let output = format_doctor_report(&report);
+
+        assert!(report.ok);
+        assert!(report.checks.iter().any(|check| {
+            check.name == "provider.remote.api_key_env"
+                && check.severity == DoctorSeverity::Warning
+                && check.message.contains("TIANJI_DOCTOR_MISSING_KEY")
+        }));
+        assert!(!output.contains("sk-"));
+        cleanup_doctor_path(&path);
+    }
+
+    #[test]
+    fn doctor_bad_references_and_concurrency_fail_report() {
+        let path = write_doctor_config(
+            "bad_refs",
+            r#"
+providers:
+  remote:
+    type: openai
+    model: gpt-4o
+    max_concurrency: 0
+    fallback: missing_provider
+agent_model_map:
+  forward_default: another_missing_provider
+"#,
+        );
+
+        let report = build_doctor_report(Some(&path.to_string_lossy()), None).expect("report");
+
+        assert!(!report.ok);
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.name == "provider.remote.max_concurrency"
+                && check.severity == DoctorSeverity::Error));
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.name == "provider.remote.fallback"
+                && check.severity == DoctorSeverity::Error));
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.name == "agent_model_map.forward_default"
+                && check.severity == DoctorSeverity::Error));
+        cleanup_doctor_path(&path);
+    }
+
+    #[test]
+    fn doctor_sqlite_parent_check_reports_ready_path() {
+        let path = temp_doctor_path("missing_with_sqlite");
+        cleanup_doctor_path(&path);
+        let sqlite_path = std::env::temp_dir().join(format!(
+            "tianji_doctor_{}_{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+
+        let report = build_doctor_report(
+            Some(&path.to_string_lossy()),
+            Some(&sqlite_path.to_string_lossy()),
+        )
+        .expect("report");
+
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| { check.name == "sqlite_path" && check.severity == DoctorSeverity::Ok }));
+    }
+
+    #[test]
     fn cli_parse_tui_with_simulate() {
         let cli = Cli::try_parse_from([
             "tianji",
@@ -1171,8 +1383,6 @@ fn parse_field_constraint(
 // ---------------------------------------------------------------------------
 
 use std::os::fd::AsRawFd;
-use std::path::PathBuf;
-
 fn pid_file_for_socket(socket_path: &str) -> PathBuf {
     let socket_file = PathBuf::from(socket_path);
     let file_name = socket_file
@@ -1614,8 +1824,360 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Predict / Backtrack / Baseline / Watch handlers
+// Predict / Backtrack / Baseline / Watch / Doctor handlers
 // ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DoctorSeverity {
+    Ok,
+    Warning,
+    Error,
+}
+
+impl DoctorSeverity {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Warning => "warning",
+            Self::Error => "error",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct DoctorCheck {
+    name: String,
+    severity: DoctorSeverity,
+    message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct DoctorProviderReport {
+    name: String,
+    provider_type: String,
+    model: String,
+    max_concurrency: usize,
+    base_url_present: bool,
+    api_key_env: Option<String>,
+    api_key_env_present: Option<bool>,
+    inline_api_key_present: bool,
+    fallback: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct DoctorAgentMappingReport {
+    agent: String,
+    provider: String,
+    provider_exists: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct DoctorReport {
+    ok: bool,
+    config_path: String,
+    config_present: bool,
+    provider_count: usize,
+    providers: Vec<DoctorProviderReport>,
+    agent_model_map: Vec<DoctorAgentMappingReport>,
+    sqlite_path: Option<String>,
+    checks: Vec<DoctorCheck>,
+}
+
+fn handle_doctor(
+    config_path: Option<&str>,
+    sqlite_path: Option<&str>,
+    json: bool,
+) -> Result<String, TianJiError> {
+    let report = build_doctor_report(config_path, sqlite_path)?;
+    if json {
+        serde_json::to_string_pretty(&report).map_err(TianJiError::Json)
+    } else {
+        Ok(format_doctor_report(&report))
+    }
+}
+
+fn build_doctor_report(
+    config_path: Option<&str>,
+    sqlite_path: Option<&str>,
+) -> Result<DoctorReport, TianJiError> {
+    let config_path = config_path
+        .map(PathBuf::from)
+        .unwrap_or_else(tianji::llm::TianJiConfig::default_path);
+    let config_path_text = config_path.to_string_lossy().to_string();
+    let mut checks = Vec::new();
+    let mut providers = Vec::new();
+    let mut mappings = Vec::new();
+
+    if !config_path.exists() {
+        checks.push(DoctorCheck {
+            name: "config_present".to_string(),
+            severity: DoctorSeverity::Warning,
+            message: format!(
+                "Config file not found at {config_path_text}; deterministic mode can run without LLM config."
+            ),
+        });
+        if let Some(sqlite_path) = sqlite_path {
+            check_sqlite_path(sqlite_path, &mut checks);
+        }
+        return Ok(DoctorReport {
+            ok: true,
+            config_path: config_path_text,
+            config_present: false,
+            provider_count: 0,
+            providers,
+            agent_model_map: mappings,
+            sqlite_path: sqlite_path.map(str::to_string),
+            checks,
+        });
+    }
+
+    checks.push(DoctorCheck {
+        name: "config_present".to_string(),
+        severity: DoctorSeverity::Ok,
+        message: format!("Config file found at {config_path_text}."),
+    });
+
+    let raw_config = std::fs::read_to_string(&config_path).map_err(|error| {
+        TianJiError::Usage(format!(
+            "Failed to read config file {config_path_text}: {error}"
+        ))
+    })?;
+    let config: tianji::llm::TianJiConfig = serde_yaml::from_str(&raw_config).map_err(|error| {
+        TianJiError::Usage(format!(
+            "Failed to parse config YAML at {config_path_text}: {error}"
+        ))
+    })?;
+    checks.push(DoctorCheck {
+        name: "config_parse".to_string(),
+        severity: DoctorSeverity::Ok,
+        message: "Config YAML parsed successfully.".to_string(),
+    });
+
+    if config.providers.is_empty() {
+        checks.push(DoctorCheck {
+            name: "providers".to_string(),
+            severity: DoctorSeverity::Warning,
+            message: "No providers configured; deterministic mode remains available.".to_string(),
+        });
+    } else {
+        checks.push(DoctorCheck {
+            name: "providers".to_string(),
+            severity: DoctorSeverity::Ok,
+            message: format!("{} provider(s) configured.", config.providers.len()),
+        });
+    }
+
+    let provider_names: BTreeSet<_> = config.providers.keys().cloned().collect();
+    for (name, provider) in &config.providers {
+        let model = provider.model.trim();
+        if model.is_empty() {
+            checks.push(DoctorCheck {
+                name: format!("provider.{name}.model"),
+                severity: DoctorSeverity::Error,
+                message: format!("Provider {name} must define a non-empty model."),
+            });
+        }
+        if provider.max_concurrency < 1 {
+            checks.push(DoctorCheck {
+                name: format!("provider.{name}.max_concurrency"),
+                severity: DoctorSeverity::Error,
+                message: format!("Provider {name} max_concurrency must be at least 1."),
+            });
+        }
+        if let Some(env_var) = provider.api_key_env.as_deref() {
+            match std::env::var(env_var) {
+                Ok(value) if !value.is_empty() => checks.push(DoctorCheck {
+                    name: format!("provider.{name}.api_key_env"),
+                    severity: DoctorSeverity::Ok,
+                    message: format!("Provider {name} env var {env_var} is set."),
+                }),
+                _ => checks.push(DoctorCheck {
+                    name: format!("provider.{name}.api_key_env"),
+                    severity: DoctorSeverity::Warning,
+                    message: format!("Provider {name} env var {env_var} is missing or empty."),
+                }),
+            }
+        }
+        if provider.api_key.is_some() {
+            checks.push(DoctorCheck {
+                name: format!("provider.{name}.api_key"),
+                severity: DoctorSeverity::Ok,
+                message: format!(
+                    "Provider {name} has an inline API key configured (value hidden)."
+                ),
+            });
+        }
+        if let Some(fallback) = provider.fallback.as_deref() {
+            if provider_names.contains(fallback) {
+                checks.push(DoctorCheck {
+                    name: format!("provider.{name}.fallback"),
+                    severity: DoctorSeverity::Ok,
+                    message: format!("Provider {name} fallback references {fallback}."),
+                });
+            } else {
+                checks.push(DoctorCheck {
+                    name: format!("provider.{name}.fallback"),
+                    severity: DoctorSeverity::Error,
+                    message: format!(
+                        "Provider {name} fallback references unknown provider {fallback}."
+                    ),
+                });
+            }
+        }
+
+        providers.push(DoctorProviderReport {
+            name: name.clone(),
+            provider_type: match provider.provider_type {
+                tianji::llm::ProviderType::OpenAI => "openai".to_string(),
+                tianji::llm::ProviderType::Ollama => "ollama".to_string(),
+            },
+            model: provider.model.clone(),
+            max_concurrency: provider.max_concurrency,
+            base_url_present: provider.base_url.is_some(),
+            api_key_env: provider.api_key_env.clone(),
+            api_key_env_present: provider.api_key_env.as_deref().map(|env_var| {
+                std::env::var(env_var)
+                    .map(|value| !value.is_empty())
+                    .unwrap_or(false)
+            }),
+            inline_api_key_present: provider.api_key.is_some(),
+            fallback: provider.fallback.clone(),
+        });
+    }
+
+    for (agent, provider_name) in &config.agent_model_map {
+        let provider_exists = provider_names.contains(provider_name);
+        checks.push(DoctorCheck {
+            name: format!("agent_model_map.{agent}"),
+            severity: if provider_exists {
+                DoctorSeverity::Ok
+            } else {
+                DoctorSeverity::Error
+            },
+            message: if provider_exists {
+                format!("Agent {agent} maps to provider {provider_name}.")
+            } else {
+                format!("Agent {agent} maps to unknown provider {provider_name}.")
+            },
+        });
+        mappings.push(DoctorAgentMappingReport {
+            agent: agent.clone(),
+            provider: provider_name.clone(),
+            provider_exists,
+        });
+    }
+
+    if let Some(sqlite_path) = sqlite_path {
+        check_sqlite_path(sqlite_path, &mut checks);
+    }
+
+    let ok = !checks
+        .iter()
+        .any(|check| check.severity == DoctorSeverity::Error);
+    Ok(DoctorReport {
+        ok,
+        config_path: config_path_text,
+        config_present: true,
+        provider_count: providers.len(),
+        providers,
+        agent_model_map: mappings,
+        sqlite_path: sqlite_path.map(str::to_string),
+        checks,
+    })
+}
+
+fn check_sqlite_path(sqlite_path: &str, checks: &mut Vec<DoctorCheck>) {
+    let path = Path::new(sqlite_path);
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let severity = if parent.exists() {
+        match std::fs::metadata(parent) {
+            Ok(metadata) if metadata.is_dir() && !metadata.permissions().readonly() => {
+                DoctorSeverity::Ok
+            }
+            Ok(metadata) if !metadata.is_dir() => DoctorSeverity::Error,
+            Ok(_) => DoctorSeverity::Warning,
+            Err(_) => DoctorSeverity::Error,
+        }
+    } else if parent.parent().is_some_and(Path::exists) {
+        DoctorSeverity::Ok
+    } else {
+        DoctorSeverity::Error
+    };
+    let message = match severity {
+        DoctorSeverity::Ok if parent.exists() => {
+            format!("SQLite parent directory is ready: {}.", parent.display())
+        }
+        DoctorSeverity::Ok => format!(
+            "SQLite parent directory can be created from existing parent: {}.",
+            parent.display()
+        ),
+        DoctorSeverity::Warning => format!(
+            "SQLite parent directory exists but may not be writable: {}.",
+            parent.display()
+        ),
+        DoctorSeverity::Error => format!(
+            "SQLite parent directory is not ready or creatable: {}.",
+            parent.display()
+        ),
+    };
+    checks.push(DoctorCheck {
+        name: "sqlite_path".to_string(),
+        severity,
+        message,
+    });
+}
+
+fn format_doctor_report(report: &DoctorReport) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "TianJi doctor: {}",
+        if report.ok { "ok" } else { "errors found" }
+    ));
+    lines.push(format!("Config: {}", report.config_path));
+    lines.push(format!("Config present: {}", report.config_present));
+    lines.push(format!("Providers: {}", report.provider_count));
+    for provider in &report.providers {
+        lines.push(format!(
+            "- provider {}: type={}, model={}, max_concurrency={}, api_key_env={}, inline_api_key_present={}, fallback={}",
+            provider.name,
+            provider.provider_type,
+            provider.model,
+            provider.max_concurrency,
+            provider.api_key_env.as_deref().unwrap_or("<none>"),
+            provider.inline_api_key_present,
+            provider.fallback.as_deref().unwrap_or("<none>")
+        ));
+    }
+    if !report.agent_model_map.is_empty() {
+        lines.push("Agent model map:".to_string());
+        for mapping in &report.agent_model_map {
+            lines.push(format!(
+                "- {} -> {} ({})",
+                mapping.agent,
+                mapping.provider,
+                if mapping.provider_exists {
+                    "ok"
+                } else {
+                    "missing"
+                }
+            ));
+        }
+    }
+    if let Some(sqlite_path) = &report.sqlite_path {
+        lines.push(format!("SQLite path: {sqlite_path}"));
+    }
+    lines.push("Checks:".to_string());
+    for check in &report.checks {
+        lines.push(format!(
+            "- [{}] {}: {}",
+            check.severity.as_str(),
+            check.name,
+            check.message
+        ));
+    }
+    lines.join("\n")
+}
 
 async fn handle_predict(
     field: &str,
@@ -2678,6 +3240,11 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             sqlite_path.as_deref(),
             config.as_deref(),
         ),
+        Cli::Doctor {
+            config,
+            sqlite_path,
+            json,
+        } => handle_doctor(config.as_deref(), sqlite_path.as_deref(), json),
         Cli::Completions { shell } => {
             let shell = match shell {
                 ShellName::Bash => Shell::Bash,
