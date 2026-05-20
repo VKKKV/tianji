@@ -255,9 +255,9 @@ Borrowing adoption status after Phase D/E:
 - Added alert dispatch dry-run/redaction and mocked webhook payload contract tests.
 - Added TUI replay cursor/frame formatting contract coverage.
 
-**F3. README operator quickstart refresh**
-- Document current LLM config, daemon API, signed command channel, alert dispatch dry-run, and TUI replay keybindings.
-- Keep examples local-first and credential-free.
+**F3. README operator quickstart refresh** ✅
+- Refreshed README operator quickstart for deterministic fixture runs, config template + `doctor`, current LLM config behavior, daemon/API envelope, signed agent command channel, alert dispatch dry-run/redaction, and TUI replay keybindings.
+- Kept examples local-first and credential-free.
 
 **F4. Release readiness check**
 - Verify `cargo build --release`, binary size target, shell completions, and a fixture-based smoke run.
