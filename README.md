@@ -19,27 +19,36 @@ Pure Rust project. 337 unit tests + 32 integration tests, zero failures. Single 
 
 ---
 
-## Quick Start
+## Operator Quickstart (local-first)
+
+The first path is credential-free: local fixture in, deterministic JSON out. No LLM, API key, daemon, webhook, or network is required.
 
 ```bash
 git clone <repo> && cd tianji
 cargo build
 
-# One-shot analysis — zero config
+# 1. Deterministic fixture run — zero config, no network
 cargo run -- run --fixture tests/fixtures/sample_feed.xml
 
-# With persistence (enables history, delta, daemon)
+# 2. Persist locally for history, delta, daemon/API, and TUI
+mkdir -p runs
 cargo run -- run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
 
-# Browse history
+# 3. Browse persisted history
 cargo run -- history --sqlite-path runs/tianji.sqlite3
 
-# Terminal UI browser
+# 4. Validate optional config + SQLite readiness without printing secrets
+cargo run -- doctor --config examples/config.example.yaml --sqlite-path runs/tianji.sqlite3
+cargo run -- doctor --config examples/config.example.yaml --json
+
+# 5. Terminal UI browser (read-only)
 cargo run -- tui --sqlite-path runs/tianji.sqlite3
 
-# Start daemon + API
-cargo run -- daemon start --sqlite-path runs/tianji.sqlite3
+# 6. Optional daemon + local HTTP API on loopback
+cargo run -- daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
 ```
+
+If you installed the binary, replace `cargo run -- ...` with `tianji ...`. Examples below use `cargo run --` when they are meant to be copy-pasteable from a source checkout.
 
 ---
 
@@ -108,28 +117,54 @@ $ cargo run -- run --fixture tests/fixtures/sample_feed.xml
 }
 ```
 
-**No LLM is required for the Cangjie/Fuxi pipeline.** Feed → scoring → backtrack remains 100% deterministic and can run with no API key. Optional Hongmeng/Nuwa simulation can call configured LLM providers when provider config is present:
+**No LLM is required for the Cangjie/Fuxi pipeline.** Feed → scoring → backtrack remains 100% deterministic and can run with no API key. Optional Hongmeng/Nuwa simulation can call configured LLM providers when provider config is present. Start from the checked-in template:
+
+```bash
+mkdir -p ~/.tianji
+cp examples/config.example.yaml ~/.tianji/config.yaml
+```
+
+`examples/config.example.yaml` is credential-free and shows both local Ollama-style and OpenAI-compatible provider shapes:
 
 ```yaml
-# ~/.tianji/config.yaml
 providers:
+  ollama_local:
+    type: ollama
+    model: qwen3:14b
+    base_url: http://127.0.0.1:11434
+    max_concurrency: 1
+
   openai_compatible:
     type: openai
     model: gpt-4o
-    api_key_env: OPENAI_API_KEY       # reads from environment variable
-    base_url: https://api.openai.com   # or any compatible endpoint
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY       # reads key from environment, never inline
+    max_concurrency: 2
+    fallback: ollama_local
+
+agent_model_map:
+  forward_default: ollama_local
+  backward_coarse: openai_compatible
+  backward_fine: ollama_local
 ```
 
 For deterministic fixture runs: **no LLM, no API key, no network calls**. LLM/network access is only used by optional provider-backed simulation or external alert dispatch paths.
 
-A complete credential-free template is available at `examples/config.example.yaml`. Validate local readiness with:
+The default config path is `~/.tianji/config.yaml`; pass `--config <PATH>` to override it. Validate local readiness with:
 
 ```bash
-tianji doctor --config examples/config.example.yaml --sqlite-path runs/tianji.sqlite3
-tianji doctor --config examples/config.example.yaml --json
+cargo run -- doctor --config examples/config.example.yaml --sqlite-path runs/tianji.sqlite3
+cargo run -- doctor --config examples/config.example.yaml --json
 ```
 
-`doctor` reports config parse status, provider references, env-var presence, and SQLite path readiness. It never prints raw API keys.
+`doctor` reports config file presence/parse status, provider counts and shapes, `api_key_env` presence, inline key presence (without printing the value), provider fallback references, agent model-map references, and optional SQLite path readiness. Missing config is a warning; malformed YAML fails. Raw API keys and credential values are never printed.
+
+Optional Hongmeng/Nuwa simulation uses configured providers when requested:
+
+```bash
+# Provider-backed; optional; may use network/model calls depending on config.
+cargo run -- predict --field east-asia.conflict --horizon 30 --config ~/.tianji/config.yaml
+```
 
 ---
 
@@ -277,9 +312,17 @@ tianji daemon stop
 
 The daemon exposes a read-first HTTP API at `http://127.0.0.1:8765`:
 
+```bash
+curl http://127.0.0.1:8765/api/v1/meta
+curl 'http://127.0.0.1:8765/api/v1/runs?limit=20'
+curl http://127.0.0.1:8765/api/v1/runs/latest
+curl 'http://127.0.0.1:8765/api/v1/compare?left_run_id=1&right_run_id=2'
+curl http://127.0.0.1:8765/api/v1/delta/latest
+```
+
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/v1/meta` | API metadata, source count, schema version |
+| `GET /api/v1/meta` | API metadata, resource manifest, schema version |
 | `GET /api/v1/runs?limit=20` | List persisted runs |
 | `GET /api/v1/runs/latest` | Latest run summary |
 | `GET /api/v1/runs/{run_id}` | Single run detail |
@@ -287,7 +330,79 @@ The daemon exposes a read-first HTTP API at `http://127.0.0.1:8765`:
 | `GET /api/v1/delta/latest` | Latest delta report from hot memory |
 | `POST /api/v1/agent/command` | HMAC-signed local agent command ingress |
 
-All responses use a JSON envelope: `{"api_version": "v1", "data": {...}, "error": null}`.
+All responses use a stable JSON envelope:
+
+```json
+{
+  "api_version": "v1",
+  "data": {},
+  "error": null
+}
+```
+
+Error responses keep the same envelope and set `data` to `null`:
+
+```json
+{
+  "api_version": "v1",
+  "data": null,
+  "error": { "code": "run_not_found", "message": "Run not found: 7" }
+}
+```
+
+The HTTP API is intended for loopback/local use. Keep it bound to `127.0.0.1` unless you have reviewed the security model for your environment.
+
+#### Signed agent command channel
+
+`POST /api/v1/agent/command` is an optional local ingress path for agent commands. The daemon's default API state does not enable a command secret; when unavailable, the endpoint returns an `agent_command_unavailable` error. Do not expose this endpoint beyond loopback.
+
+Accepted command bodies are JSON envelopes like:
+
+```json
+{
+  "command_id": "cmd-local-demo-001",
+  "command_type": "query",
+  "payload": { "question": "latest risk summary" }
+}
+```
+
+Required headers:
+
+- `x-tianji-agent-id`
+- `x-tianji-agent-tier` (`restricted` allows `observe`/`query`; `full` also allows `simulate`/`intervene`)
+- `x-tianji-timestamp` (Unix seconds, within the server tolerance window)
+- `x-tianji-nonce` (unique per agent within the nonce cache)
+- `x-tianji-signature` (hex HMAC-SHA256)
+
+Signature message format:
+
+```text
+timestamp + "\n" + nonce + "\n" + sha256(body)
+```
+
+Dummy-only signing example (for understanding the contract, not for a live secret):
+
+```bash
+BODY='{"command_id":"cmd-local-demo-001","command_type":"query","payload":{"question":"latest risk summary"}}'
+TIMESTAMP="1710000000"
+NONCE="dummy-nonce-001"
+SECRET="dummy-test-secret"
+BODY_SHA=$(printf '%s' "$BODY" | sha256sum | cut -d' ' -f1)
+SIGNATURE=$(printf '%s\n%s\n%s' "$TIMESTAMP" "$NONCE" "$BODY_SHA" \
+  | openssl dgst -sha256 -hmac "$SECRET" -binary \
+  | xxd -p -c 256)
+
+curl -X POST http://127.0.0.1:8765/api/v1/agent/command \
+  -H 'content-type: application/json' \
+  -H 'x-tianji-agent-id: local-demo-agent' \
+  -H 'x-tianji-agent-tier: restricted' \
+  -H "x-tianji-timestamp: $TIMESTAMP" \
+  -H "x-tianji-nonce: $NONCE" \
+  -H "x-tianji-signature: $SIGNATURE" \
+  --data "$BODY"
+```
+
+Use environment variables or a local secret manager for any real deployment. Never paste real tokens or signing secrets into shell history, README snippets, issue reports, or logs.
 
 ### `tianji webui`
 
@@ -302,13 +417,42 @@ The Web UI provides a Jarvis-style HUD with run history, detail view, and a queu
 
 ### `tianji tui`
 
-Read-only terminal UI for browsing persisted runs. ratatui + Kanagawa Dark.
+Read-only terminal UI for browsing persisted runs and optional simulation replay. ratatui + Kanagawa Dark.
 
 ```
 tianji tui --sqlite-path <PATH> [--limit 20]
+tianji tui --sqlite-path <PATH> --simulate <field:horizon> [--interactive]
 ```
 
-Keybindings: `j/k` navigate, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` detail view, `q` quit. In simulation view, `Left`/`h` and `Right`/`l` scrub replay frames.
+Keybindings: `j/k` or arrow keys navigate history, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` opens detail or compare depending on staged state, `c` stages a compare-left run, `Esc`/`h` returns from detail/compare, and `q` quits. In simulation replay, `Left`/`h` scrubs to the previous frame and `Right`/`l` scrubs to the next frame.
+
+Simulation replay is still local/read-only from the terminal perspective. Provider-backed simulation remains optional and follows the config rules above.
+
+### Alert dispatch dry-run/redaction
+
+Alert dispatch is optional and is not part of the first-run path. The dispatcher supports Telegram, Discord, and generic webhook channels. Use dry-run planning first: dry-run reports which deliveries would be attempted, counts message chunks, and redacts endpoints/secrets without sending network requests.
+
+Generic webhook payload shape:
+
+```json
+{
+  "tier": "priority",
+  "title": "TianJi alert",
+  "summary": "Risk moved higher in the latest run.",
+  "body": "Operator-readable details..."
+}
+```
+
+Example secret-shaped values should stay dummy/redacted:
+
+```text
+Telegram bot token: <redacted>
+Discord webhook: https://example.invalid/discord/<redacted>
+Generic webhook: https://example.invalid/tianji-alerts/<redacted>
+Header value: dummy-test-secret
+```
+
+In dry-run mode, reports use `status: planned` and redacted endpoints such as `https://example.invalid/.../<redacted>`. Live dispatch is only for operators who intentionally configure real Telegram/Discord/webhook endpoints outside the quickstart.
 
 ### `tianji completions`
 
