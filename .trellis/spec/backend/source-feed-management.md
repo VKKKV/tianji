@@ -24,9 +24,10 @@ change and not an LLM/simulation feature.
    - No tokens, API keys, passwords, cookies, or private feed URLs in examples/tests.
    - If credentialed feeds are ever added, credentials must be referenced through env vars, never printed.
 
-4. Bounded first slice
-   - Start with manifest loading, validation, listing, and fixture-run fan-in.
-   - Defer live polling metadata persistence to later Phase I tasks.
+4. Bounded completion
+   - I1 starts with manifest loading, validation, listing, and fixture-run fan-in.
+   - Phase I completion adds JSON health summaries and explicit live-fetch opt-in.
+   - Default listing must never perform network I/O.
 
 ## Registry schema
 
@@ -84,15 +85,35 @@ Validation rules:
 - Unknown kind fails validation.
 - Disabled sources are loaded and reported but not selected for fan-in runs.
 
-## First-slice CLI
+## CLI
 
-Preferred command:
+List and validate registry without network I/O:
 
 ```bash
 tianji sources --config examples/sources.example.yaml
 ```
 
-Default behavior prints JSON summary:
+Run enabled fixture sources only:
+
+```bash
+tianji sources --config examples/sources.example.yaml --run-fixtures
+```
+
+Explicitly fetch enabled `rss`/`atom` sources:
+
+```bash
+tianji sources --config ~/.config/tianji/sources.yaml --fetch-live
+```
+
+Safety rules:
+
+- default listing is validation/report only;
+- `--run-fixtures` never fetches network sources;
+- `--fetch-live` is the only CLI mode that may perform network I/O;
+- disabled sources are always reported but never run/fetched;
+- examples and tests must remain credential-free.
+
+Expected JSON report includes:
 
 ```json
 {
@@ -101,24 +122,23 @@ Default behavior prints JSON summary:
   "total": 3,
   "enabled": 2,
   "disabled": 1,
+  "ready": 2,
+  "skipped": 1,
+  "errors": 0,
   "tiers": {"primary": 1, "secondary": 1, "watchlist": 1},
-  "sources": []
+  "sources": [],
+  "runs": []
 }
 ```
 
-Optional first-slice run fan-in:
+Run entries should include:
 
-```bash
-tianji sources --config examples/sources.example.yaml --run-fixtures
-```
-
-`--run-fixtures` should:
-
-- run enabled `kind: fixture` sources through the deterministic pipeline;
-- ignore disabled sources;
-- reject `rss`/`atom` live network fetching in first slice unless explicitly designed later;
-- return non-zero if any selected fixture cannot be read/parsed;
-- emit JSON with per-source status and artifact counts, not full artifacts by default.
+- `source_id`
+- `kind`
+- `status`: `ok`, `skipped`, or `error`
+- item/event/candidate counts on success
+- dominant field and risk level on success
+- safe error string on failure
 
 ## Acceptance for I1
 
@@ -128,6 +148,17 @@ tianji sources --config examples/sources.example.yaml --run-fixtures
 4. Add `--run-fixtures` deterministic local fan-in for enabled fixture sources.
 5. Add tests for valid load, duplicate ID rejection, missing fixture path rejection, disabled source exclusion, and CLI parsing.
 6. Update README/plan with Phase I start state.
+
+## Acceptance for I2-I4 completion
+
+1. Source JSON reports include health/aggregate status fields (`ready`, `skipped`, `errors` or equivalent).
+2. `tianji sources --config <PATH>` performs no network I/O.
+3. `tianji sources --config <PATH> --run-fixtures` runs enabled fixture sources only.
+4. `tianji sources --config <PATH> --fetch-live` explicitly fetches enabled rss/atom sources.
+5. Disabled sources are reported but never run/fetched in any mode.
+6. Live-fetch tests use deterministic local/mock HTTP or injected fetch text; no external internet dependency.
+7. README documents registry listing, fixture fan-in, live-fetch opt-in, and local smoke commands.
+8. `plan.md` marks Phase I complete after verification.
 
 ## Verification
 
