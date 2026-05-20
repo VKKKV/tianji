@@ -61,7 +61,7 @@ Avoid comparing incidental formatting or local paths beyond fixture source names
 
 ### Drift report
 
-The first user-facing command should be:
+The user-facing command is:
 
 ```bash
 tianji eval --manifest tests/fixtures/eval/corpus.yaml
@@ -75,15 +75,16 @@ Expected behavior:
 - exits `0` when every case is accepted;
 - exits non-zero when any required expectation fails or disallowed drift occurs.
 
-Optional first-slice helper:
+Snapshot refresh is explicit:
 
 ```bash
 tianji eval --manifest tests/fixtures/eval/corpus.yaml --update-golden
 ```
 
-If implemented, this helper may write snapshots, but normal `eval` must be read-only.
+Normal `eval` is read-only. `--update-golden` may overwrite only golden files
+listed in the manifest and should report the updated paths.
 
-Report shape should be stable and compact:
+Report shape is stable and compact:
 
 ```json
 {
@@ -92,13 +93,18 @@ Report shape should be stable and compact:
   "case_count": 2,
   "passed": 2,
   "failed": 0,
+  "max_score_delta": 0.0,
+  "updated_golden_paths": [],
   "cases": [
     {
       "id": "sample_feed_technology_high",
+      "description": "Representative sample feed remains technology/high.",
       "status": "pass",
       "fixture": "tests/fixtures/sample_feed.xml",
+      "check_count": 13,
+      "failed_check_count": 0,
       "checks": [
-        {"name": "dominant_field", "status": "pass", "expected": "technology", "actual": "technology"}
+        {"name": "dominant_field", "status": "pass", "expected": "technology", "actual": "technology", "delta": null, "tolerance": null}
       ],
       "max_score_delta": 0.0
     }
@@ -126,6 +132,16 @@ Out of scope for H1:
 - daemon/API integration;
 - probabilistic simulation quality metrics;
 - broad fixture corpus expansion beyond the first representative cases.
+
+## Acceptance for H2-H4 completion
+
+1. Eval corpus contains at least two checked-in local fixture cases.
+2. Every case has a checked-in golden snapshot.
+3. `tianji eval --manifest tests/fixtures/eval/corpus.yaml` exits `0` for the checked-in corpus.
+4. `tianji eval --manifest tests/fixtures/eval/corpus.yaml --update-golden` refreshes only listed golden snapshots and is tested.
+5. Report includes case descriptions, check counts, failed check counts, global max score delta, and per-numeric-check delta/tolerance.
+6. A local verification script or documented gate exists and requires no network, daemon, LLM, or credentials.
+7. README and `plan.md` document Phase H as complete after verification.
 
 ## Verification
 
