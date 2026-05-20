@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, and Phase H evaluation harness complete. Next: source/feed management candidates.
-> Tests: 346 unit + 41 integration pass / 0 fail
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, and Phase H evaluation harness complete. Phase I source/feed management started with I1 source registry first slice implemented.
+> Tests: 398 total pass / 0 fail
 
 ---
 
@@ -38,10 +38,11 @@ TUI ████████████████████ ✅ 4 views + s
 
 Phase F ████████████████████ ✅ Product polish + operator readiness
 Phase H ████████████████████ ✅ Evaluation harness
+Phase I ████░░░░░░░░░░░░░░░░ 🚧 Source/feed management started
 ```
 
-  源码: 26,079 行 Rust / 57 源文件
-  测试: 346 unit + 41 integration pass / 0 fail
+  源码: 26,135 行 Rust / 57 源文件
+  测试: 355 unit + 43 integration = 398 total pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -301,8 +302,20 @@ Purpose: make TianJi's analysis quality measurable before deeper scoring, simula
 
 ### Later candidate phases
 
-**Phase I — Source/feed management**
-- Feed source registry, per-source enable/disable, tier config from YAML, last-success/error metadata.
+### Phase I — Source/feed management (STARTED)
+
+Purpose: make feed inputs explicit, local-first, and operator-controllable before
+adding live polling metadata or persistence.
+
+**I1. Source registry first slice** ✅
+- Added typed YAML source registry support with `schema_version: tianji.sources-report.v1`.
+- Added `tianji sources --config examples/sources.example.yaml` for JSON summary.
+- Added `--run-fixtures` for deterministic fan-in over enabled fixture sources only.
+- Disabled sources are reported but not run; RSS/Atom live fetching remains out of scope.
+- Added credential-free `examples/sources.example.yaml` with local fixture paths and a disabled `example.invalid` dummy remote.
+
+Later Phase I candidates:
+- Live source polling metadata, last-success/error persistence, source health history.
 
 **Phase J — Operational reliability**
 - SQLite backup/export, retention policy, daemon health/readiness, operator maintenance commands.
@@ -352,7 +365,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 346 unit + 41 integration)
+- `cargo test` all green (currently 355 unit + 43 integration = 398 total)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional

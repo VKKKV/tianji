@@ -13,6 +13,7 @@ use tianji::{
     artifact_json, classify_delta_tier, clear_baseline, compare_runs, compute_delta,
     get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary,
     list_runs, load_baseline, run_feed_text, run_fixture_path, save_baseline,
+    source_registry::{build_sources_report, load_source_manifest},
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     worldline::{
         baseline::Baseline,
@@ -341,6 +342,15 @@ enum Cli {
         /// Refresh golden snapshots listed in the manifest
         #[arg(long = "update-golden")]
         update_golden: bool,
+    },
+    /// Inspect source registry manifests and optionally run enabled fixtures
+    Sources {
+        /// Path to source registry YAML
+        #[arg(long = "config")]
+        config: String,
+        /// Run enabled fixture sources through deterministic pipeline
+        #[arg(long = "run-fixtures")]
+        run_fixtures: bool,
     },
     /// Generate shell completion scripts
     Completions {
@@ -1174,6 +1184,43 @@ mod tests {
                 assert!(update_golden);
             }
             _ => panic!("expected Eval variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_sources() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "sources",
+            "--config",
+            "examples/sources.example.yaml",
+        ])
+        .expect("parse sources");
+        match cli {
+            Cli::Sources {
+                config,
+                run_fixtures,
+            } => {
+                assert_eq!(config, "examples/sources.example.yaml");
+                assert!(!run_fixtures);
+            }
+            _ => panic!("expected Sources variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_sources_run_fixtures() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "sources",
+            "--config",
+            "examples/sources.example.yaml",
+            "--run-fixtures",
+        ])
+        .expect("parse sources run fixtures");
+        match cli {
+            Cli::Sources { run_fixtures, .. } => assert!(run_fixtures),
+            _ => panic!("expected Sources variant"),
         }
     }
 
@@ -3312,6 +3359,14 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             } else {
                 Ok(output)
             }
+        }
+        Cli::Sources {
+            config,
+            run_fixtures,
+        } => {
+            let manifest = load_source_manifest(&config)?;
+            let report = build_sources_report(&config, manifest, run_fixtures)?;
+            Ok(serde_json::to_string_pretty(&report)?)
         }
         Cli::Completions { shell } => {
             let shell = match shell {
