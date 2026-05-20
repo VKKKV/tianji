@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, and Phase H evaluation harness complete. Phase I source/feed management started with I1 source registry first slice implemented.
-> Tests: 398 total pass / 0 fail
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, and Phase I source/feed management complete.
+> Tests: 402 total pass / 0 fail
 
 ---
 
@@ -38,11 +38,11 @@ TUI ████████████████████ ✅ 4 views + s
 
 Phase F ████████████████████ ✅ Product polish + operator readiness
 Phase H ████████████████████ ✅ Evaluation harness
-Phase I ████░░░░░░░░░░░░░░░░ 🚧 Source/feed management started
+Phase I ████████████████████ ✅ Source/feed management
 ```
 
-  源码: 26,135 行 Rust / 57 源文件
-  测试: 355 unit + 43 integration = 398 total pass / 0 fail
+  源码: 26,903 行 Rust / 58 源文件
+  测试: 358 unit + 44 integration = 402 total pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -302,7 +302,7 @@ Purpose: make TianJi's analysis quality measurable before deeper scoring, simula
 
 ### Later candidate phases
 
-### Phase I — Source/feed management (STARTED)
+### Phase I — Source/feed management (COMPLETE)
 
 Purpose: make feed inputs explicit, local-first, and operator-controllable before
 adding live polling metadata or persistence.
@@ -311,11 +311,18 @@ adding live polling metadata or persistence.
 - Added typed YAML source registry support with `schema_version: tianji.sources-report.v1`.
 - Added `tianji sources --config examples/sources.example.yaml` for JSON summary.
 - Added `--run-fixtures` for deterministic fan-in over enabled fixture sources only.
-- Disabled sources are reported but not run; RSS/Atom live fetching remains out of scope.
+- Disabled sources are reported but not run/fetched.
 - Added credential-free `examples/sources.example.yaml` with local fixture paths and a disabled `example.invalid` dummy remote.
 
-Later Phase I candidates:
-- Live source polling metadata, last-success/error persistence, source health history.
+**I2-I4. Health summaries, live fetch opt-in, and docs** ✅
+- Source reports include aggregate `ready`, `skipped`, and `errors` counters plus per-source status/runnable/last-success/error fields.
+- `--run-fixtures` runs enabled fixture sources only and never fetches network sources.
+- `--fetch-live` is the only source-registry mode that fetches enabled RSS/Atom sources, using the deterministic feed pipeline and concise per-source counts/status.
+- Default `tianji sources --config <PATH>` remains validation/report-only with no network I/O.
+- README documents registry listing, fixture fan-in, live-fetch opt-in, safety constraints, and CI-friendly smoke commands.
+
+Later source-management candidates:
+- Live source polling metadata persistence, source health history, and operator scheduling integration.
 
 **Phase J — Operational reliability**
 - SQLite backup/export, retention policy, daemon health/readiness, operator maintenance commands.
@@ -365,7 +372,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 355 unit + 43 integration = 398 total)
+- `cargo test` all green (currently 358 unit + 44 integration = 402 total)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional

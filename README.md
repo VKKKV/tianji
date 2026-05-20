@@ -4,7 +4,7 @@ TianJi is a geopolitical intelligence engine — ingest signals, compute diverge
 
 ## Current State (2026-05-20)
 
-Pure Rust project. 355 unit tests + 43 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, and local source registry inspection are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 358 unit tests + 44 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, and source/feed management are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
@@ -44,6 +44,7 @@ cargo run -- doctor --config examples/config.example.yaml --json
 # 5. Inspect local source registry and run enabled fixture sources
 cargo run -- sources --config examples/sources.example.yaml
 cargo run -- sources --config examples/sources.example.yaml --run-fixtures
+# Optional: live registry entries require explicit --fetch-live and an operator-owned config.
 
 # 6. Terminal UI browser (read-only)
 cargo run -- tui --sqlite-path runs/tianji.sqlite3
@@ -514,17 +515,18 @@ intentional; otherwise fix the deterministic pipeline or manifest expectation.
 
 ### `tianji sources`
 
-Inspect a local source registry manifest and optionally run enabled fixture
-sources through the deterministic pipeline. The I1 source registry is local-first:
-disabled RSS/Atom entries are reported as metadata, but live network fetching is
-not performed.
+Inspect a local source registry manifest, run enabled fixture sources, or
+explicitly fetch enabled RSS/Atom sources. Source management is safe by default:
+plain listing validates and reports registry health without network I/O.
+Disabled sources are always reported but are never run or fetched.
 
 ```
-tianji sources --config examples/sources.example.yaml [--run-fixtures]
+tianji sources --config examples/sources.example.yaml [--run-fixtures] [--fetch-live]
 ```
 
 Default output is JSON with `schema_version: "tianji.sources-report.v1"`, source
-counts, tier counts, and source metadata:
+counts, aggregate health counters (`ready`, `skipped`, `errors`), tier counts,
+and per-source status metadata:
 
 ```bash
 cargo run --quiet -- sources --config examples/sources.example.yaml
@@ -536,12 +538,28 @@ Run enabled fixture sources only:
 cargo run --quiet -- sources --config examples/sources.example.yaml --run-fixtures
 ```
 
-`--run-fixtures` ignores disabled sources and reports per-source status plus
-artifact counts (`raw_item_count`, `normalized_event_count`, `scored_event_count`,
-and `intervention_candidate_count`) without embedding full run artifacts. The
-checked-in `examples/sources.example.yaml` uses only local fixture paths and a
-disabled `https://example.invalid/...` dummy URL; do not put private feed URLs or
-secrets in shared manifests.
+Fetch enabled live RSS/Atom sources only when explicitly requested:
+
+```bash
+tianji sources --config ~/.config/tianji/sources.yaml --fetch-live
+```
+
+`--run-fixtures` never fetches RSS/Atom URLs. `--fetch-live` never runs disabled
+sources and is the only source-registry mode that may perform network I/O. Both
+run modes report concise per-source status plus artifact counts
+(`raw_item_count`, `normalized_event_count`, `scored_event_count`, and
+`intervention_candidate_count`), `dominant_field`, and `risk_level` without
+embedding full run artifacts. The checked-in `examples/sources.example.yaml` uses
+only local fixture paths and a disabled `https://example.invalid/...` dummy URL;
+do not put private feed URLs, credentials, cookies, or tokens in shared
+manifests.
+
+CI-friendly local source smoke commands:
+
+```bash
+cargo run --quiet -- sources --config examples/sources.example.yaml
+cargo run --quiet -- sources --config examples/sources.example.yaml --run-fixtures
+```
 
 ### `tianji completions`
 

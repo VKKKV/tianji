@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{run_fixture_path, TianJiError};
+use crate::{run_feed_text, run_fixture_path, TianJiError};
 
 pub const SOURCES_REPORT_SCHEMA_VERSION: &str = "tianji.sources-report.v1";
 
@@ -73,10 +73,32 @@ pub struct SourcesReport {
     pub total: usize,
     pub enabled: usize,
     pub disabled: usize,
+    pub ready: usize,
+    pub skipped: usize,
+    pub errors: usize,
     pub tiers: BTreeMap<String, usize>,
-    pub sources: Vec<SourceDefinition>,
+    pub sources: Vec<SourceStatusReport>,
+    pub runs: Vec<SourceRunReport>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SourceStatusReport {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub tier: String,
+    pub kind: SourceKind,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runs: Option<Vec<SourceRunReport>>,
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    pub tags: Vec<String>,
+    pub status: String,
+    pub runnable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_success: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -86,6 +108,8 @@ pub struct SourceRunReport {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_item_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,7 +183,27 @@ pub fn build_sources_report(
     config_path: &str,
     manifest: SourceManifest,
     run_fixtures: bool,
+    fetch_live: bool,
 ) -> Result<SourcesReport, TianJiError> {
+    build_sources_report_with_fetcher(
+        config_path,
+        manifest,
+        run_fixtures,
+        fetch_live,
+        fetch_feed_url,
+    )
+}
+
+pub fn build_sources_report_with_fetcher<F>(
+    config_path: &str,
+    manifest: SourceManifest,
+    run_fixtures: bool,
+    fetch_live: bool,
+    mut fetcher: F,
+) -> Result<SourcesReport, TianJiError>
+where
+    F: FnMut(&str) -> Result<String, TianJiError>,
+{
     let mut tiers = BTreeMap::new();
     for source in &manifest.sources {
         *tiers.entry(source.tier.clone()).or_insert(0) += 1;
@@ -172,11 +216,20 @@ pub fn build_sources_report(
         .filter(|source| source.enabled)
         .count();
     let disabled = total.saturating_sub(enabled);
-    let runs = if run_fixtures {
-        Some(run_enabled_fixtures(&manifest.sources)?)
-    } else {
-        None
-    };
+    let runs = build_source_runs(&manifest.sources, run_fixtures, fetch_live, &mut fetcher);
+    let sources = build_source_statuses(&manifest.sources, &runs, run_fixtures, fetch_live);
+    let ready = sources
+        .iter()
+        .filter(|source| source.status == "ready")
+        .count();
+    let skipped = sources
+        .iter()
+        .filter(|source| source.status == "skipped")
+        .count();
+    let errors = sources
+        .iter()
+        .filter(|source| source.status == "error")
+        .count();
 
     Ok(SourcesReport {
         schema_version: SOURCES_REPORT_SCHEMA_VERSION.to_string(),
@@ -184,8 +237,11 @@ pub fn build_sources_report(
         total,
         enabled,
         disabled,
+        ready,
+        skipped,
+        errors,
         tiers,
-        sources: manifest.sources,
+        sources,
         runs,
     })
 }
@@ -193,76 +249,213 @@ pub fn build_sources_report(
 pub fn run_enabled_fixtures(
     sources: &[SourceDefinition],
 ) -> Result<Vec<SourceRunReport>, TianJiError> {
-    let mut reports = Vec::new();
-    let mut first_error = None;
-
-    for source in sources
+    Ok(sources
         .iter()
         .filter(|source| source.enabled && source.kind == SourceKind::Fixture)
-    {
-        let path = source.path.clone();
-        let report = match path.as_deref() {
-            Some(path) => match run_fixture_path(path, None) {
-                Ok(result) => SourceRunReport {
-                    source_id: source.id.clone(),
-                    kind: source.kind.clone(),
-                    status: "ok".to_string(),
-                    path: Some(path.to_string()),
-                    raw_item_count: Some(result.artifact.input_summary.raw_item_count),
-                    normalized_event_count: Some(
-                        result.artifact.input_summary.normalized_event_count,
-                    ),
-                    scored_event_count: Some(result.artifact.scored_events.len()),
-                    intervention_candidate_count: Some(
-                        result.artifact.intervention_candidates.len(),
-                    ),
-                    dominant_field: Some(result.artifact.scenario_summary.dominant_field),
-                    risk_level: Some(result.artifact.scenario_summary.risk_level),
-                    error: None,
-                },
-                Err(error) => {
-                    if first_error.is_none() {
-                        first_error = Some(error.to_string());
-                    }
-                    SourceRunReport {
-                        source_id: source.id.clone(),
-                        kind: source.kind.clone(),
-                        status: "error".to_string(),
-                        path: Some(path.to_string()),
-                        raw_item_count: None,
-                        normalized_event_count: None,
-                        scored_event_count: None,
-                        intervention_candidate_count: None,
-                        dominant_field: None,
-                        risk_level: None,
-                        error: first_error.clone(),
-                    }
+        .map(run_fixture_source)
+        .collect())
+}
+
+fn build_source_statuses(
+    sources: &[SourceDefinition],
+    runs: &[SourceRunReport],
+    run_fixtures: bool,
+    fetch_live: bool,
+) -> Vec<SourceStatusReport> {
+    sources
+        .iter()
+        .map(|source| {
+            let run = runs.iter().find(|run| run.source_id == source.id);
+            let runnable = source.enabled
+                && matches!(
+                    source.kind,
+                    SourceKind::Fixture | SourceKind::Rss | SourceKind::Atom
+                );
+            let status = if !source.enabled {
+                "skipped"
+            } else if let Some(run) = run {
+                match run.status.as_str() {
+                    "ok" => "ready",
+                    "error" => "error",
+                    _ => "skipped",
                 }
-            },
-            None => SourceRunReport {
-                source_id: source.id.clone(),
+            } else if !run_fixtures && !fetch_live {
+                "ready"
+            } else {
+                "skipped"
+            };
+            SourceStatusReport {
+                id: source.id.clone(),
+                name: source.name.clone(),
+                enabled: source.enabled,
+                tier: source.tier.clone(),
                 kind: source.kind.clone(),
-                status: "error".to_string(),
-                path,
-                raw_item_count: None,
-                normalized_event_count: None,
-                scored_event_count: None,
-                intervention_candidate_count: None,
-                dominant_field: None,
-                risk_level: None,
-                error: Some("Fixture source is missing path.".to_string()),
-            },
-        };
-        reports.push(report);
+                path: source.path.clone(),
+                url: source.url.clone(),
+                tags: source.tags.clone(),
+                status: status.to_string(),
+                runnable,
+                last_success: run
+                    .filter(|run| run.status == "ok")
+                    .map(|_| "1970-01-01T00:00:00+00:00".to_string()),
+                last_error: run.and_then(|run| run.error.clone()),
+            }
+        })
+        .collect()
+}
+
+fn build_source_runs<F>(
+    sources: &[SourceDefinition],
+    run_fixtures: bool,
+    fetch_live: bool,
+    fetcher: &mut F,
+) -> Vec<SourceRunReport>
+where
+    F: FnMut(&str) -> Result<String, TianJiError>,
+{
+    if !run_fixtures && !fetch_live {
+        return Vec::new();
     }
 
-    if let Some(error) = first_error {
+    sources
+        .iter()
+        .map(|source| {
+            if !source.enabled {
+                return skipped_run(source, "Source is disabled.");
+            }
+            match (&source.kind, run_fixtures, fetch_live) {
+                (SourceKind::Fixture, true, _) => run_fixture_source(source),
+                (SourceKind::Fixture, false, true) => {
+                    skipped_run(source, "Fixture source is not a live source.")
+                }
+                (SourceKind::Rss | SourceKind::Atom, _, true) => run_live_source(source, fetcher),
+                (SourceKind::Rss | SourceKind::Atom, true, false) => {
+                    skipped_run(source, "Live source requires --fetch-live.")
+                }
+                _ => skipped_run(source, "Source is not selected for this mode."),
+            }
+        })
+        .collect()
+}
+
+fn run_fixture_source(source: &SourceDefinition) -> SourceRunReport {
+    match source.path.as_deref() {
+        Some(path) => match run_fixture_path(path, None) {
+            Ok(result) => successful_run(source, Some(path.to_string()), None, result),
+            Err(error) => errored_run(source, Some(path.to_string()), None, error.to_string()),
+        },
+        None => errored_run(
+            source,
+            None,
+            None,
+            "Fixture source is missing path.".to_string(),
+        ),
+    }
+}
+
+fn run_live_source<F>(source: &SourceDefinition, fetcher: &mut F) -> SourceRunReport
+where
+    F: FnMut(&str) -> Result<String, TianJiError>,
+{
+    match source.url.as_deref() {
+        Some(url) => {
+            match fetcher(url).and_then(|feed_text| run_feed_text(&feed_text, url, None)) {
+                Ok(result) => successful_run(source, None, Some(url.to_string()), result),
+                Err(error) => errored_run(source, None, Some(url.to_string()), error.to_string()),
+            }
+        }
+        None => errored_run(
+            source,
+            None,
+            None,
+            "Live source is missing url.".to_string(),
+        ),
+    }
+}
+
+fn successful_run(
+    source: &SourceDefinition,
+    path: Option<String>,
+    url: Option<String>,
+    result: crate::RunResult,
+) -> SourceRunReport {
+    SourceRunReport {
+        source_id: source.id.clone(),
+        kind: source.kind.clone(),
+        status: "ok".to_string(),
+        path,
+        url,
+        raw_item_count: Some(result.artifact.input_summary.raw_item_count),
+        normalized_event_count: Some(result.artifact.input_summary.normalized_event_count),
+        scored_event_count: Some(result.artifact.scored_events.len()),
+        intervention_candidate_count: Some(result.artifact.intervention_candidates.len()),
+        dominant_field: Some(result.artifact.scenario_summary.dominant_field),
+        risk_level: Some(result.artifact.scenario_summary.risk_level),
+        error: None,
+    }
+}
+
+fn skipped_run(source: &SourceDefinition, reason: &str) -> SourceRunReport {
+    SourceRunReport {
+        source_id: source.id.clone(),
+        kind: source.kind.clone(),
+        status: "skipped".to_string(),
+        path: source.path.clone(),
+        url: source.url.clone(),
+        raw_item_count: None,
+        normalized_event_count: None,
+        scored_event_count: None,
+        intervention_candidate_count: None,
+        dominant_field: None,
+        risk_level: None,
+        error: Some(reason.to_string()),
+    }
+}
+
+fn errored_run(
+    source: &SourceDefinition,
+    path: Option<String>,
+    url: Option<String>,
+    error: String,
+) -> SourceRunReport {
+    SourceRunReport {
+        source_id: source.id.clone(),
+        kind: source.kind.clone(),
+        status: "error".to_string(),
+        path,
+        url,
+        raw_item_count: None,
+        normalized_event_count: None,
+        scored_event_count: None,
+        intervention_candidate_count: None,
+        dominant_field: None,
+        risk_level: None,
+        error: Some(error),
+    }
+}
+
+pub fn fetch_feed_url(source_url: &str) -> Result<String, TianJiError> {
+    if !(source_url.starts_with("http://") || source_url.starts_with("https://")) {
+        return Err(TianJiError::Usage(
+            "Live source URL must be HTTP or HTTPS.".to_string(),
+        ));
+    }
+    let response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|error| TianJiError::Input(format!("Failed to build feed client: {error}")))?
+        .get(source_url)
+        .send()
+        .map_err(|error| TianJiError::Input(format!("Failed to fetch feed: {error}")))?;
+    let status = response.status();
+    if !status.is_success() {
         return Err(TianJiError::Input(format!(
-            "One or more fixture sources failed to run: {error}"
+            "Failed to fetch feed: HTTP {status}"
         )));
     }
-
-    Ok(reports)
+    response
+        .text()
+        .map_err(|error| TianJiError::Input(format!("Failed to read feed: {error}")))
 }
 
 fn require_non_empty(
@@ -325,15 +518,20 @@ mod tests {
         let manifest = valid_manifest();
 
         validate_source_manifest(&manifest).expect("valid manifest");
-        let report = build_sources_report("examples/sources.example.yaml", manifest, false)
+        let report = build_sources_report("examples/sources.example.yaml", manifest, false, false)
             .expect("source report");
 
         assert_eq!(report.schema_version, SOURCES_REPORT_SCHEMA_VERSION);
         assert_eq!(report.total, 3);
         assert_eq!(report.enabled, 1);
         assert_eq!(report.disabled, 2);
+        assert_eq!(report.ready, 1);
+        assert_eq!(report.skipped, 2);
+        assert_eq!(report.errors, 0);
         assert_eq!(report.tiers["primary"], 1);
-        assert!(report.runs.is_none());
+        assert!(report.runs.is_empty());
+        assert_eq!(report.sources[0].status, "ready");
+        assert_eq!(report.sources[1].status, "skipped");
     }
 
     #[test]
@@ -417,7 +615,7 @@ sources:
     #[test]
     fn source_registry_loads_checked_in_example() {
         let manifest = load_source_manifest("examples/sources.example.yaml").expect("example load");
-        let report = build_sources_report("examples/sources.example.yaml", manifest, false)
+        let report = build_sources_report("examples/sources.example.yaml", manifest, false, false)
             .expect("example report");
 
         assert_eq!(report.total, 3);
@@ -446,14 +644,96 @@ sources:
         let mut manifest = valid_manifest();
         manifest.sources[1].enabled = true;
 
-        let report = build_sources_report("examples/sources.example.yaml", manifest, true)
+        let report = build_sources_report("examples/sources.example.yaml", manifest, true, false)
             .expect("source report");
-        let runs = report.runs.expect("runs present");
+        let runs = report.runs;
 
-        assert_eq!(runs.len(), 2);
+        assert_eq!(runs.len(), 3);
         assert_eq!(runs[0].source_id, "sample_technology");
         assert_eq!(runs[0].scored_event_count, Some(3));
         assert_eq!(runs[1].source_id, "economy_fixture");
         assert_eq!(runs[1].raw_item_count, Some(2));
+        assert_eq!(runs[2].source_id, "disabled_dummy_remote");
+        assert_eq!(runs[2].status, "skipped");
+    }
+
+    #[test]
+    fn source_registry_default_listing_does_not_fetch_live_sources() {
+        let mut manifest = valid_manifest();
+        manifest.sources[2].enabled = true;
+        let mut fetch_count = 0;
+
+        let report = build_sources_report_with_fetcher(
+            "examples/sources.example.yaml",
+            manifest,
+            false,
+            false,
+            |_| {
+                fetch_count += 1;
+                Err(TianJiError::Input("should not fetch".to_string()))
+            },
+        )
+        .expect("source report");
+
+        assert_eq!(fetch_count, 0);
+        assert!(report.runs.is_empty());
+        assert_eq!(report.ready, 2);
+        assert_eq!(report.skipped, 1);
+        assert_eq!(report.errors, 0);
+    }
+
+    #[test]
+    fn source_registry_fetch_live_uses_injected_feed_text() {
+        let mut manifest = valid_manifest();
+        manifest.sources[0].enabled = false;
+        manifest.sources[2].enabled = true;
+        let fixture = std::fs::read_to_string("tests/fixtures/sample_feed.xml").expect("fixture");
+        let mut fetched_urls = Vec::new();
+
+        let report =
+            build_sources_report_with_fetcher("tests/live.yaml", manifest, false, true, |url| {
+                fetched_urls.push(url.to_string());
+                Ok(fixture.clone())
+            })
+            .expect("source report");
+
+        assert_eq!(fetched_urls, vec!["https://example.invalid/feed.xml"]);
+        assert_eq!(report.runs.len(), 3);
+        let live_run = report
+            .runs
+            .iter()
+            .find(|run| run.source_id == "disabled_dummy_remote")
+            .expect("live run");
+        assert_eq!(live_run.status, "ok");
+        assert_eq!(live_run.raw_item_count, Some(3));
+        assert_eq!(live_run.dominant_field.as_deref(), Some("technology"));
+        let fixture_run = report
+            .runs
+            .iter()
+            .find(|run| run.source_id == "sample_technology")
+            .expect("fixture skipped");
+        assert_eq!(fixture_run.status, "skipped");
+        assert_eq!(report.errors, 0);
+    }
+
+    #[test]
+    fn source_registry_fetch_live_never_fetches_disabled_sources() {
+        let manifest = valid_manifest();
+        let mut fetch_count = 0;
+
+        let report =
+            build_sources_report_with_fetcher("tests/live.yaml", manifest, false, true, |_| {
+                fetch_count += 1;
+                Err(TianJiError::Input("disabled fetch attempted".to_string()))
+            })
+            .expect("source report");
+
+        assert_eq!(fetch_count, 0);
+        let disabled = report
+            .runs
+            .iter()
+            .find(|run| run.source_id == "disabled_dummy_remote")
+            .expect("disabled run report");
+        assert_eq!(disabled.status, "skipped");
     }
 }

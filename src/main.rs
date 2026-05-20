@@ -351,6 +351,9 @@ enum Cli {
         /// Run enabled fixture sources through deterministic pipeline
         #[arg(long = "run-fixtures")]
         run_fixtures: bool,
+        /// Fetch enabled RSS/Atom sources explicitly
+        #[arg(long = "fetch-live")]
+        fetch_live: bool,
     },
     /// Generate shell completion scripts
     Completions {
@@ -1200,9 +1203,11 @@ mod tests {
             Cli::Sources {
                 config,
                 run_fixtures,
+                fetch_live,
             } => {
                 assert_eq!(config, "examples/sources.example.yaml");
                 assert!(!run_fixtures);
+                assert!(!fetch_live);
             }
             _ => panic!("expected Sources variant"),
         }
@@ -1219,7 +1224,30 @@ mod tests {
         ])
         .expect("parse sources run fixtures");
         match cli {
-            Cli::Sources { run_fixtures, .. } => assert!(run_fixtures),
+            Cli::Sources {
+                run_fixtures,
+                fetch_live,
+                ..
+            } => {
+                assert!(run_fixtures);
+                assert!(!fetch_live);
+            }
+            _ => panic!("expected Sources variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_sources_fetch_live() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "sources",
+            "--config",
+            "examples/sources.example.yaml",
+            "--fetch-live",
+        ])
+        .expect("parse sources fetch live");
+        match cli {
+            Cli::Sources { fetch_live, .. } => assert!(fetch_live),
             _ => panic!("expected Sources variant"),
         }
     }
@@ -3363,9 +3391,10 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
         Cli::Sources {
             config,
             run_fixtures,
+            fetch_live,
         } => {
             let manifest = load_source_manifest(&config)?;
-            let report = build_sources_report(&config, manifest, run_fixtures)?;
+            let report = build_sources_report(&config, manifest, run_fixtures, fetch_live)?;
             Ok(serde_json::to_string_pretty(&report)?)
         }
         Cli::Completions { shell } => {
