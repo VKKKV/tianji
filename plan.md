@@ -259,9 +259,10 @@ Borrowing adoption status after Phase D/E:
 - Refreshed README operator quickstart for deterministic fixture runs, config template + `doctor`, current LLM config behavior, daemon/API envelope, signed agent command channel, alert dispatch dry-run/redaction, and TUI replay keybindings.
 - Kept examples local-first and credential-free.
 
-**F4. Release readiness check**
-- Verify `cargo build --release`, binary size target, shell completions, and a fixture-based smoke run.
-- Produce a concise release checklist in the repo.
+**F4. Release readiness check** ✅
+- Verified `cargo build --release`; release binary `target/release/tianji` is 15,338,616 bytes (14.63 MiB), under the 25 MB target.
+- Verified shell completions for bash/zsh/fish and a fixture-based smoke run.
+- Added `RELEASE_CHECKLIST.md` with exact commands, results, and local-first/no-secrets release notes.
 
 ---
 
@@ -308,4 +309,4 @@ Each phase must pass:
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
-- Single binary < 25MB release
+- Single binary < 25MB release (current: 15,338,616 bytes / 14.63 MiB)
