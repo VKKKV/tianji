@@ -4,7 +4,7 @@ TianJi is a geopolitical intelligence engine — ingest signals, compute diverge
 
 ## Current State (2026-05-20)
 
-Pure Rust project. 341 unit tests + 39 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, and TUI replay are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 345 unit tests + 39 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, and eval harness drift checks are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
@@ -184,6 +184,7 @@ tianji tui              Browse persisted runs and simulation replay in a termina
 tianji predict          Run Hongmeng/Nuwa simulation against configured actor profiles
 tianji watch            Poll feeds with fast/slow scheduling helpers
 tianji doctor           Validate local config readiness without printing secrets
+tianji eval             Run deterministic fixture evaluation and drift checks
 tianji completions      Generate shell completion scripts (bash/zsh/fish)
 ```
 
@@ -453,6 +454,18 @@ Header value: dummy-test-secret
 ```
 
 In dry-run mode, reports use `status: planned` and redacted endpoints such as `https://example.invalid/.../<redacted>`. Live dispatch is only for operators who intentionally configure real Telegram/Discord/webhook endpoints outside the quickstart.
+
+### `tianji eval`
+
+Run the checked-in local evaluation corpus and report semantic drift as JSON.
+No network, daemon, or LLM provider is required.
+
+```
+tianji eval --manifest tests/fixtures/eval/corpus.yaml
+```
+
+The command exits `0` when all cases pass and exits non-zero when any manifest
+expectation or golden semantic score check fails.
 
 ### `tianji completions`
 

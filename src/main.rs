@@ -333,6 +333,12 @@ enum Cli {
         #[arg(long = "json")]
         json: bool,
     },
+    /// Run deterministic fixture evaluation corpus and report drift
+    Eval {
+        /// Path to eval corpus manifest YAML
+        #[arg(long = "manifest")]
+        manifest: String,
+    },
     /// Generate shell completion scripts
     Completions {
         /// Shell to generate completions for
@@ -432,6 +438,10 @@ async fn main() -> ExitCode {
                 println!("{output}");
             }
             ExitCode::SUCCESS
+        }
+        Err(TianJiError::ReportFailure(output)) => {
+            println!("{output}");
+            ExitCode::from(1)
         }
         Err(error) => {
             error!("{error}");
@@ -1118,6 +1128,23 @@ mod tests {
                 assert!(json);
             }
             _ => panic!("expected Doctor variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_eval() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "eval",
+            "--manifest",
+            "tests/fixtures/eval/corpus.yaml",
+        ])
+        .expect("parse eval");
+        match cli {
+            Cli::Eval { manifest } => {
+                assert_eq!(manifest, "tests/fixtures/eval/corpus.yaml");
+            }
+            _ => panic!("expected Eval variant"),
         }
     }
 
@@ -3245,6 +3272,15 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             sqlite_path,
             json,
         } => handle_doctor(config.as_deref(), sqlite_path.as_deref(), json),
+        Cli::Eval { manifest } => {
+            let report = tianji::eval::run_eval_manifest(&manifest)?;
+            let output = serde_json::to_string_pretty(&report)?;
+            if report.failed > 0 {
+                Err(TianJiError::ReportFailure(output))
+            } else {
+                Ok(output)
+            }
+        }
         Cli::Completions { shell } => {
             let shell = match shell {
                 ShellName::Bash => Shell::Bash,

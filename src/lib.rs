@@ -4,6 +4,7 @@ pub mod backtrack;
 pub mod daemon;
 pub mod delta;
 pub mod delta_memory;
+pub mod eval;
 pub mod fetch;
 pub mod grouping;
 pub mod hongmeng;
@@ -60,6 +61,7 @@ pub enum TianJiError {
     Yaml(serde_yaml::Error, String),
     Storage(rusqlite::Error),
     Llm(llm::error::LlmError),
+    ReportFailure(String),
 }
 
 impl std::fmt::Display for TianJiError {
@@ -73,6 +75,7 @@ impl std::fmt::Display for TianJiError {
             Self::Yaml(error, path) => write!(formatter, "{error} (in {path})"),
             Self::Storage(error) => write!(formatter, "{error}"),
             Self::Llm(error) => write!(formatter, "{error}"),
+            Self::ReportFailure(_) => write!(formatter, "report indicates failure"),
         }
     }
 }

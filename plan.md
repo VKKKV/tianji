@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, and release-readiness gate complete. Next: Phase H evaluation harness.
-> Tests: 341 unit + 39 integration pass / 0 fail
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, and H1 evaluation harness first slice complete. Next: expand Phase H snapshots and drift reporting.
+> Tests: 345 unit + 39 integration pass / 0 fail
 
 ---
 
@@ -39,8 +39,8 @@ TUI ████████████████████ ✅ 4 views + s
 Phase F ████████████████████ ✅ Product polish + operator readiness
 ```
 
-  源码: 25,398 行 Rust / 56 源文件
-  测试: 341 unit + 39 integration pass / 0 fail
+  源码: 25,437 行 Rust / 56 源文件
+  测试: 345 unit + 39 integration pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -278,9 +278,10 @@ Borrowing adoption status after Phase D/E:
 
 Purpose: make TianJi's analysis quality measurable before deeper scoring, simulation, or feed-source expansion.
 
-**H1. Fixture corpus manifest** ⏳
-- Add a checked-in manifest describing fixture scenarios, expected mode/schema, dominant-field expectations, risk-level expectations, and allowed score drift tolerance.
-- Keep all corpus inputs local-first and credential-free.
+**H1. Evaluation harness first slice** ✅
+- Added checked-in eval corpus manifest and golden snapshot for the representative sample feed.
+- Added `tianji eval --manifest tests/fixtures/eval/corpus.yaml` JSON drift report with CI-friendly failure exit.
+- Compares local deterministic fixture output against manifest expectations and golden semantic score fields.
 
 **H2. Golden artifact snapshots** ⏳
 - Generate stable golden outputs for selected fixtures.
@@ -350,7 +351,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 341 unit + 39 integration)
+- `cargo test` all green (currently 345 unit + 39 integration)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
