@@ -1,9 +1,9 @@
-# TianJi (天机) — Development Plan v5
+# TianJi (天机) — Development Plan v6
 
-> Branch: `main` | Updated: 2026-05-19
+> Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core product complete. Phase A/B/C/D/E hardening, production features, agent integration, and simulation auditability complete. Next: update roadmap before starting new feature phase.
-> Tests: 337 unit + 32 integration pass / 0 fail
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, and release-readiness gate complete. Next: Phase H evaluation harness.
+> Tests: 341 unit + 39 integration pass / 0 fail
 
 ---
 
@@ -36,14 +36,15 @@ TUI ████████████████████ ✅ 4 views + s
  5.2 ████████████████████ ✅ Worldline SQLite persistence
  5.3 ████████████████████ ✅ Human-in-the-loop pruning (TUI ↔ Sim)
 
-Bugfix ████████████████████ ✅ 22 bugs (15C+7H), 4 commits, 2026-05-17
+Phase F ████████████████████ ✅ Product polish + operator readiness
 ```
 
-  源码: 21,722 行 Rust / 55 源文件
-  测试: 337 unit + 32 integration pass / 0 fail
-  构建: cargo build + clippy -D warnings zero
-  依赖: 23 manifest dependencies
+  源码: 25,398 行 Rust / 56 源文件
+  测试: 341 unit + 39 integration pass / 0 fail
+  构建: cargo build --release + clippy -D warnings zero
+  依赖: 24 manifest dependencies
   Python: 已退役
+  Release binary: 15,338,616 bytes / 14.63 MiB (< 25MB)
 
 ### Phase A — Immediate Cleanup (COMPLETE)
 
@@ -137,11 +138,11 @@ RunArtifact JSON ─────────────────────
 
 ---
 
-## 3. Next Development Plan (v5)
+## 3. Development Roadmap (v6)
 
-The core Rust engine is complete and the post-review A/B/C hardening pass is
-finished. Development now moves from correctness/architecture cleanup to
-selective production features. Ordered by priority.
+The core Rust engine and Phase F release-readiness checkpoint are complete.
+Development now moves from product completion to quality governance: reproducible
+evaluation, source management, and operational reliability.
 
 ### Completed hardening
 
@@ -153,6 +154,7 @@ selective production features. Ordered by priority.
   deduplication, unified worldline forking.
 - Phase D: D1-D8 production features complete.
 - Phase E: agent command channel, structured simulation auditability, timeline replay.
+- Phase F: operator readiness, API contracts, release checklist, release gate.
 
 ### Phase D — Completed Production & Features
 
@@ -244,7 +246,7 @@ Borrowing adoption status after Phase D/E:
   - Landed in E3.
   - Simulation TUI exposes replay cursor/frame position and keyboard scrubbing.
 
-### Phase F — Product Polish & Operator Readiness (NEXT)
+### Phase F — Product Polish & Operator Readiness (COMPLETE)
 
 **F1. Config sample and doctor command** ✅
 - Added `examples/config.example.yaml` as a user-safe provider template.
@@ -264,6 +266,48 @@ Borrowing adoption status after Phase D/E:
 - Verified shell completions for bash/zsh/fish and a fixture-based smoke run.
 - Added `RELEASE_CHECKLIST.md` with exact commands, results, and local-first/no-secrets release notes.
 
+### Phase G — Roadmap & Spec Authority Refresh (COMPLETE)
+
+**G1. Roadmap and spec authority refresh** ✅
+- Updated root roadmap and README visible state after Phase F.
+- Audited Trellis specs for stale Phase D/F status and Python-era implementation paths.
+- Marked historical Python/Rich-era references as compatibility context where retained.
+- Defined Phase H as the next feature phase.
+
+### Phase H — Evaluation Harness (NEXT)
+
+Purpose: make TianJi's analysis quality measurable before deeper scoring, simulation, or feed-source expansion.
+
+**H1. Fixture corpus manifest** ⏳
+- Add a checked-in manifest describing fixture scenarios, expected mode/schema, dominant-field expectations, risk-level expectations, and allowed score drift tolerance.
+- Keep all corpus inputs local-first and credential-free.
+
+**H2. Golden artifact snapshots** ⏳
+- Generate stable golden outputs for selected fixtures.
+- Compare semantic fields rather than incidental timestamp or formatting noise.
+- Store snapshots under tests/fixtures or a dedicated eval directory.
+
+**H3. Score drift reporter** ⏳
+- Add a command or test helper that compares current output against golden expectations.
+- Report changed dominant field, risk level, event count, intervention count, and score deltas.
+- Return CI-friendly non-zero status for disallowed drift.
+
+**H4. Evaluation documentation and CI gate** ⏳
+- Document how to add a fixture and refresh a golden snapshot.
+- Add a lightweight local verification command for maintainers.
+- Keep eval independent of live network, LLM providers, and external services.
+
+### Later candidate phases
+
+**Phase I — Source/feed management**
+- Feed source registry, per-source enable/disable, tier config from YAML, last-success/error metadata.
+
+**Phase J — Operational reliability**
+- SQLite backup/export, retention policy, daemon health/readiness, operator maintenance commands.
+
+**Phase K — Simulation replay/export**
+- JSONL trace export, replay bundle packaging, structured agent audit viewer improvements.
+
 ---
 
 ## 4. Dependencies
@@ -277,6 +321,7 @@ serde_yaml = "0.9"
 roxmltree = "0.21"
 regex = "1.12"
 sha2 = "0.11"
+hmac = "0.13"
 blake3 = "1"
 rusqlite = { version = "0.39", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
@@ -291,7 +336,7 @@ petgraph = { version = "0.7", features = ["serde-1"] }
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap_complete = "4"
 
 [profile.release]

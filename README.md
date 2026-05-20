@@ -2,9 +2,9 @@
 
 TianJi is a geopolitical intelligence engine — ingest signals, compute divergence, generate intervention candidates, and track changes across runs. Deterministic by default. Daemon-ready. Single binary.
 
-## Current State (2026-05-19)
+## Current State (2026-05-20)
 
-Pure Rust project. 337 unit tests + 32 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, and TUI replay are implemented.
+Pure Rust project. 341 unit tests + 39 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, and TUI replay are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|

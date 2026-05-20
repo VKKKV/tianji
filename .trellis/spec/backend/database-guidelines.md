@@ -1,13 +1,13 @@
 # Database Guidelines
 
-> **Status: Shipped (Milestone 2).** Rust uses `rusqlite` with patterns matching
-> the Python oracle. The sections below document both Python oracle patterns
-> (for parity verification) and Rust implementation conventions (for future
-> development).
+> **Status: Shipped (Milestone 2+).** Current Rust code uses `rusqlite` in
+> `src/storage.rs` and bounded connection pooling for long-lived API/daemon paths.
+> Python-oracle snippets below are historical compatibility references only, not
+> standards for new code.
 
 ---
 
-## Python Oracle Database Patterns (Compatibility Reference)
+## Python Oracle Database Patterns (Historical Compatibility Reference)
 
 The sections below document the Python oracle's SQLite patterns for parity
 verification. They are **not** coding standards for new Rust code.
@@ -16,7 +16,11 @@ verification. They are **not** coding standards for new Rust code.
 
 ## Overview
 
-TianJi uses **raw `sqlite3` from the Python standard library** with **no ORM**. There is no third-party database library. All persistence goes through the `storage.py` hub and its sub-modules (`storage_write.py`, `storage_views.py`, `storage_filters.py`, `storage_compare.py`).
+TianJi's historical Python oracle used raw `sqlite3` with no ORM. Current Rust
+code uses `rusqlite` in `src/storage.rs`; use the Rust conventions section below
+for new work. The historical oracle routed persistence through `storage.py` and
+its sub-modules (`storage_write.py`, `storage_views.py`, `storage_filters.py`,
+`storage_compare.py`).
 
 ---
 
@@ -199,11 +203,11 @@ ensure_column(connection, table_name="raw_items",
 
 ## Anti-Patterns
 
-- **No ORM** — do not introduce SQLAlchemy, Peewee, or any ORM
-- **No connection pooling** — do not introduce `sqlite3` connection pooling
-- **No raw string formatting for queries** — always use `?` placeholders (`storage_write.py` uses `:named` style with `executemany`)
-- **No shared mutable connection** — every operation opens and closes its own connection
-- **No destructive migrations** — only ADD COLUMN, never DROP or ALTER existing columns
+- Bounded connection pooling is allowed and already used for long-lived API/daemon paths.
+- One-shot CLI storage helpers still open path-based `rusqlite::Connection` values per operation.
+- Do not introduce a general ORM.
+- Do not use raw string interpolation for query values; use rusqlite parameters.
+- No destructive migrations — only additive schema drift.
 
 ---
 
@@ -221,10 +225,10 @@ The Rust implementation in `src/storage.rs` mirrors the Python oracle's SQLite p
 
 ### Connection Management
 
-- Every operation opens its own `rusqlite::Connection::open(path)`.
-- `PRAGMA foreign_keys = ON` executed on every connection immediately after opening.
-- No connection pooling, no shared mutable connections.
-- `persist_run()` wraps all inserts in `connection.transaction()` with explicit `tx.commit()`.
+- `src/storage.rs` owns the canonical SQLite read/write model.
+- Long-lived API/daemon paths use the project SQLite pool; one-shot CLI paths may still open per-operation connections.
+- `PRAGMA foreign_keys = ON` executed on every direct connection immediately after opening.
+- `persist_run()` wraps inserts in `connection.transaction()` with explicit `tx.commit()`.
 
 ### Error Handling
 

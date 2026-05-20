@@ -17,7 +17,7 @@ The daemon is not a second source of truth for writes. The synchronous CLI `run`
 1. **CLI remains the write authority**
    - `tianji run ...` (Rust binary) is the direct source-of-truth write path.
    - `tianji daemon run ...` and `tianji daemon schedule ...` submit that same work unit for background execution.
-   - Python oracle equivalent: `python3 -m tianji run ...`
+   - Historical Python oracle equivalent: `python3 -m tianji run ...`
 
 2. **Local-first and loopback-only**
    - The daemon socket is local filesystem IPC.
@@ -108,36 +108,31 @@ if !ready {
 Start the daemon and hosted read API:
 
 ```bash
-# Rust (Milestone 5+)
 tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
-
-# Python oracle (current)
-python3 -m tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
 ```
 
 Inspect daemon availability:
 
 ```bash
-# Python oracle
-python3 -m tianji daemon status --socket-path runs/tianji.sock
+tianji daemon status --socket-path runs/tianji.sock
 ```
 
 Inspect one queued job:
 
 ```bash
-python3 -m tianji daemon status --socket-path runs/tianji.sock --job-id 1
+tianji daemon status --socket-path runs/tianji.sock --job-id 1
 ```
 
 Queue one background run:
 
 ```bash
-python3 -m tianji daemon run --socket-path runs/tianji.sock --fixture tests/fixtures/sample_feed.xml
+tianji daemon run --socket-path runs/tianji.sock --fixture tests/fixtures/sample_feed.xml
 ```
 
 Queue a bounded repeated run set:
 
 ```bash
-python3 -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
+tianji daemon schedule --socket-path runs/tianji.sock --every-seconds 300 --count 3 --fixture tests/fixtures/sample_feed.xml
 ```
 
 ## Bounded Schedule Command Contract
@@ -151,7 +146,7 @@ python3 -m tianji daemon schedule --socket-path runs/tianji.sock --every-seconds
 
 - `tianji daemon schedule --socket-path <path> --fixture <path> --sqlite-path <path> --every-seconds <N> --count <M>`
 - Defaults: `--socket-path runs/tianji.sock`.
-- Rust MVP input surface: `--fixture` plus optional `--sqlite-path`. Python-only fetch/source/output flags are not part of the Rust schedule contract until the Rust `daemon run` surface supports them.
+- Rust MVP input surface: `--fixture` plus optional `--sqlite-path`. Additional fetch/source/output flags are outside the bounded schedule contract until explicitly added to `tianji daemon run`.
 
 ### 3. Contracts
 
@@ -211,7 +206,7 @@ for index in 0..count {
 Stop the daemon:
 
 ```bash
-python3 -m tianji daemon stop --socket-path runs/tianji.sock
+tianji daemon stop --socket-path runs/tianji.sock
 ```
 
 ## Job Lifecycle

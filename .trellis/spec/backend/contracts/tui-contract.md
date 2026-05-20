@@ -1,17 +1,18 @@
 # TianJi TUI Contract
 
-> **Status: Superseded by `plan.md` §9 (TUI Design Spec).**
-> This document describes the shipped Python Rich-based TUI. The target TUI is
-> now the ratatui + Kanagawa Dark design defined in `plan.md` §9. Preserve the
-> read-only navigation semantics documented here during the Rust TUI port, but
-> the visual design, keybindings, color palette, and layout are governed by
-> `plan.md` §9.
+> **Status: Historical / superseded.** This document preserves the Python Rich-era
+> TUI contract for compatibility context only. Current shipped TianJi uses the
+> Rust `src/tui/` ratatui implementation with Kanagawa Dark styling, history,
+> detail, compare, search/filter, simulation, and replay scrubbing. Use root
+> `plan.md`, README, and current Rust tests as the authority for new work.
 
 ## Purpose
 
 This document defines the shipped contract for TianJi's terminal UI.
 
-TianJi already ships a first read-only Rich-based slice today.
+TianJi previously shipped a read-only Python Rich slice. The current product ships
+a Rust ratatui TUI; the Python-era text below is retained only to explain the
+historical read-only navigation contract.
 The goal here is to preserve alignment between:
 
 - the current CLI-first operator workflow
@@ -34,11 +35,10 @@ The TUI should browse:
 
 ## Shipped Now vs Planned Later
 
-### Shipped now
+### Historical Python slice
 
-The current `tui` command already provides a read-only terminal browser over persisted SQLite-backed runs.
-
-Current shipped behavior, as implemented in `tianji/tui.py` and dispatched from `tianji/cli.py`:
+The earlier Python implementation provided these read-only semantics, implemented
+in `tianji/tui.py` and dispatched from `tianji/cli.py` before the Rust port:
 
 - launch from `python3 -m tianji tui --sqlite-path ...`
 - browse a persisted run list
@@ -90,24 +90,22 @@ The shipped implementation uses `rich` (`Console`, `Live`, `Layout`) plus a smal
 
 ## Source-of-Truth Surfaces
 
-The shipped and future TUI should mirror these existing owned surfaces:
+Current Rust source-of-truth surfaces:
 
-- the Click-based `python3 -m tianji ...` CLI remains the semantic source of truth for command behavior
-
-- `python3 -m tianji history --sqlite-path ...`
+- `tianji history --sqlite-path ...`
   - persisted run list / triage view
 
-- `python3 -m tianji history-show --sqlite-path ...`
+- `tianji history-show --sqlite-path ...`
   - persisted single-run detail view
   - supports latest / previous / next navigation
   - supports scored-event and event-group projection lenses
 
-- `python3 -m tianji history-compare --sqlite-path ...`
+- `tianji history-compare --sqlite-path ...`
   - persisted run compare view
   - supports explicit pair and relative/latest presets
   - supports the same projection lenses as `history-show`
 
-- `tianji/storage.py`
+- `src/storage.rs`
   - canonical read-model implementation for list/detail/compare payloads
   - persisted truth lives here, while TUI panels render projected read lenses on top
 

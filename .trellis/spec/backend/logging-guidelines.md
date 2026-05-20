@@ -1,131 +1,61 @@
 # Logging Guidelines
 
-> **Status: Oracle-only.** This document describes the Python oracle's output
-> conventions. The Rust target uses `tracing` (Milestone 5+). Until then, Rust
-> output goes to stdout (artifact JSON) and stderr (errors).
+> **Status: Current.** TianJi is a pure Rust binary. Runtime diagnostics use
+> `tracing`; artifact/status data intended for operators goes to stdout as
+> structured JSON or terminal UI state. Historical Python logging conventions are
+> no longer standards for new code.
 
 ---
 
-## Python Oracle Logging (Compatibility Reference)
+## Rust Logging Model
 
-The sections below document the Python oracle's output patterns for parity
-verification. They are **not** coding standards for new Rust code.
+Current Rust conventions:
 
----
+- use `tracing::{error, warn, info, debug, trace}` for diagnostic events;
+- initialize formatting through `tracing_subscriber` and `RUST_LOG`;
+- keep command result payloads on stdout;
+- keep errors and diagnostics off stdout unless the command's explicit contract is a diagnostic command;
+- do not print ad-hoc debug text from library code;
+- avoid diagnostic output while the TUI owns the terminal screen.
 
-## Overview
+## Output Channels
 
-TianJi does **not** use Python's `logging` module. There are **zero** `import logging` statements in the codebase. Output is handled through purpose-specific channels:
+| Channel | Purpose |
+|---------|---------|
+| stdout | JSON artifacts, CLI command results, generated shell completions |
+| stderr / tracing sink | warnings, errors, daemon/server diagnostics |
+| TUI terminal screen | ratatui application state while `tianji tui` is running |
+| SQLite/API state | persisted runs, daemon job state, and read API responses |
 
-| Channel | Purpose | Location |
-|---------|---------|-----------|
-| `click.echo()` | Primary CLI output (JSON results, status messages) | All CLI handlers |
-| `print()` | Fallback messages only (TUI unavailable, server startup) | `tui.py:44`, `webui_server.py:251` |
-| `sys.stderr` | Click error display | `cli.py:782` |
-| `JobRecord.error` | Daemon worker failure tracking | `daemon.py:204` |
+## CLI Output Rules
 
----
+- `tianji run --fixture ...` emits one schema-versioned artifact to stdout.
+- `history`, `history-show`, `history-compare`, daemon status, API-like command outputs, and dry-run outputs should remain machine-readable where already established.
+- `doctor --json` emits a diagnostic JSON envelope without printing secret values.
+- Generated completions are written to stdout so callers can redirect them.
 
-## Output Patterns
+## TUI Rules
 
-### CLI Output: `click.echo()`
+- Do not print normal log lines while ratatui owns the terminal.
+- Surface TUI loading/error state through widgets where possible.
+- Use ASCII/Nerd Font fallback helpers instead of printing side-channel warnings.
 
-All CLI commands return results via `click.echo()`. JSON is the expected output format:
+## Daemon/API Rules
 
-```python
-# tianji/cli.py:76-77 — artifact output
-artifact_json = json.dumps(artifact.to_dict(), ensure_ascii=False, indent=2)
-click.echo(artifact_json)
-```
-
-```python
-# tianji/cli_history.py:95 — history listing
-click.echo(json.dumps(result, ensure_ascii=False, indent=2))
-```
-
-```python
-# tianji/cli_daemon.py:213 — daemon status
-click.echo(json.dumps(response, ensure_ascii=False, indent=2))
-```
-
-### Fallback Messages: `print()`
-
-Only used when the primary channel is unavailable:
-
-```python
-# tianji/tui.py:44 — TUI fallback when no runs exist
-print("No persisted runs are available for the TUI browser.")
-```
-
-```python
-# tianji/webui_server.py:251 — server startup
-print(f"WebUI server starting on {args.host}:{args.port}")
-```
-
-### Error Display: `sys.stderr`
-
-Click errors are displayed via the framework's own mechanism:
-
-```python
-# tianji/cli.py:782
-except click.ClickException as error:
-    error.show(file=sys.stderr)
-```
-
-### Daemon Error Tracking: `JobRecord.error`
-
-The daemon has no runtime log output. Worker failures are stored in `JobRecord.error` strings:
-
-```python
-# tianji/daemon.py:202-204
-except Exception as exc:
-    error_message = f"{exc.__class__.__name__}: {exc}"
-    self.state.set_job_failed(record.job_id, error=error_message)
-```
-
-### API HTTP Logging: Explicitly Disabled
-
-The API server's `log_message` is overridden to a no-op:
-
-```python
-# tianji/api.py:70-71
-def log_message(self, format: str, *args: Any) -> None:
-    return  # No-op: suppress HTTP request logging
-```
-
----
-
-## TUI Output
-
-The Rich TUI uses `Console` with `Live(screen=True)` — it writes directly to the terminal and is not part of any logging system. No log messages should be printed while the TUI is active (they would corrupt the terminal display).
-
----
-
-## Rules
-
-- **Use `click.echo()` for all CLI output** — it respects Click's output streams and testing infrastructure
-- **Use `print()` only for fallback messages** — when Click is not available (TUI fallback, raw server startup)
-- **Use `json.dumps(ensure_ascii=False, indent=2)` for structured output** — consistent formatting across all commands
-- **Never use `logging` module** — not part of this project's conventions
-- **Never print to stdout during TUI sessions** — would corrupt the terminal display
-
----
+- Daemon worker failures should be captured in daemon job state and exposed through the stable status envelope.
+- API errors use the local API response envelope with `api_version`, `data`, and `error`.
+- Request/response diagnostics may use tracing, but should not change API payload shapes.
 
 ## Anti-Patterns
 
-- **No `logging` module** — do not introduce `logging.getLogger()`, `logging.basicConfig()`, or any logging framework
-- **No `print()` for normal CLI output** — use `click.echo()` in CLI commands
-- **No runtime log files** — all state is in SQLite; there is no log file to tail
-- **No `stderr` for normal output** — `stderr` is only for Click error display
+- Ad-hoc `println!`/`eprintln!` debug statements in library or daemon code.
+- Logging secrets, webhook URLs, API keys, tokens, or raw signed-command secrets.
+- Changing stdout from JSON to human text for commands consumed by tests or local API/web UI tooling.
+- Emitting logs during TUI drawing that corrupt the terminal screen.
+- Adding a separate runtime log file as the primary state source; persisted state belongs in SQLite and API envelopes.
 
----
+## Historical Context
 
-## Common Mistakes
-
-- Adding `print()` debug statements and forgetting to remove them — use `click.echo()` or write to the database instead
-- Introducing `logging` because "every project needs logging" — TianJi intentionally uses SQLite for all persistent state
-- Printing formatted text during TUI sessions — it will corrupt the Rich terminal display
-
----
-
-**Language**: English
+The retired Python oracle used `click.echo`, `print`, and framework exceptions.
+Those examples may remain in archived docs for parity history, but new work should
+follow the Rust rules above.

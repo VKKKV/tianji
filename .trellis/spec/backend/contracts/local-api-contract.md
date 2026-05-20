@@ -10,12 +10,12 @@ TianJi now ships a narrow read-first loopback HTTP API inside the local daemon/s
 - the current SQLite-backed run-history surface
 - the shipped local API layer for a decoupled web UI or other local readers
 
-The shipped startup contract is the daemon runtime path: `tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765` (Rust binary, Milestone 5+) or `python -m tianji daemon start ...` (Python oracle), which keeps the UNIX socket control plane and binds the read API at `http://127.0.0.1:8765/api/v1` by default.
+The shipped startup contract is the daemon runtime path: `tianji daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765`, which keeps the UNIX socket control plane and binds the read API at `http://127.0.0.1:8765/api/v1` by default.
 
 ## Design Principles
 
 1. **CLI remains the source of truth for writes first**
-   - The current product surface is `tianji run ...` (Rust binary) or `python3 -m tianji run ...` (Python oracle).
+   - The current product surface is `tianji run ...` (Rust binary).
    - The first local API slice should be read-first.
 
 2. **Reuse existing artifact and history shapes**
@@ -34,18 +34,18 @@ The shipped startup contract is the daemon runtime path: `tianji daemon start --
 
 These are the current product-aligned surfaces the shipped API mirrors:
 
-- `tianji run ...` (Rust) / `python3 -m tianji run ...` (Python oracle)
+- `tianji run ...`
   - one synchronous pipeline execution
   - emits one schema-versioned artifact
 
-- `tianji history --sqlite-path ...` / `python3 -m tianji history --sqlite-path ...`
+- `tianji history --sqlite-path ...`
   - lists persisted runs from SQLite
 
-- `tianji history-show --sqlite-path ... --run-id N` / `python3 -m tianji history-show ...`
+- `tianji history-show --sqlite-path ... --run-id N`
   - returns persisted run-level detail
   - includes `input_summary`, `scenario_summary`, `scored_events`, and `intervention_candidates`
 
-- `tianji history-compare --sqlite-path ...` / `python3 -m tianji history-compare ...`
+- `tianji history-compare --sqlite-path ...`
   - compares two persisted runs, or resolves relative/latest compare presets first
   - reuses the same scored-event and event-group projection vocabulary as `history-show`
   - confirms that compare is already part of the mirrored backend surface that the first API slice must name explicitly for direct pair comparison
@@ -215,16 +215,16 @@ These either do not exist in the current product surface or would force architec
 
 ## Mapping to Current TianJi Code
 
-- `tianji/cli.py`
-  - current operator commands: `run`, `history`, `history-show`, `history-compare`, and `tui`
+- `src/main.rs`
+  - current operator commands: `run`, `history`, `history-show`, `history-compare`, `tui`, daemon/API/web UI, doctor, completions, and simulation commands
 
-- `tianji/pipeline.py`
-  - defines the unit of work: one run -> one artifact
+- `src/lib.rs` plus pipeline modules (`fetch`, `normalize`, `scoring`, `backtrack`)
+  - define the unit of work: one run -> one artifact
 
-- `tianji/models.py`
+- `src/models.rs`
   - current artifact schema vocabulary
 
-- `tianji/storage.py`
+- `src/storage.rs`
   - current persisted read/write boundary for runs, run details, and run comparison payloads
 
 ## Risks to Avoid

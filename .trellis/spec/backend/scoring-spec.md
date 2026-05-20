@@ -41,7 +41,7 @@ This scoring-spec update documents the shipped rationale output more explicitly.
 
 Current rationale remains additive, explicit, transparent, inspectable, and bounded:
 
-- `build_rationale()` in `tianji/scoring.py` always starts with top-level `Im=<value>` and `Fa=<value>` entries
+- `build_rationale()` in `src/scoring.rs` always starts with top-level `Im=<value>` and `Fa=<value>` entries
 - the rationale then exposes the additive `Im` components with the exact shipped labels:
   - `im_base`
   - `im_actor_weight`
@@ -149,7 +149,7 @@ Allowed inputs for this slice:
 
 - the selected `dominant_field`
 - the dominant field's current strength from `field_scores`
-- first-party field keyword weights already defined in `tianji/normalize.py`
+- first-party field keyword weights already defined in `src/normalize.rs`
 
 Disallowed inputs for this slice:
 
@@ -169,7 +169,7 @@ Constraints implemented in this slice:
 Current implementation shape:
 
 - TianJi computes a small field-impact factor from the dominant field's keyword
-  vocabulary profile in `tianji/normalize.py`
+  vocabulary profile in `src/normalize.rs`
 - stronger dominant-field vocabularies contribute a modestly larger bounded bonus
   when the event's dominant-field strength is otherwise the same
 - uncategorized events do not receive this bonus
@@ -198,7 +198,7 @@ without changing SQLite table shape.
 
 The shipped `Fa` model is intentionally narrow and fully local to one normalized event.
 
-Current rule set in `tianji/scoring.py`:
+Current rule set in `src/scoring.rs`:
 
 - start from the dominant field strength
 - add a bounded dominance-margin bonus over the second-best field
@@ -377,7 +377,7 @@ Recommended verification for this slice:
 
 ## Current Implementation Boundary
 
-- `tianji/scoring.py` owns the explicit `Im` and `Fa` computations for now.
+- `src/scoring.rs` owns the explicit `Im` and `Fa` computations for now.
 - `impact_score` in the artifact corresponds to current TianJi `Im`.
 - `field_attraction` in the artifact corresponds to current TianJi `Fa`.
 

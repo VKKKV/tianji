@@ -54,10 +54,9 @@ return Err(TianJiError::DataIntegrity(
 
 ---
 
-## Python Oracle Error Handling (Compatibility Reference)
-
-The sections below document the Python oracle's error patterns for parity
-verification. They are **not** coding standards for new Rust code.
+> **Status: Historical / compatibility reference.** The current Rust model is above.
+> The sections below preserve the retired Python oracle's error patterns for
+> historical parity context only. They are **not** coding standards for new Rust code.
 
 ---
 
