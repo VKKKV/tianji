@@ -4,7 +4,7 @@ TianJi is a geopolitical intelligence engine — ingest signals, compute diverge
 
 ## Current State (2026-05-20)
 
-Pure Rust project. 345 unit tests + 39 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, and eval harness drift checks are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 346 unit tests + 41 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, and eval harness drift checks are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
@@ -465,7 +465,47 @@ tianji eval --manifest tests/fixtures/eval/corpus.yaml
 ```
 
 The command exits `0` when all cases pass and exits non-zero when any manifest
-expectation or golden semantic score check fails.
+expectation or golden semantic score check fails. The report uses
+`schema_version: "tianji.eval-report.v1"` and includes per-case descriptions,
+check counts, failed-check counts, global/per-case `max_score_delta`, and
+numeric `delta`/`tolerance` values for score drift checks.
+
+Local gate:
+
+```bash
+bash scripts/check-eval.sh
+```
+
+That script runs only:
+
+```bash
+cargo run --quiet -- eval --manifest tests/fixtures/eval/corpus.yaml
+```
+
+To refresh golden snapshots intentionally after an accepted deterministic
+pipeline/scoring change:
+
+```bash
+cargo run --quiet -- eval --manifest tests/fixtures/eval/corpus.yaml --update-golden
+```
+
+Normal `eval` is read-only. `--update-golden` overwrites only golden files named
+in `tests/fixtures/eval/corpus.yaml` and reports them in `updated_golden_paths`.
+
+To add a fixture case:
+
+1. Add a credential-free RSS/Atom file under `tests/fixtures/`.
+2. Add a case to `tests/fixtures/eval/corpus.yaml` with stable expected counts,
+   dominant field, risk level, top event id, score tolerance, and golden path.
+3. Run `cargo run --quiet -- eval --manifest tests/fixtures/eval/corpus.yaml --update-golden`.
+4. Inspect the new/changed golden JSON under `tests/fixtures/eval/golden/` and
+   commit only intentional semantic fields.
+5. Run `bash scripts/check-eval.sh` to confirm the corpus passes without refresh.
+
+When eval fails, inspect `cases[].checks[]`: non-numeric drift shows expected vs
+actual semantic values; score drift additionally shows absolute `delta` and the
+allowed `tolerance`. Update fixtures/goldens only when the changed behavior is
+intentional; otherwise fix the deterministic pipeline or manifest expectation.
 
 ### `tianji completions`
 

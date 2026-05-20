@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, and H1 evaluation harness first slice complete. Next: expand Phase H snapshots and drift reporting.
-> Tests: 345 unit + 39 integration pass / 0 fail
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, and Phase H evaluation harness complete. Next: source/feed management candidates.
+> Tests: 346 unit + 41 integration pass / 0 fail
 
 ---
 
@@ -37,10 +37,11 @@ TUI ████████████████████ ✅ 4 views + s
  5.3 ████████████████████ ✅ Human-in-the-loop pruning (TUI ↔ Sim)
 
 Phase F ████████████████████ ✅ Product polish + operator readiness
+Phase H ████████████████████ ✅ Evaluation harness
 ```
 
-  源码: 25,437 行 Rust / 56 源文件
-  测试: 345 unit + 39 integration pass / 0 fail
+  源码: 26,079 行 Rust / 57 源文件
+  测试: 346 unit + 41 integration pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -274,7 +275,7 @@ Borrowing adoption status after Phase D/E:
 - Marked historical Python/Rich-era references as compatibility context where retained.
 - Defined Phase H as the next feature phase.
 
-### Phase H — Evaluation Harness (NEXT)
+### Phase H — Evaluation Harness (COMPLETE)
 
 Purpose: make TianJi's analysis quality measurable before deeper scoring, simulation, or feed-source expansion.
 
@@ -283,20 +284,20 @@ Purpose: make TianJi's analysis quality measurable before deeper scoring, simula
 - Added `tianji eval --manifest tests/fixtures/eval/corpus.yaml` JSON drift report with CI-friendly failure exit.
 - Compares local deterministic fixture output against manifest expectations and golden semantic score fields.
 
-**H2. Golden artifact snapshots** ⏳
-- Generate stable golden outputs for selected fixtures.
-- Compare semantic fields rather than incidental timestamp or formatting noise.
-- Store snapshots under tests/fixtures or a dedicated eval directory.
+**H2. Golden artifact snapshots** ✅
+- Added a second checked-in local fixture case with economy/high semantics.
+- Every corpus case has a stable semantic golden snapshot under `tests/fixtures/eval/golden/`.
+- `tianji eval --manifest tests/fixtures/eval/corpus.yaml --update-golden` refreshes only manifest-listed golden paths and reports them.
 
-**H3. Score drift reporter** ⏳
-- Add a command or test helper that compares current output against golden expectations.
-- Report changed dominant field, risk level, event count, intervention count, and score deltas.
-- Return CI-friendly non-zero status for disallowed drift.
+**H3. Score drift reporter** ✅
+- Eval JSON report includes descriptions, check counts, failed-check counts, global/per-case `max_score_delta`, and updated golden paths.
+- Numeric score checks include absolute `delta` and configured `tolerance`.
+- Disallowed manifest/golden drift returns CI-friendly non-zero status.
 
-**H4. Evaluation documentation and CI gate** ⏳
-- Document how to add a fixture and refresh a golden snapshot.
-- Add a lightweight local verification command for maintainers.
-- Keep eval independent of live network, LLM providers, and external services.
+**H4. Evaluation documentation and CI gate** ✅
+- README documents running eval, adding fixture cases, refreshing goldens, and interpreting drift failures.
+- Added `scripts/check-eval.sh` as a local credential-free eval gate.
+- Eval remains independent of live network, LLM providers, daemon/API, and external services.
 
 ### Later candidate phases
 
@@ -351,7 +352,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 345 unit + 39 integration)
+- `cargo test` all green (currently 346 unit + 41 integration)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional

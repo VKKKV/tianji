@@ -338,6 +338,9 @@ enum Cli {
         /// Path to eval corpus manifest YAML
         #[arg(long = "manifest")]
         manifest: String,
+        /// Refresh golden snapshots listed in the manifest
+        #[arg(long = "update-golden")]
+        update_golden: bool,
     },
     /// Generate shell completion scripts
     Completions {
@@ -1141,8 +1144,34 @@ mod tests {
         ])
         .expect("parse eval");
         match cli {
-            Cli::Eval { manifest } => {
+            Cli::Eval {
+                manifest,
+                update_golden,
+            } => {
                 assert_eq!(manifest, "tests/fixtures/eval/corpus.yaml");
+                assert!(!update_golden);
+            }
+            _ => panic!("expected Eval variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_eval_update_golden() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "eval",
+            "--manifest",
+            "tests/fixtures/eval/corpus.yaml",
+            "--update-golden",
+        ])
+        .expect("parse eval update golden");
+        match cli {
+            Cli::Eval {
+                manifest,
+                update_golden,
+            } => {
+                assert_eq!(manifest, "tests/fixtures/eval/corpus.yaml");
+                assert!(update_golden);
             }
             _ => panic!("expected Eval variant"),
         }
@@ -3272,8 +3301,11 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             sqlite_path,
             json,
         } => handle_doctor(config.as_deref(), sqlite_path.as_deref(), json),
-        Cli::Eval { manifest } => {
-            let report = tianji::eval::run_eval_manifest(&manifest)?;
+        Cli::Eval {
+            manifest,
+            update_golden,
+        } => {
+            let report = tianji::eval::run_eval_manifest(&manifest, update_golden)?;
             let output = serde_json::to_string_pretty(&report)?;
             if report.failed > 0 {
                 Err(TianJiError::ReportFailure(output))
