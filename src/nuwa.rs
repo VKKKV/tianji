@@ -14,6 +14,8 @@ pub use outcome::{
 pub use pruning::PruningDecision;
 pub use sandbox::{NuwaSandbox, SimulationMode};
 pub use trace::{
-    read_trace_jsonl, write_trace_jsonl, SimulationTrace, SimulationTraceFrame,
-    SimulationTraceMetadata, SimulationTraceRecord, TraceAgentAction, SIM_TRACE_SCHEMA_VERSION,
+    read_trace_jsonl, write_replay_bundle_dir, write_trace_jsonl, ReplayBundleManifest,
+    SimulationTrace, SimulationTraceFrame, SimulationTraceMetadata, SimulationTraceRecord,
+    TraceAgentAction, REPLAY_BUNDLE_MANIFEST_FILE, REPLAY_BUNDLE_OUTCOME_FILE,
+    REPLAY_BUNDLE_SCHEMA_VERSION, REPLAY_BUNDLE_TRACE_FILE, SIM_TRACE_SCHEMA_VERSION,
 };

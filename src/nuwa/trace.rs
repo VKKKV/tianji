@@ -15,6 +15,10 @@ use crate::TianJiError;
 use super::outcome::SimulationOutcome;
 
 pub const SIM_TRACE_SCHEMA_VERSION: &str = "tianji.sim-trace.v1";
+pub const REPLAY_BUNDLE_SCHEMA_VERSION: &str = "tianji.replay-bundle.v1";
+pub const REPLAY_BUNDLE_MANIFEST_FILE: &str = "manifest.json";
+pub const REPLAY_BUNDLE_TRACE_FILE: &str = "trace.jsonl";
+pub const REPLAY_BUNDLE_OUTCOME_FILE: &str = "outcome.json";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SimulationTrace {
@@ -71,6 +75,21 @@ impl TraceAgentAction {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SimulationTraceCompleted {
     pub outcome: SimulationOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ReplayBundleManifest {
+    pub schema_version: String,
+    pub created_at: String,
+    pub simulation_id: String,
+    pub mode: String,
+    pub target_field: Option<FieldKey>,
+    pub horizon_ticks: u64,
+    pub frame_count: usize,
+    pub trace_file: String,
+    pub outcome_file: String,
+    pub trace_bytes: u64,
+    pub outcome_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -200,6 +219,77 @@ pub fn read_trace_jsonl(path: impl AsRef<Path>) -> Result<SimulationTrace, TianJ
         frames,
         completed,
     })
+}
+
+pub fn write_replay_bundle_dir(
+    dir: impl AsRef<Path>,
+    trace: &SimulationTrace,
+) -> Result<ReplayBundleManifest, TianJiError> {
+    let dir = dir.as_ref();
+    std::fs::create_dir_all(dir)?;
+
+    let trace_path = dir.join(REPLAY_BUNDLE_TRACE_FILE);
+    let outcome_path = dir.join(REPLAY_BUNDLE_OUTCOME_FILE);
+    let manifest_path = dir.join(REPLAY_BUNDLE_MANIFEST_FILE);
+
+    write_trace_jsonl(&trace_path, trace)?;
+
+    let outcome_file = File::create(&outcome_path)?;
+    let mut outcome_writer = BufWriter::new(outcome_file);
+    serde_json::to_writer_pretty(&mut outcome_writer, &trace.completed.outcome)?;
+    outcome_writer.write_all(b"\n")?;
+    outcome_writer.flush()?;
+
+    let trace_bytes = std::fs::metadata(&trace_path)?.len();
+    let outcome_bytes = std::fs::metadata(&outcome_path)?.len();
+    let manifest = ReplayBundleManifest {
+        schema_version: REPLAY_BUNDLE_SCHEMA_VERSION.to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        simulation_id: local_simulation_id(&trace.metadata),
+        mode: trace.metadata.mode.clone(),
+        target_field: trace.metadata.target_field.clone(),
+        horizon_ticks: trace.metadata.horizon_ticks,
+        frame_count: trace.frames.len(),
+        trace_file: REPLAY_BUNDLE_TRACE_FILE.to_string(),
+        outcome_file: REPLAY_BUNDLE_OUTCOME_FILE.to_string(),
+        trace_bytes,
+        outcome_bytes,
+    };
+
+    let manifest_file = File::create(manifest_path)?;
+    let mut manifest_writer = BufWriter::new(manifest_file);
+    serde_json::to_writer_pretty(&mut manifest_writer, &manifest)?;
+    manifest_writer.write_all(b"\n")?;
+    manifest_writer.flush()?;
+
+    Ok(manifest)
+}
+
+fn local_simulation_id(metadata: &SimulationTraceMetadata) -> String {
+    let field = metadata
+        .target_field
+        .as_ref()
+        .map(|field| format!("{}-{}", field.region, field.domain))
+        .unwrap_or_else(|| "all-fields".to_string());
+    format!(
+        "local-{}-{}-h{}-f{}",
+        sanitize_id_part(&metadata.mode),
+        sanitize_id_part(&field),
+        metadata.horizon_ticks,
+        metadata.frame_count
+    )
+}
+
+fn sanitize_id_part(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => character.to_ascii_lowercase(),
+            _ => '-',
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
 }
 
 fn write_record<W: Write>(
@@ -342,5 +432,51 @@ mod tests {
         assert_eq!(loaded.metadata.schema_version, SIM_TRACE_SCHEMA_VERSION);
         assert_eq!(loaded.metadata.frame_count, trace.metadata.frame_count);
         assert_eq!(loaded.frames.len(), trace.frames.len());
+    }
+
+    #[test]
+    fn bundle_writer_creates_manifest_trace_and_outcome() {
+        let trace = sample_trace();
+        let dir = std::env::temp_dir().join(format!(
+            "tianji_bundle_roundtrip_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+
+        let manifest = write_replay_bundle_dir(&dir, &trace).expect("write bundle");
+        let manifest_path = dir.join(REPLAY_BUNDLE_MANIFEST_FILE);
+        let trace_path = dir.join(&manifest.trace_file);
+        let outcome_path = dir.join(&manifest.outcome_file);
+
+        assert_eq!(manifest.schema_version, REPLAY_BUNDLE_SCHEMA_VERSION);
+        assert_eq!(manifest.trace_file, REPLAY_BUNDLE_TRACE_FILE);
+        assert_eq!(manifest.outcome_file, REPLAY_BUNDLE_OUTCOME_FILE);
+        assert_eq!(manifest.frame_count, trace.frames.len());
+        assert_eq!(
+            manifest.trace_bytes,
+            std::fs::metadata(&trace_path).unwrap().len()
+        );
+        assert_eq!(
+            manifest.outcome_bytes,
+            std::fs::metadata(&outcome_path).unwrap().len()
+        );
+        assert!(manifest_path.exists());
+
+        let loaded_trace = read_trace_jsonl(&trace_path).expect("read bundled trace");
+        assert_eq!(loaded_trace.frames.len(), trace.frames.len());
+        let outcome: SimulationOutcome =
+            serde_json::from_reader(File::open(&outcome_path).expect("open bundled outcome"))
+                .expect("bundled outcome json");
+        assert_eq!(outcome.tick_count, trace.completed.outcome.tick_count);
+
+        let manifest_json: ReplayBundleManifest =
+            serde_json::from_reader(File::open(&manifest_path).expect("open bundled manifest"))
+                .expect("bundled manifest json");
+        assert_eq!(manifest_json, manifest);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

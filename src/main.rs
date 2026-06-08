@@ -304,6 +304,9 @@ enum Cli {
         /// Optional JSONL trace export path for replay/import tooling
         #[arg(long = "trace-jsonl")]
         trace_jsonl: Option<String>,
+        /// Optional replay bundle output directory (manifest.json, trace.jsonl, outcome.json)
+        #[arg(long = "replay-bundle-dir")]
+        replay_bundle_dir: Option<String>,
     },
     /// Run backward constraint search for intervention paths
     Backtrack {
@@ -827,6 +830,7 @@ mod tests {
                 "profiles/",
                 None,
                 None,
+                None,
             ))
             .expect("predict output");
         let value: Value = serde_json::from_str(&output).expect("json output");
@@ -842,7 +846,7 @@ mod tests {
     #[test]
     fn predict_rejects_invalid_field_format() {
         let rt = tokio::runtime::Runtime::new().expect("runtime");
-        let result = rt.block_on(handle_predict("conflict", 5, "profiles/", None, None));
+        let result = rt.block_on(handle_predict("conflict", 5, "profiles/", None, None, None));
         assert!(result.is_err());
         assert!(matches!(result, Err(TianJiError::Usage(msg)) if msg.contains("region.domain")));
     }
@@ -1164,11 +1168,13 @@ mod tests {
                 field,
                 horizon,
                 trace_jsonl,
+                replay_bundle_dir,
                 ..
             } => {
                 assert_eq!(field, "east-asia.conflict");
                 assert_eq!(horizon, 10);
                 assert_eq!(trace_jsonl, None);
+                assert_eq!(replay_bundle_dir, None);
             }
             _ => panic!("expected Predict variant"),
         }
@@ -1194,6 +1200,27 @@ mod tests {
     }
 
     #[test]
+    fn cli_parse_predict_replay_bundle_dir() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "predict",
+            "--field",
+            "east-asia.conflict",
+            "--replay-bundle-dir",
+            "runs/bundle",
+        ])
+        .expect("parse predict replay bundle dir");
+        match cli {
+            Cli::Predict {
+                replay_bundle_dir, ..
+            } => {
+                assert_eq!(replay_bundle_dir.as_deref(), Some("runs/bundle"));
+            }
+            _ => panic!("expected Predict variant"),
+        }
+    }
+
+    #[test]
     fn predict_trace_jsonl_writes_trace_and_preserves_stdout_outcome() {
         let trace_path = std::env::temp_dir().join(format!(
             "tianji_predict_trace_{}_{}.jsonl",
@@ -1211,6 +1238,7 @@ mod tests {
                 "profiles/",
                 None,
                 Some(&trace_path),
+                None,
             ))
             .expect("predict output");
         let stdout: Value = serde_json::from_str(&output).expect("json output");
@@ -1228,6 +1256,64 @@ mod tests {
             trace.frames.len(),
             stdout["tick_count"].as_u64().unwrap() as usize
         );
+    }
+
+    #[test]
+    fn predict_replay_bundle_writes_bundle_and_preserves_stdout_outcome() {
+        let bundle_dir = std::env::temp_dir().join(format!(
+            "tianji_predict_bundle_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let output = rt
+            .block_on(handle_predict(
+                "global.conflict",
+                3,
+                "profiles/",
+                None,
+                None,
+                Some(&bundle_dir),
+            ))
+            .expect("predict output");
+        let stdout: Value = serde_json::from_str(&output).expect("json output");
+        assert!(stdout.get("branches").is_some());
+        assert!(stdout.get("metadata").is_none());
+
+        let manifest_path = bundle_dir.join(tianji::nuwa::REPLAY_BUNDLE_MANIFEST_FILE);
+        let trace_path = bundle_dir.join(tianji::nuwa::REPLAY_BUNDLE_TRACE_FILE);
+        let outcome_path = bundle_dir.join(tianji::nuwa::REPLAY_BUNDLE_OUTCOME_FILE);
+        let manifest: tianji::nuwa::ReplayBundleManifest =
+            serde_json::from_reader(std::fs::File::open(&manifest_path).expect("manifest file"))
+                .expect("manifest json");
+        assert_eq!(
+            manifest.schema_version,
+            tianji::nuwa::REPLAY_BUNDLE_SCHEMA_VERSION
+        );
+        assert_eq!(manifest.trace_file, tianji::nuwa::REPLAY_BUNDLE_TRACE_FILE);
+        assert_eq!(
+            manifest.outcome_file,
+            tianji::nuwa::REPLAY_BUNDLE_OUTCOME_FILE
+        );
+        assert_eq!(
+            manifest.trace_bytes,
+            std::fs::metadata(&trace_path).unwrap().len()
+        );
+        assert_eq!(
+            manifest.outcome_bytes,
+            std::fs::metadata(&outcome_path).unwrap().len()
+        );
+
+        let trace = tianji::nuwa::read_trace_jsonl(&trace_path).expect("trace jsonl");
+        assert_eq!(manifest.frame_count, trace.frames.len());
+        let outcome: tianji::nuwa::SimulationOutcome =
+            serde_json::from_reader(std::fs::File::open(&outcome_path).expect("outcome file"))
+                .expect("outcome json");
+        assert_eq!(outcome.tick_count, stdout["tick_count"].as_u64().unwrap());
+        let _ = std::fs::remove_dir_all(&bundle_dir);
     }
 
     #[test]
@@ -2791,6 +2877,7 @@ async fn handle_predict(
     profile_dir: &str,
     config_path: Option<&str>,
     trace_jsonl: Option<&Path>,
+    replay_bundle_dir: Option<&Path>,
 ) -> Result<String, TianJiError> {
     use tianji::hongmeng::Agent;
     use tianji::llm::ProviderRegistry;
@@ -2879,6 +2966,9 @@ async fn handle_predict(
         run_forward_with_trace(&worldline, &agents, &mode, &sim_config, Some(&provider)).await;
     if let Some(path) = trace_jsonl {
         tianji::nuwa::write_trace_jsonl(path, &trace)?;
+    }
+    if let Some(dir) = replay_bundle_dir {
+        tianji::nuwa::write_replay_bundle_dir(dir, &trace)?;
     }
     Ok(serde_json::to_string_pretty(&outcome)?)
 }
@@ -3818,6 +3908,7 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             profile_dir,
             config,
             trace_jsonl,
+            replay_bundle_dir,
         } => {
             handle_predict(
                 &field,
@@ -3825,6 +3916,7 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
                 &profile_dir,
                 config.as_deref(),
                 trace_jsonl.as_deref().map(Path::new),
+                replay_bundle_dir.as_deref().map(Path::new),
             )
             .await
         }

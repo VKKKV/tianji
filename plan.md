@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, Phase J operational reliability, and Phase K1 simulation JSONL trace export complete.
-> Tests: 432 total pass / 0 fail (K1 trace export adds 6 targeted tests)
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, Phase J operational reliability, and Phase K2 replay bundle packaging complete.
+> Tests: 435 total pass / 0 fail (K2 replay bundle packaging adds 3 targeted tests)
 
 ---
 
@@ -41,10 +41,11 @@ Phase H ████████████████████ ✅ Evaluat
 Phase I ████████████████████ ✅ Source/feed management
 Phase J ████████████████████ ✅ Operational reliability
 Phase K1████████████████████ ✅ Simulation JSONL trace export
+Phase K2████████████████████ ✅ Replay bundle packaging
 ```
 
-  源码: 29,260 行 Rust / 59 源文件
-  测试: 377 unit + 55 integration = 432 total pass / 0 fail
+  源码: 29,490 行 Rust / 59 源文件
+  测试: 378 unit + 57 integration = 435 total pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -368,6 +369,11 @@ adding live polling metadata or persistence.
 - Added `run_forward_with_trace(...)` while preserving `run_forward(...)` and default `predict` stdout outcome JSON.
 - Added `tianji predict --trace-jsonl <PATH>` for replay-friendly forward simulation traces including field changes and structured agent audit fields.
 
+**K2. Replay bundle packaging** ✅
+- Added `tianji.replay-bundle.v1` manifest metadata and `write_replay_bundle_dir(...)` helper that reuses K1 trace serialization.
+- Added `tianji predict --replay-bundle-dir <DIR>` to write `manifest.json`, `trace.jsonl`, and `outcome.json` while preserving default stdout outcome JSON.
+- Added focused coverage for bundle writing, manifest file references/byte sizes, trace import, outcome parsing, CLI parse, and predict bundle creation.
+
 ---
 
 ## 4. Dependencies
@@ -410,7 +416,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 377 unit + 55 integration = 432 total)
+- `cargo test` all green (currently 378 unit + 57 integration = 435 total)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
