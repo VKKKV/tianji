@@ -41,12 +41,16 @@ use normalize::normalize_items;
 use scoring::{score_events, summarize_scenario};
 use serde_json::Value as JsonValue;
 pub use storage::{
-    apply_retention_policy, clear_baseline, compare_runs, compare_runs_with_conn,
-    get_latest_run_id, get_latest_run_id_with_conn, get_latest_run_pair, get_next_run_id,
-    get_previous_run_id, get_run_summary, get_run_summary_with_conn, list_runs,
-    list_runs_with_conn, load_baseline, load_latest_worldlines, load_worldline, next_worldline_id,
-    persist_run, save_baseline, save_worldline, EventGroupFilters, RetentionReport, RunListFilters,
-    ScoredEventFilters, SqlitePool, DEFAULT_SQLITE_POOL_SIZE, MAX_RUN_SUMMARY_EVENT_LIMIT,
+    apply_retention_policy, backup_sqlite_database, clear_baseline, compact_sqlite_database,
+    compare_runs, compare_runs_with_conn, export_run_history, get_latest_run_id,
+    get_latest_run_id_with_conn, get_latest_run_pair, get_next_run_id, get_previous_run_id,
+    get_run_summary, get_run_summary_with_conn, list_runs, list_runs_with_conn, load_baseline,
+    load_latest_worldlines, load_worldline, maintenance_check, next_worldline_id, persist_run,
+    save_baseline, save_worldline, BackupReport, CompactReport, EventGroupFilters, ExportFormat,
+    ExportReport, MaintenanceCheckReport, RetentionReport, RunListFilters, ScoredEventFilters,
+    SqlitePool, BACKUP_REPORT_SCHEMA_VERSION, COMPACT_REPORT_SCHEMA_VERSION,
+    DEFAULT_SQLITE_POOL_SIZE, EXPORT_REPORT_SCHEMA_VERSION,
+    MAINTENANCE_CHECK_REPORT_SCHEMA_VERSION, MAX_RUN_SUMMARY_EVENT_LIMIT,
     MAX_RUN_SUMMARY_GROUP_LIMIT, RETENTION_REPORT_SCHEMA_VERSION,
 };
 

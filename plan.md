@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, and Phase J2 daemon health/readiness complete.
-> Tests: 410 total pass / 0 fail
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, and Phase J operational reliability complete.
+> Tests: 423 total pass / 0 fail
 
 ---
 
@@ -39,11 +39,11 @@ TUI ████████████████████ ✅ 4 views + s
 Phase F ████████████████████ ✅ Product polish + operator readiness
 Phase H ████████████████████ ✅ Evaluation harness
 Phase I ████████████████████ ✅ Source/feed management
-Phase J2████████████████████ ✅ SQLite retention + daemon health/readiness
+Phase J ████████████████████ ✅ Operational reliability
 ```
 
-  源码: 27,351 行 Rust / 58 源文件
-  测试: 364 unit + 46 integration = 410 total pass / 0 fail
+  源码: 28,273 行 Rust / 58 源文件
+  测试: 371 unit + 52 integration = 423 total pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -342,8 +342,15 @@ Later source-management candidates:
 - Daemon startup readiness polling now checks `/api/v1/ready` instead of
   inferring readiness from `/api/v1/meta`.
 
-Later operational reliability candidates:
-- SQLite backup/export and additional operator maintenance commands.
+**J3-J6. Maintenance check, backup, export, compact** ✅
+- Added read-only `tianji maintenance check` diagnostics with quick check,
+  foreign-key validation, table counts, latest run id, file sizes, page/freelist
+  counts, and journal mode.
+- Added online-safe `tianji maintenance backup` via SQLite-native `VACUUM INTO`.
+- Added portable `tianji maintenance export` in JSON or JSONL, with optional
+  full run details.
+- Added `tianji maintenance compact` for WAL checkpoint truncate and optional
+  `VACUUM`.
 
 **Phase K — Simulation replay/export**
 - JSONL trace export, replay bundle packaging, structured agent audit viewer improvements.
@@ -390,7 +397,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 364 unit + 46 integration = 410 total)
+- `cargo test` all green (currently 371 unit + 52 integration = 423 total)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional

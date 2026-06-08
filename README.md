@@ -4,7 +4,7 @@ TianJi is a geopolitical intelligence engine — ingest signals, compute diverge
 
 ## Current State (2026-05-20)
 
-Pure Rust project. 364 unit tests + 46 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management, SQLite retention, and daemon health/readiness probes are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 371 unit tests + 52 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management, SQLite retention, daemon health/readiness probes, and local maintenance check/backup/export/compact are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
@@ -49,8 +49,13 @@ cargo run -- sources --config examples/sources.example.yaml --run-fixtures
 # 6. Terminal UI browser (read-only)
 cargo run -- tui --sqlite-path runs/tianji.sqlite3
 
-# 7. Prune old persisted runs while keeping the latest N
+# 7. Local maintenance sequence before destructive retention
+cargo run -- maintenance check --sqlite-path runs/tianji.sqlite3
+cargo run -- maintenance backup --sqlite-path runs/tianji.sqlite3 --output runs/tianji.backup.sqlite3
+cargo run -- maintenance export --sqlite-path runs/tianji.sqlite3 --output runs/tianji-history.jsonl --format jsonl
 cargo run -- maintenance retain --sqlite-path runs/tianji.sqlite3 --keep-last-runs 20
+cargo run -- maintenance compact --sqlite-path runs/tianji.sqlite3 --vacuum
+cargo run -- maintenance check --sqlite-path runs/tianji.sqlite3
 
 # 8. Optional daemon + local HTTP API on loopback
 cargo run -- daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
@@ -292,16 +297,54 @@ Example:
 tianji delta --sqlite-path runs/tianji.sqlite3 --latest-pair
 ```
 
-### `tianji maintenance retain`
+### `tianji maintenance check / backup / export / retain / compact`
+
+Suggested operator sequence before destructive maintenance:
+
+1. `maintenance check` — confirm SQLite diagnostics are clean.
+2. `maintenance backup` — create an online-safe SQLite copy using SQLite-native `VACUUM INTO`.
+3. `maintenance export` — optionally write portable JSON/JSONL run history.
+4. `maintenance retain` — prune old persisted runs.
+5. `maintenance compact` — checkpoint WAL and optionally `VACUUM`.
+6. `maintenance check` — confirm the database remains healthy after maintenance.
+
+```
+tianji maintenance check   --sqlite-path <PATH>
+tianji maintenance backup  --sqlite-path <PATH> --output <BACKUP.sqlite3> [--overwrite]
+tianji maintenance export  --sqlite-path <PATH> --output <history.json|history.jsonl> [--format json|jsonl] [--include-details] [--overwrite]
+tianji maintenance retain  --sqlite-path <PATH> --keep-last-runs <N>
+tianji maintenance compact --sqlite-path <PATH> [--vacuum]
+```
+
+`check`, `backup`, `export`, and `compact` reject a missing `--sqlite-path`
+database instead of creating one. `backup` and `export` reject an existing
+output path unless `--overwrite` is set.
+
+`maintenance check` emits `tianji.maintenance-check-report.v1` JSON with
+`quick_check`, foreign-key violation count, table counts, latest run id, file
+sizes, page/freelist counts, and journal mode.
+
+`maintenance backup` emits `tianji.backup-report.v1` JSON with source/output
+paths, total source/output sizes, and run count. The backup DB is queryable by
+normal history commands.
+
+`maintenance export` emits `tianji.export-report.v1` JSON with output path,
+format, run count, and bytes written. JSON exports contain one object with
+`metadata` and `runs`. JSONL exports are deterministic: one metadata record
+followed by one run record per persisted run. `--include-details` exports full
+`history-show` payloads for each run; otherwise it exports `history` summaries
+in the same newest-first ordering as `list_runs`.
+
+`maintenance compact` emits `tianji.compact-report.v1` JSON with before/after
+file sizes, before/after page and freelist counts, WAL checkpoint result, and
+whether `VACUUM` ran.
+
+#### `tianji maintenance retain`
 
 Apply the local SQLite retention policy. The command keeps the most recent N
 runs by descending run id, deletes older run rows inside one transaction, relies
 on existing `ON DELETE CASCADE` cleanup for run-scoped tables, and removes
 canonical `source_items` no longer referenced by raw or normalized events.
-
-```
-tianji maintenance retain --sqlite-path <PATH> --keep-last-runs <N>
-```
 
 `--keep-last-runs 0` is allowed and deletes all persisted runs before removing
 orphan source items. Output is JSON:

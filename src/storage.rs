@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
+use std::fs;
+use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use crate::fetch::{derive_canonical_content_hash, derive_canonical_entry_identity_hash};
 use crate::models::{InterventionCandidate, NormalizedEvent, RawItem, RunArtifact, ScoredEvent};
@@ -14,6 +16,10 @@ use crate::worldline::types::Worldline;
 use crate::TianJiError;
 
 pub const RETENTION_REPORT_SCHEMA_VERSION: &str = "tianji.retention-report.v1";
+pub const MAINTENANCE_CHECK_REPORT_SCHEMA_VERSION: &str = "tianji.maintenance-check-report.v1";
+pub const BACKUP_REPORT_SCHEMA_VERSION: &str = "tianji.backup-report.v1";
+pub const EXPORT_REPORT_SCHEMA_VERSION: &str = "tianji.export-report.v1";
+pub const COMPACT_REPORT_SCHEMA_VERSION: &str = "tianji.compact-report.v1";
 
 pub const DEFAULT_RUN_SUMMARY_EVENT_LIMIT: usize = 200;
 pub const MAX_RUN_SUMMARY_EVENT_LIMIT: usize = 500;
@@ -201,6 +207,423 @@ pub fn apply_retention_policy(
         deleted_runs,
         deleted_source_items,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Maintenance operations
+// ---------------------------------------------------------------------------
+
+const HISTORY_TABLES: [&str; 6] = [
+    "runs",
+    "source_items",
+    "raw_items",
+    "normalized_events",
+    "scored_events",
+    "intervention_candidates",
+];
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct MaintenanceFileSizes {
+    pub main_bytes: u64,
+    pub wal_bytes: u64,
+    pub shm_bytes: u64,
+    pub total_bytes: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct MaintenanceCheckReport {
+    pub schema_version: String,
+    pub sqlite_path: String,
+    pub quick_check: String,
+    pub foreign_key_violation_count: usize,
+    pub table_counts: BTreeMap<String, usize>,
+    pub latest_run_id: Option<i64>,
+    pub file_sizes: MaintenanceFileSizes,
+    pub page_count: i64,
+    pub freelist_count: i64,
+    pub journal_mode: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct BackupReport {
+    pub schema_version: String,
+    pub source_path: String,
+    pub output_path: String,
+    pub source_bytes: u64,
+    pub output_bytes: u64,
+    pub run_count: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    Json,
+    Jsonl,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ExportReport {
+    pub schema_version: String,
+    pub sqlite_path: String,
+    pub output_path: String,
+    pub format: ExportFormat,
+    pub include_details: bool,
+    pub run_count: usize,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct CheckpointReport {
+    pub busy: i64,
+    pub log_frames: i64,
+    pub checkpointed_frames: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct CompactReport {
+    pub schema_version: String,
+    pub sqlite_path: String,
+    pub vacuum: bool,
+    pub before_file_sizes: MaintenanceFileSizes,
+    pub after_file_sizes: MaintenanceFileSizes,
+    pub before_page_count: i64,
+    pub after_page_count: i64,
+    pub before_freelist_count: i64,
+    pub after_freelist_count: i64,
+    pub checkpoint: CheckpointReport,
+}
+
+pub fn maintenance_check(sqlite_path: &str) -> Result<MaintenanceCheckReport, TianJiError> {
+    ensure_existing_sqlite_source(sqlite_path)?;
+    let connection = open_existing_read_only_connection(sqlite_path)?;
+    let quick_check: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+    let foreign_key_violation_count = foreign_key_violation_count(&connection)?;
+    let table_counts = history_table_counts(&connection)?;
+    let latest_run_id = get_latest_run_id_with_conn(&connection)?;
+    let page_count = pragma_i64(&connection, "page_count")?;
+    let freelist_count = pragma_i64(&connection, "freelist_count")?;
+    let journal_mode = pragma_string(&connection, "journal_mode")?;
+
+    Ok(MaintenanceCheckReport {
+        schema_version: MAINTENANCE_CHECK_REPORT_SCHEMA_VERSION.to_string(),
+        sqlite_path: sqlite_path.to_string(),
+        quick_check,
+        foreign_key_violation_count,
+        table_counts,
+        latest_run_id,
+        file_sizes: maintenance_file_sizes(sqlite_path)?,
+        page_count,
+        freelist_count,
+        journal_mode,
+    })
+}
+
+pub fn backup_sqlite_database(
+    sqlite_path: &str,
+    output_path: &str,
+    overwrite: bool,
+) -> Result<BackupReport, TianJiError> {
+    ensure_existing_sqlite_source(sqlite_path)?;
+    prepare_output_path(sqlite_path, output_path, overwrite)?;
+    let connection = open_existing_read_only_connection(sqlite_path)?;
+    let run_count = count_table_rows(&connection, "runs")?;
+    connection.execute("VACUUM INTO ?1", params![output_path])?;
+    let output_connection = open_existing_read_only_connection(output_path)?;
+    let output_run_count = count_table_rows(&output_connection, "runs")?;
+    if output_run_count != run_count {
+        return Err(TianJiError::DataIntegrity(format!(
+            "backup run count mismatch: source={run_count} output={output_run_count}"
+        )));
+    }
+
+    Ok(BackupReport {
+        schema_version: BACKUP_REPORT_SCHEMA_VERSION.to_string(),
+        source_path: sqlite_path.to_string(),
+        output_path: output_path.to_string(),
+        source_bytes: maintenance_file_sizes(sqlite_path)?.total_bytes,
+        output_bytes: maintenance_file_sizes(output_path)?.total_bytes,
+        run_count,
+    })
+}
+
+pub fn export_run_history(
+    sqlite_path: &str,
+    output_path: &str,
+    format: ExportFormat,
+    include_details: bool,
+    overwrite: bool,
+) -> Result<ExportReport, TianJiError> {
+    ensure_existing_sqlite_source(sqlite_path)?;
+    prepare_output_path(sqlite_path, output_path, overwrite)?;
+    let connection = open_existing_read_only_connection(sqlite_path)?;
+    let run_count = count_table_rows(&connection, "runs")?;
+    let summaries = list_runs_with_conn(&connection, run_count, &RunListFilters::default())?;
+    let runs = if include_details {
+        let scored_filters = ScoredEventFilters::default();
+        let group_filters = EventGroupFilters::default();
+        summaries
+            .iter()
+            .map(|summary| {
+                let run_id = summary
+                    .get("run_id")
+                    .and_then(|value| value.as_i64())
+                    .ok_or_else(|| {
+                        TianJiError::DataIntegrity("run summary missing integer run_id".to_string())
+                    })?;
+                get_run_summary_with_conn(
+                    &connection,
+                    run_id,
+                    &scored_filters,
+                    false,
+                    &group_filters,
+                )?
+                .ok_or_else(|| {
+                    TianJiError::DataIntegrity(format!("run disappeared during export: {run_id}"))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        summaries
+    };
+    let metadata = serde_json::json!({
+        "schema_version": "tianji.run-history-export.v1",
+        "sqlite_path": sqlite_path,
+        "format": format,
+        "include_details": include_details,
+        "run_count": runs.len(),
+    });
+    write_export_file(output_path, &format, &metadata, &runs)?;
+    let bytes = fs::metadata(output_path)?.len();
+    Ok(ExportReport {
+        schema_version: EXPORT_REPORT_SCHEMA_VERSION.to_string(),
+        sqlite_path: sqlite_path.to_string(),
+        output_path: output_path.to_string(),
+        format,
+        include_details,
+        run_count: runs.len(),
+        bytes,
+    })
+}
+
+pub fn compact_sqlite_database(
+    sqlite_path: &str,
+    vacuum: bool,
+) -> Result<CompactReport, TianJiError> {
+    ensure_existing_sqlite_source(sqlite_path)?;
+    let connection = open_existing_read_write_connection(sqlite_path)?;
+    let before_file_sizes = maintenance_file_sizes(sqlite_path)?;
+    let before_page_count = pragma_i64(&connection, "page_count")?;
+    let before_freelist_count = pragma_i64(&connection, "freelist_count")?;
+    let checkpoint = connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+        Ok(CheckpointReport {
+            busy: row.get(0)?,
+            log_frames: row.get(1)?,
+            checkpointed_frames: row.get(2)?,
+        })
+    })?;
+    if vacuum {
+        connection.execute_batch("VACUUM")?;
+    }
+    let after_page_count = pragma_i64(&connection, "page_count")?;
+    let after_freelist_count = pragma_i64(&connection, "freelist_count")?;
+    drop(connection);
+    let after_file_sizes = maintenance_file_sizes(sqlite_path)?;
+    Ok(CompactReport {
+        schema_version: COMPACT_REPORT_SCHEMA_VERSION.to_string(),
+        sqlite_path: sqlite_path.to_string(),
+        vacuum,
+        before_file_sizes,
+        after_file_sizes,
+        before_page_count,
+        after_page_count,
+        before_freelist_count,
+        after_freelist_count,
+        checkpoint,
+    })
+}
+
+fn ensure_existing_sqlite_source(sqlite_path: &str) -> Result<(), TianJiError> {
+    let path = Path::new(sqlite_path);
+    if !path.exists() {
+        return Err(TianJiError::Usage(format!(
+            "SQLite database does not exist: {sqlite_path}"
+        )));
+    }
+    if !path.is_file() {
+        return Err(TianJiError::Usage(format!(
+            "SQLite path is not a file: {sqlite_path}"
+        )));
+    }
+    Ok(())
+}
+
+fn open_existing_read_only_connection(sqlite_path: &str) -> Result<Connection, TianJiError> {
+    let connection = Connection::open_with_flags(
+        sqlite_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+    )?;
+    connection.execute_batch("PRAGMA foreign_keys = ON")?;
+    Ok(connection)
+}
+
+fn open_existing_read_write_connection(sqlite_path: &str) -> Result<Connection, TianJiError> {
+    let connection = Connection::open_with_flags(
+        sqlite_path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI,
+    )?;
+    connection.execute_batch("PRAGMA foreign_keys = ON")?;
+    Ok(connection)
+}
+
+fn prepare_output_path(
+    sqlite_path: &str,
+    output_path: &str,
+    overwrite: bool,
+) -> Result<(), TianJiError> {
+    if Path::new(sqlite_path) == Path::new(output_path) {
+        return Err(TianJiError::Usage(
+            "Output path must differ from --sqlite-path.".to_string(),
+        ));
+    }
+    let output = Path::new(output_path);
+    if output.exists() {
+        if !overwrite {
+            return Err(TianJiError::Usage(format!(
+                "Output already exists: {output_path}. Use --overwrite to replace it."
+            )));
+        }
+        fs::remove_file(output)?;
+    }
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+fn maintenance_file_sizes(sqlite_path: &str) -> Result<MaintenanceFileSizes, TianJiError> {
+    let main_bytes = file_size_or_zero(Path::new(sqlite_path))?;
+    let wal_bytes = file_size_or_zero(Path::new(&format!("{sqlite_path}-wal")))?;
+    let shm_bytes = file_size_or_zero(Path::new(&format!("{sqlite_path}-shm")))?;
+    Ok(MaintenanceFileSizes {
+        main_bytes,
+        wal_bytes,
+        shm_bytes,
+        total_bytes: main_bytes + wal_bytes + shm_bytes,
+    })
+}
+
+fn file_size_or_zero(path: &Path) -> Result<u64, TianJiError> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(TianJiError::Io(error)),
+    }
+}
+
+fn history_table_counts(connection: &Connection) -> Result<BTreeMap<String, usize>, TianJiError> {
+    let mut counts = BTreeMap::new();
+    for table_name in HISTORY_TABLES {
+        counts.insert(
+            table_name.to_string(),
+            count_table_rows(connection, table_name)?,
+        );
+    }
+    Ok(counts)
+}
+
+fn count_table_rows(connection: &Connection, table_name: &str) -> Result<usize, TianJiError> {
+    let query = match table_name {
+        "runs" => "SELECT COUNT(*) FROM runs",
+        "source_items" => "SELECT COUNT(*) FROM source_items",
+        "raw_items" => "SELECT COUNT(*) FROM raw_items",
+        "normalized_events" => "SELECT COUNT(*) FROM normalized_events",
+        "scored_events" => "SELECT COUNT(*) FROM scored_events",
+        "intervention_candidates" => "SELECT COUNT(*) FROM intervention_candidates",
+        _ => {
+            return Err(TianJiError::DataIntegrity(format!(
+                "unsupported row-count table: {table_name}"
+            )))
+        }
+    };
+    let count: i64 = connection.query_row(query, [], |row| row.get(0))?;
+    usize::try_from(count).map_err(|_| {
+        TianJiError::DataIntegrity(format!("negative row count returned for {table_name}"))
+    })
+}
+
+fn foreign_key_violation_count(connection: &Connection) -> Result<usize, TianJiError> {
+    let mut stmt = connection.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = stmt.query([])?;
+    let mut count = 0usize;
+    while rows.next()?.is_some() {
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn pragma_i64(connection: &Connection, name: &str) -> Result<i64, TianJiError> {
+    let query = match name {
+        "page_count" => "PRAGMA page_count",
+        "freelist_count" => "PRAGMA freelist_count",
+        _ => {
+            return Err(TianJiError::DataIntegrity(format!(
+                "unsupported pragma: {name}"
+            )))
+        }
+    };
+    Ok(connection.query_row(query, [], |row| row.get(0))?)
+}
+
+fn pragma_string(connection: &Connection, name: &str) -> Result<String, TianJiError> {
+    let query = match name {
+        "journal_mode" => "PRAGMA journal_mode",
+        _ => {
+            return Err(TianJiError::DataIntegrity(format!(
+                "unsupported pragma: {name}"
+            )))
+        }
+    };
+    Ok(connection.query_row(query, [], |row| row.get(0))?)
+}
+
+fn write_export_file(
+    output_path: &str,
+    format: &ExportFormat,
+    metadata: &serde_json::Value,
+    runs: &[serde_json::Value],
+) -> Result<(), TianJiError> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output_path)?;
+    match format {
+        ExportFormat::Json => {
+            let payload = serde_json::json!({
+                "metadata": metadata,
+                "runs": runs,
+            });
+            file.write_all(serde_json::to_string_pretty(&payload)?.as_bytes())?;
+            file.write_all(b"\n")?;
+        }
+        ExportFormat::Jsonl => {
+            let metadata_record = serde_json::json!({
+                "record_type": "metadata",
+                "metadata": metadata,
+            });
+            writeln!(file, "{}", serde_json::to_string(&metadata_record)?)?;
+            for run in runs {
+                let run_record = serde_json::json!({
+                    "record_type": "run",
+                    "run": run,
+                });
+                writeln!(file, "{}", serde_json::to_string(&run_record)?)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn count_rows(connection: &Connection, table_name: &str) -> Result<usize, TianJiError> {
@@ -2047,6 +2470,194 @@ mod storage_integrity_tests {
         handle.join().expect("thread join");
 
         cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn maintenance_check_rejects_missing_source_without_creating_file() {
+        let db_path = temp_sqlite_path("maintenance_check_missing");
+        cleanup_db(&db_path);
+
+        let result = maintenance_check(&db_path);
+
+        assert!(
+            matches!(result, Err(TianJiError::Usage(message)) if message.contains("does not exist"))
+        );
+        assert!(!Path::new(&db_path).exists());
+    }
+
+    #[test]
+    fn maintenance_check_reports_seeded_database_diagnostics() {
+        let db_path = temp_sqlite_path("maintenance_check_seeded");
+        crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+            .expect("persist fixture run");
+
+        let report = maintenance_check(&db_path).expect("maintenance check");
+
+        assert_eq!(
+            report.schema_version,
+            MAINTENANCE_CHECK_REPORT_SCHEMA_VERSION
+        );
+        assert_eq!(report.sqlite_path, db_path);
+        assert_eq!(report.quick_check, "ok");
+        assert_eq!(report.foreign_key_violation_count, 0);
+        assert_eq!(report.table_counts["runs"], 1);
+        assert_eq!(report.table_counts["raw_items"], 3);
+        assert_eq!(report.latest_run_id, Some(1));
+        assert!(report.file_sizes.total_bytes > 0);
+        assert!(report.page_count > 0);
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn backup_rejects_missing_source_and_existing_output() {
+        let missing_path = temp_sqlite_path("backup_missing");
+        cleanup_db(&missing_path);
+        let output_path = temp_sqlite_path("backup_missing_output");
+        cleanup_db(&output_path);
+
+        let missing_result = backup_sqlite_database(&missing_path, &output_path, false);
+        assert!(
+            matches!(missing_result, Err(TianJiError::Usage(message)) if message.contains("does not exist"))
+        );
+        assert!(!Path::new(&missing_path).exists());
+
+        let db_path = temp_sqlite_path("backup_existing_source");
+        crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+            .expect("persist fixture run");
+        std::fs::write(&output_path, b"already here").expect("seed output");
+
+        let existing_result = backup_sqlite_database(&db_path, &output_path, false);
+        assert!(
+            matches!(existing_result, Err(TianJiError::Usage(message)) if message.contains("already exists"))
+        );
+
+        cleanup_db(&db_path);
+        cleanup_db(&output_path);
+    }
+
+    #[test]
+    fn backup_creates_queryable_sqlite_database() {
+        let db_path = temp_sqlite_path("backup_source");
+        let output_path = temp_sqlite_path("backup_output");
+        cleanup_db(&output_path);
+        for _ in 0..2 {
+            crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+                .expect("persist fixture run");
+        }
+
+        let report = backup_sqlite_database(&db_path, &output_path, false).expect("backup");
+
+        assert_eq!(report.schema_version, BACKUP_REPORT_SCHEMA_VERSION);
+        assert_eq!(report.run_count, 2);
+        assert!(report.output_bytes > 0);
+        let runs =
+            list_runs(&output_path, 10, &RunListFilters::default()).expect("list backup runs");
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0]["run_id"], 2);
+
+        cleanup_db(&db_path);
+        cleanup_db(&output_path);
+    }
+
+    #[test]
+    fn export_rejects_existing_output_and_writes_json_and_jsonl() {
+        let db_path = temp_sqlite_path("export_source");
+        for _ in 0..2 {
+            crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+                .expect("persist fixture run");
+        }
+        let json_path = temp_sqlite_path("export_json");
+        cleanup_db(&json_path);
+        std::fs::write(&json_path, b"exists").expect("seed output");
+        let existing_result =
+            export_run_history(&db_path, &json_path, ExportFormat::Json, false, false);
+        assert!(
+            matches!(existing_result, Err(TianJiError::Usage(message)) if message.contains("already exists"))
+        );
+
+        let json_report = export_run_history(&db_path, &json_path, ExportFormat::Json, true, true)
+            .expect("json export");
+        assert_eq!(json_report.schema_version, EXPORT_REPORT_SCHEMA_VERSION);
+        assert_eq!(json_report.run_count, 2);
+        assert!(json_report.include_details);
+        let payload: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&json_path).expect("read json export"))
+                .expect("parse json export");
+        assert_eq!(payload["metadata"]["run_count"], 2);
+        assert_eq!(payload["runs"].as_array().expect("runs array").len(), 2);
+        assert!(payload["runs"][0].get("scored_events").is_some());
+
+        let jsonl_path = temp_sqlite_path("export_jsonl");
+        cleanup_db(&jsonl_path);
+        let jsonl_report =
+            export_run_history(&db_path, &jsonl_path, ExportFormat::Jsonl, false, false)
+                .expect("jsonl export");
+        assert_eq!(jsonl_report.run_count, 2);
+        let lines: Vec<String> = std::fs::read_to_string(&jsonl_path)
+            .expect("read jsonl export")
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(lines.len(), 3);
+        let metadata: serde_json::Value = serde_json::from_str(&lines[0]).expect("metadata line");
+        assert_eq!(metadata["record_type"], "metadata");
+        let run_record: serde_json::Value = serde_json::from_str(&lines[1]).expect("run line");
+        assert_eq!(run_record["record_type"], "run");
+        assert!(run_record["run"].get("scored_events").is_none());
+
+        cleanup_db(&db_path);
+        cleanup_db(&json_path);
+        cleanup_db(&jsonl_path);
+    }
+
+    #[test]
+    fn export_rejects_missing_source_without_creating_file() {
+        let db_path = temp_sqlite_path("export_missing");
+        cleanup_db(&db_path);
+        let output_path = temp_sqlite_path("export_missing_output");
+        cleanup_db(&output_path);
+
+        let result = export_run_history(&db_path, &output_path, ExportFormat::Json, false, false);
+
+        assert!(
+            matches!(result, Err(TianJiError::Usage(message)) if message.contains("does not exist"))
+        );
+        assert!(!Path::new(&db_path).exists());
+        assert!(!Path::new(&output_path).exists());
+    }
+
+    #[test]
+    fn compact_checkpoints_and_preserves_readable_history() {
+        let db_path = temp_sqlite_path("compact_seeded");
+        for _ in 0..2 {
+            crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+                .expect("persist fixture run");
+        }
+
+        let report = compact_sqlite_database(&db_path, true).expect("compact");
+
+        assert_eq!(report.schema_version, COMPACT_REPORT_SCHEMA_VERSION);
+        assert!(report.vacuum);
+        assert!(report.after_page_count > 0);
+        let runs =
+            list_runs(&db_path, 10, &RunListFilters::default()).expect("list compacted runs");
+        assert_eq!(runs.len(), 2);
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn compact_rejects_missing_source_without_creating_file() {
+        let db_path = temp_sqlite_path("compact_missing");
+        cleanup_db(&db_path);
+
+        let result = compact_sqlite_database(&db_path, false);
+
+        assert!(
+            matches!(result, Err(TianJiError::Usage(message)) if message.contains("does not exist"))
+        );
+        assert!(!Path::new(&db_path).exists());
     }
 
     #[test]

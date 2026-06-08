@@ -10,9 +10,10 @@ use clap_complete::{generate, Shell};
 use rusqlite::Connection;
 use serde::Serialize;
 use tianji::{
-    apply_retention_policy, artifact_json, classify_delta_tier, clear_baseline, compare_runs,
-    compute_delta, get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id,
-    get_run_summary, list_runs, load_baseline, run_feed_text, run_fixture_path, save_baseline,
+    apply_retention_policy, artifact_json, backup_sqlite_database, classify_delta_tier,
+    clear_baseline, compact_sqlite_database, compare_runs, compute_delta, export_run_history,
+    get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary,
+    list_runs, load_baseline, maintenance_check, run_feed_text, run_fixture_path, save_baseline,
     source_registry::{build_sources_report, load_source_manifest},
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     worldline::{
@@ -30,6 +31,30 @@ enum ShellName {
     Bash,
     Zsh,
     Fish,
+}
+
+#[derive(Clone, Debug, ValueEnum)]
+enum MaintenanceExportFormat {
+    Json,
+    Jsonl,
+}
+
+impl From<MaintenanceExportFormat> for tianji::ExportFormat {
+    fn from(value: MaintenanceExportFormat) -> Self {
+        match value {
+            MaintenanceExportFormat::Json => Self::Json,
+            MaintenanceExportFormat::Jsonl => Self::Jsonl,
+        }
+    }
+}
+
+impl std::fmt::Display for MaintenanceExportFormat {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Json => write!(formatter, "json"),
+            Self::Jsonl => write!(formatter, "jsonl"),
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -449,6 +474,51 @@ enum DaemonCommands {
 
 #[derive(Subcommand)]
 enum MaintenanceCommands {
+    /// Run read-only SQLite diagnostics
+    Check {
+        /// SQLite database path containing persisted TianJi runs
+        #[arg(long = "sqlite-path")]
+        sqlite_path: String,
+    },
+    /// Create an online-safe SQLite backup using SQLite-native VACUUM INTO
+    Backup {
+        /// SQLite database path containing persisted TianJi runs
+        #[arg(long = "sqlite-path")]
+        sqlite_path: String,
+        /// Output SQLite database path
+        #[arg(long = "output")]
+        output: String,
+        /// Replace an existing output file
+        #[arg(long = "overwrite")]
+        overwrite: bool,
+    },
+    /// Export persisted run history to JSON or JSONL
+    Export {
+        /// SQLite database path containing persisted TianJi runs
+        #[arg(long = "sqlite-path")]
+        sqlite_path: String,
+        /// Output export path
+        #[arg(long = "output")]
+        output: String,
+        /// Export format
+        #[arg(long = "format", value_enum, default_value_t = MaintenanceExportFormat::Json)]
+        format: MaintenanceExportFormat,
+        /// Include full run details instead of list summaries
+        #[arg(long = "include-details")]
+        include_details: bool,
+        /// Replace an existing output file
+        #[arg(long = "overwrite")]
+        overwrite: bool,
+    },
+    /// Checkpoint WAL and optionally VACUUM the database
+    Compact {
+        /// SQLite database path containing persisted TianJi runs
+        #[arg(long = "sqlite-path")]
+        sqlite_path: String,
+        /// Run VACUUM after WAL checkpoint truncate
+        #[arg(long = "vacuum")]
+        vacuum: bool,
+    },
     /// Apply SQLite run-history retention policy
     Retain {
         /// SQLite database path containing persisted TianJi runs
@@ -1310,6 +1380,120 @@ mod tests {
         }
     }
 
+    #[test]
+    fn cli_parse_maintenance_check() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "maintenance",
+            "check",
+            "--sqlite-path",
+            "runs/tianji.sqlite3",
+        ])
+        .expect("parse maintenance check");
+
+        match cli {
+            Cli::Maintenance {
+                command: MaintenanceCommands::Check { sqlite_path },
+            } => assert_eq!(sqlite_path, "runs/tianji.sqlite3"),
+            _ => panic!("expected Maintenance::Check variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_maintenance_backup() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "maintenance",
+            "backup",
+            "--sqlite-path",
+            "runs/tianji.sqlite3",
+            "--output",
+            "runs/backup.sqlite3",
+            "--overwrite",
+        ])
+        .expect("parse maintenance backup");
+
+        match cli {
+            Cli::Maintenance {
+                command:
+                    MaintenanceCommands::Backup {
+                        sqlite_path,
+                        output,
+                        overwrite,
+                    },
+            } => {
+                assert_eq!(sqlite_path, "runs/tianji.sqlite3");
+                assert_eq!(output, "runs/backup.sqlite3");
+                assert!(overwrite);
+            }
+            _ => panic!("expected Maintenance::Backup variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_maintenance_export_jsonl_details() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "maintenance",
+            "export",
+            "--sqlite-path",
+            "runs/tianji.sqlite3",
+            "--output",
+            "runs/history.jsonl",
+            "--format",
+            "jsonl",
+            "--include-details",
+        ])
+        .expect("parse maintenance export");
+
+        match cli {
+            Cli::Maintenance {
+                command:
+                    MaintenanceCommands::Export {
+                        sqlite_path,
+                        output,
+                        format,
+                        include_details,
+                        overwrite,
+                    },
+            } => {
+                assert_eq!(sqlite_path, "runs/tianji.sqlite3");
+                assert_eq!(output, "runs/history.jsonl");
+                assert!(matches!(format, MaintenanceExportFormat::Jsonl));
+                assert!(include_details);
+                assert!(!overwrite);
+            }
+            _ => panic!("expected Maintenance::Export variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_maintenance_compact() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "maintenance",
+            "compact",
+            "--sqlite-path",
+            "runs/tianji.sqlite3",
+            "--vacuum",
+        ])
+        .expect("parse maintenance compact");
+
+        match cli {
+            Cli::Maintenance {
+                command:
+                    MaintenanceCommands::Compact {
+                        sqlite_path,
+                        vacuum,
+                    },
+            } => {
+                assert_eq!(sqlite_path, "runs/tianji.sqlite3");
+                assert!(vacuum);
+            }
+            _ => panic!("expected Maintenance::Compact variant"),
+        }
+    }
+
     #[tokio::test]
     async fn maintenance_retain_outputs_report_and_prunes_history() {
         let db_path = temp_sqlite_path("maintenance_retain");
@@ -1348,6 +1532,94 @@ mod tests {
         assert_eq!(run_ids, vec![3, 2]);
 
         cleanup_sqlite_path(&db_path);
+    }
+
+    #[tokio::test]
+    async fn maintenance_check_backup_export_compact_execute_via_cli() {
+        let db_path = temp_sqlite_path("maintenance_execute");
+        let backup_path = temp_sqlite_path("maintenance_execute_backup");
+        let export_path = temp_sqlite_path("maintenance_execute_export");
+        cleanup_sqlite_path(&backup_path);
+        cleanup_sqlite_path(&export_path);
+        for _ in 0..2 {
+            run(Cli::Run {
+                fixture: SAMPLE_FIXTURE.to_string(),
+                sqlite_path: Some(db_path.clone()),
+                show_delta: false,
+            })
+            .await
+            .expect("seed run");
+        }
+
+        let check_output = run(Cli::Maintenance {
+            command: MaintenanceCommands::Check {
+                sqlite_path: db_path.clone(),
+            },
+        })
+        .await
+        .expect("maintenance check output");
+        let check_value: Value = serde_json::from_str(&check_output).expect("check json");
+        assert_eq!(
+            check_value["schema_version"],
+            "tianji.maintenance-check-report.v1"
+        );
+        assert_eq!(check_value["latest_run_id"], 2);
+
+        let backup_output = run(Cli::Maintenance {
+            command: MaintenanceCommands::Backup {
+                sqlite_path: db_path.clone(),
+                output: backup_path.clone(),
+                overwrite: false,
+            },
+        })
+        .await
+        .expect("maintenance backup output");
+        let backup_value: Value = serde_json::from_str(&backup_output).expect("backup json");
+        assert_eq!(backup_value["schema_version"], "tianji.backup-report.v1");
+        assert_eq!(backup_value["run_count"], 2);
+        let backup_runs = list_runs(&backup_path, 10, &RunListFilters::default())
+            .expect("backup readable from cli test");
+        assert_eq!(backup_runs.len(), 2);
+
+        let export_output = run(Cli::Maintenance {
+            command: MaintenanceCommands::Export {
+                sqlite_path: db_path.clone(),
+                output: export_path.clone(),
+                format: MaintenanceExportFormat::Jsonl,
+                include_details: false,
+                overwrite: false,
+            },
+        })
+        .await
+        .expect("maintenance export output");
+        let export_value: Value = serde_json::from_str(&export_output).expect("export json");
+        assert_eq!(export_value["schema_version"], "tianji.export-report.v1");
+        assert_eq!(export_value["run_count"], 2);
+        assert_eq!(
+            std::fs::read_to_string(&export_path)
+                .expect("export file")
+                .lines()
+                .count(),
+            3
+        );
+
+        let compact_output = run(Cli::Maintenance {
+            command: MaintenanceCommands::Compact {
+                sqlite_path: db_path.clone(),
+                vacuum: false,
+            },
+        })
+        .await
+        .expect("maintenance compact output");
+        let compact_value: Value = serde_json::from_str(&compact_output).expect("compact json");
+        assert_eq!(compact_value["schema_version"], "tianji.compact-report.v1");
+        let compacted_runs = list_runs(&db_path, 10, &RunListFilters::default())
+            .expect("compacted readable from cli test");
+        assert_eq!(compacted_runs.len(), 2);
+
+        cleanup_sqlite_path(&db_path);
+        cleanup_sqlite_path(&backup_path);
+        let _ = std::fs::remove_file(&export_path);
     }
 
     #[test]
@@ -3501,6 +3773,41 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             Ok(serde_json::to_string_pretty(&report)?)
         }
         Cli::Maintenance { command } => match command {
+            MaintenanceCommands::Check { sqlite_path } => {
+                let report = maintenance_check(&sqlite_path)?;
+                Ok(serde_json::to_string_pretty(&report)?)
+            }
+            MaintenanceCommands::Backup {
+                sqlite_path,
+                output,
+                overwrite,
+            } => {
+                let report = backup_sqlite_database(&sqlite_path, &output, overwrite)?;
+                Ok(serde_json::to_string_pretty(&report)?)
+            }
+            MaintenanceCommands::Export {
+                sqlite_path,
+                output,
+                format,
+                include_details,
+                overwrite,
+            } => {
+                let report = export_run_history(
+                    &sqlite_path,
+                    &output,
+                    format.into(),
+                    include_details,
+                    overwrite,
+                )?;
+                Ok(serde_json::to_string_pretty(&report)?)
+            }
+            MaintenanceCommands::Compact {
+                sqlite_path,
+                vacuum,
+            } => {
+                let report = compact_sqlite_database(&sqlite_path, vacuum)?;
+                Ok(serde_json::to_string_pretty(&report)?)
+            }
             MaintenanceCommands::Retain {
                 sqlite_path,
                 keep_last_runs,
