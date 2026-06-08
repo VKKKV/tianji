@@ -4,7 +4,7 @@ TianJi is a geopolitical intelligence engine — ingest signals, compute diverge
 
 ## Current State (2026-05-20)
 
-Pure Rust project. 371 unit tests + 52 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management, SQLite retention, daemon health/readiness probes, and local maintenance check/backup/export/compact are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 374 unit tests + 52 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management with SQLite source health history, SQLite retention, daemon health/readiness probes, and local maintenance check/backup/export/compact are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
@@ -44,6 +44,7 @@ cargo run -- doctor --config examples/config.example.yaml --json
 # 5. Inspect local source registry and run enabled fixture sources
 cargo run -- sources --config examples/sources.example.yaml
 cargo run -- sources --config examples/sources.example.yaml --run-fixtures
+cargo run -- sources --config examples/sources.example.yaml --run-fixtures --sqlite-path runs/source-health.sqlite3
 # Optional: live registry entries require explicit --fetch-live and an operator-owned config.
 
 # 6. Terminal UI browser (read-only)
@@ -598,7 +599,7 @@ plain listing validates and reports registry health without network I/O.
 Disabled sources are always reported but are never run or fetched.
 
 ```
-tianji sources --config examples/sources.example.yaml [--run-fixtures] [--fetch-live]
+tianji sources --config examples/sources.example.yaml [--run-fixtures] [--fetch-live] [--sqlite-path <PATH>]
 ```
 
 Default output is JSON with `schema_version: "tianji.sources-report.v1"`, source
@@ -630,6 +631,22 @@ embedding full run artifacts. The checked-in `examples/sources.example.yaml` use
 only local fixture paths and a disabled `https://example.invalid/...` dummy URL;
 do not put private feed URLs, credentials, cookies, or tokens in shared
 manifests.
+
+Add `--sqlite-path <PATH>` to persist source health history when a run mode is
+selected. TianJi records one health row per reported source, including disabled
+sources skipped by policy, with `source_id`, `kind`, `status`, `checked_at`, item
+counts, `dominant_field`, `risk_level`, and safe error text. Plain listing with
+`--sqlite-path` reads latest persisted health and enriches per-source
+`last_success`, `last_error`, and `last_error_message`; listing without
+`--sqlite-path` remains validation-only with no database writes.
+
+TianJi does not spawn a source scheduler daemon in this slice. Use an external
+scheduler (cron/systemd/Kubernetes) to invoke live polling explicitly, for
+example:
+
+```bash
+tianji sources --config ~/.config/tianji/sources.yaml --fetch-live --sqlite-path /var/lib/tianji/source-health.sqlite3
+```
 
 CI-friendly local source smoke commands:
 

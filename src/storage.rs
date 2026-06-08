@@ -29,6 +29,32 @@ pub const MAX_RUN_SUMMARY_GROUP_LIMIT: usize = 500;
 const RUN_LIST_FILTER_PAGE_SIZE: usize = 100;
 pub const DEFAULT_SQLITE_POOL_SIZE: usize = 4;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceHealthCheckInput {
+    pub source_id: String,
+    pub kind: String,
+    pub status: String,
+    pub checked_at: String,
+    pub raw_item_count: Option<i64>,
+    pub normalized_event_count: Option<i64>,
+    pub scored_event_count: Option<i64>,
+    pub intervention_candidate_count: Option<i64>,
+    pub dominant_field: Option<String>,
+    pub risk_level: Option<String>,
+    pub error: Option<String>,
+    pub run_id: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LatestSourceHealth {
+    pub source_id: String,
+    pub latest_status: String,
+    pub latest_checked_at: String,
+    pub last_success: Option<String>,
+    pub last_error: Option<String>,
+    pub last_error_message: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // SQLite connection pool
 // ---------------------------------------------------------------------------
@@ -152,6 +178,114 @@ pub fn persist_run(
     tx.commit()?;
 
     Ok(())
+}
+
+pub fn persist_source_health_checks(
+    sqlite_path: &str,
+    checks: &[SourceHealthCheckInput],
+) -> Result<(), TianJiError> {
+    let mut connection = open_initialized_connection(Path::new(sqlite_path))?;
+    let tx = connection.transaction()?;
+    for check in checks {
+        tx.execute(
+            "INSERT INTO source_health_checks (
+                source_id, kind, status, checked_at,
+                raw_item_count, normalized_event_count, scored_event_count,
+                intervention_candidate_count, dominant_field, risk_level, error, run_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &check.source_id,
+                &check.kind,
+                &check.status,
+                &check.checked_at,
+                check.raw_item_count,
+                check.normalized_event_count,
+                check.scored_event_count,
+                check.intervention_candidate_count,
+                &check.dominant_field,
+                &check.risk_level,
+                &check.error,
+                check.run_id,
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn load_latest_source_health(
+    sqlite_path: &str,
+) -> Result<BTreeMap<String, LatestSourceHealth>, TianJiError> {
+    let connection = open_initialized_connection(Path::new(sqlite_path))?;
+
+    let mut latest = BTreeMap::new();
+    let mut stmt = connection.prepare(
+        "SELECT source_id, status, checked_at, error
+         FROM source_health_checks
+         ORDER BY source_id ASC, checked_at DESC, id DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (source_id, status, checked_at, error) = row?;
+        latest
+            .entry(source_id.clone())
+            .or_insert(LatestSourceHealth {
+                source_id,
+                latest_status: status,
+                latest_checked_at: checked_at,
+                last_success: None,
+                last_error: None,
+                last_error_message: error,
+            });
+    }
+
+    let mut success_stmt = connection.prepare(
+        "SELECT source_id, MAX(checked_at)
+         FROM source_health_checks
+         WHERE status = 'ok'
+         GROUP BY source_id",
+    )?;
+    let success_rows = success_stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in success_rows {
+        let (source_id, checked_at) = row?;
+        if let Some(entry) = latest.get_mut(&source_id) {
+            entry.last_success = Some(checked_at);
+        }
+    }
+
+    let mut error_stmt = connection.prepare(
+        "SELECT source_id, checked_at, error
+         FROM source_health_checks
+         WHERE status = 'error'
+         ORDER BY source_id ASC, checked_at DESC, id DESC",
+    )?;
+    let error_rows = error_stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+    for row in error_rows {
+        let (source_id, checked_at, error) = row?;
+        if let Some(entry) = latest.get_mut(&source_id) {
+            if entry.last_error.is_none() {
+                entry.last_error = Some(checked_at);
+                entry.last_error_message = error;
+            }
+        }
+    }
+
+    Ok(latest)
 }
 
 // ---------------------------------------------------------------------------
@@ -952,6 +1086,26 @@ fn initialize_schema(connection: &Connection) -> Result<(), TianJiError> {
             baseline_json TEXT NOT NULL,
             locked_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS source_health_checks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            checked_at TEXT NOT NULL,
+            raw_item_count INTEGER,
+            normalized_event_count INTEGER,
+            scored_event_count INTEGER,
+            intervention_candidate_count INTEGER,
+            dominant_field TEXT,
+            risk_level TEXT,
+            error TEXT,
+            run_id INTEGER,
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_source_health_latest
+            ON source_health_checks(source_id, checked_at DESC, id DESC);
         ",
     )?;
     ensure_column(
@@ -2365,6 +2519,61 @@ mod storage_integrity_tests {
             entry_identity_hash: identity_hash.to_string(),
             content_hash: content_hash.to_string(),
         }
+    }
+
+    #[test]
+    fn source_health_persists_history_and_reads_latest_per_source() {
+        let db_path = temp_sqlite_path("source_health_latest");
+        let checks = vec![
+            SourceHealthCheckInput {
+                source_id: "sample".to_string(),
+                kind: "fixture".to_string(),
+                status: "ok".to_string(),
+                checked_at: "2026-06-08T00:00:00+00:00".to_string(),
+                raw_item_count: Some(3),
+                normalized_event_count: Some(3),
+                scored_event_count: Some(3),
+                intervention_candidate_count: Some(2),
+                dominant_field: Some("technology".to_string()),
+                risk_level: Some("high".to_string()),
+                error: None,
+                run_id: None,
+            },
+            SourceHealthCheckInput {
+                source_id: "sample".to_string(),
+                kind: "fixture".to_string(),
+                status: "error".to_string(),
+                checked_at: "2026-06-09T00:00:00+00:00".to_string(),
+                raw_item_count: None,
+                normalized_event_count: None,
+                scored_event_count: None,
+                intervention_candidate_count: None,
+                dominant_field: None,
+                risk_level: None,
+                error: Some("fixture missing".to_string()),
+                run_id: None,
+            },
+        ];
+
+        persist_source_health_checks(&db_path, &checks).expect("persist source health");
+        let latest = load_latest_source_health(&db_path).expect("latest source health");
+        let sample = latest.get("sample").expect("sample health");
+
+        assert_eq!(sample.latest_status, "error");
+        assert_eq!(
+            sample.last_success.as_deref(),
+            Some("2026-06-08T00:00:00+00:00")
+        );
+        assert_eq!(
+            sample.last_error.as_deref(),
+            Some("2026-06-09T00:00:00+00:00")
+        );
+        assert_eq!(
+            sample.last_error_message.as_deref(),
+            Some("fixture missing")
+        );
+
+        cleanup_db(&db_path);
     }
 
     fn normalized_event_with_hashes(identity_hash: &str, content_hash: &str) -> NormalizedEvent {

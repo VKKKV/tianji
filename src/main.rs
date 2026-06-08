@@ -13,8 +13,11 @@ use tianji::{
     apply_retention_policy, artifact_json, backup_sqlite_database, classify_delta_tier,
     clear_baseline, compact_sqlite_database, compare_runs, compute_delta, export_run_history,
     get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary,
-    list_runs, load_baseline, maintenance_check, run_feed_text, run_fixture_path, save_baseline,
-    source_registry::{build_sources_report, load_source_manifest},
+    list_runs, load_baseline, load_latest_source_health, maintenance_check,
+    persist_source_health_checks, run_feed_text, run_fixture_path, save_baseline,
+    source_registry::{
+        build_sources_report_with_health, load_source_manifest, source_health_inputs_from_runs,
+    },
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     worldline::{
         baseline::Baseline,
@@ -379,6 +382,9 @@ enum Cli {
         /// Fetch enabled RSS/Atom sources explicitly
         #[arg(long = "fetch-live")]
         fetch_live: bool,
+        /// Optional SQLite database path for persisting/reading source health history
+        #[arg(long = "sqlite-path")]
+        sqlite_path: Option<String>,
     },
     /// Operator maintenance commands for local storage
     Maintenance {
@@ -1304,10 +1310,12 @@ mod tests {
                 config,
                 run_fixtures,
                 fetch_live,
+                sqlite_path,
             } => {
                 assert_eq!(config, "examples/sources.example.yaml");
                 assert!(!run_fixtures);
                 assert!(!fetch_live);
+                assert_eq!(sqlite_path, None);
             }
             _ => panic!("expected Sources variant"),
         }
@@ -1327,10 +1335,12 @@ mod tests {
             Cli::Sources {
                 run_fixtures,
                 fetch_live,
+                sqlite_path,
                 ..
             } => {
                 assert!(run_fixtures);
                 assert!(!fetch_live);
+                assert_eq!(sqlite_path, None);
             }
             _ => panic!("expected Sources variant"),
         }
@@ -1348,6 +1358,25 @@ mod tests {
         .expect("parse sources fetch live");
         match cli {
             Cli::Sources { fetch_live, .. } => assert!(fetch_live),
+            _ => panic!("expected Sources variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_sources_sqlite_path() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "sources",
+            "--config",
+            "examples/sources.example.yaml",
+            "--sqlite-path",
+            "runs/source-health.sqlite3",
+        ])
+        .expect("parse sources sqlite path");
+        match cli {
+            Cli::Sources { sqlite_path, .. } => {
+                assert_eq!(sqlite_path.as_deref(), Some("runs/source-health.sqlite3"));
+            }
             _ => panic!("expected Sources variant"),
         }
     }
@@ -3767,9 +3796,27 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             config,
             run_fixtures,
             fetch_live,
+            sqlite_path,
         } => {
             let manifest = load_source_manifest(&config)?;
-            let report = build_sources_report(&config, manifest, run_fixtures, fetch_live)?;
+            let latest_health = if let Some(path) = sqlite_path.as_deref() {
+                load_latest_source_health(path)?
+            } else {
+                BTreeMap::new()
+            };
+            let report = build_sources_report_with_health(
+                &config,
+                manifest,
+                run_fixtures,
+                fetch_live,
+                latest_health,
+            )?;
+            if let Some(path) = sqlite_path.as_deref() {
+                if run_fixtures || fetch_live {
+                    let checks = source_health_inputs_from_runs(&report.runs);
+                    persist_source_health_checks(path, &checks)?;
+                }
+            }
             Ok(serde_json::to_string_pretty(&report)?)
         }
         Cli::Maintenance { command } => match command {

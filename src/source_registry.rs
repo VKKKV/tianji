@@ -4,6 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::storage::{LatestSourceHealth, SourceHealthCheckInput};
 use crate::{run_feed_text, run_fixture_path, TianJiError};
 
 pub const SOURCES_REPORT_SCHEMA_VERSION: &str = "tianji.sources-report.v1";
@@ -66,6 +67,17 @@ impl<'de> Deserialize<'de> for SourceKind {
     }
 }
 
+impl SourceKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Fixture => "fixture",
+            Self::Rss => "rss",
+            Self::Atom => "atom",
+            Self::Unknown(kind) => kind,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct SourcesReport {
     pub schema_version: String,
@@ -99,6 +111,8 @@ pub struct SourceStatusReport {
     pub last_success: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -106,6 +120,7 @@ pub struct SourceRunReport {
     pub source_id: String,
     pub kind: SourceKind,
     pub status: String,
+    pub checked_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,6 +205,24 @@ pub fn build_sources_report(
         manifest,
         run_fixtures,
         fetch_live,
+        BTreeMap::new(),
+        fetch_feed_url,
+    )
+}
+
+pub fn build_sources_report_with_health(
+    config_path: &str,
+    manifest: SourceManifest,
+    run_fixtures: bool,
+    fetch_live: bool,
+    latest_health: BTreeMap<String, LatestSourceHealth>,
+) -> Result<SourcesReport, TianJiError> {
+    build_sources_report_with_fetcher(
+        config_path,
+        manifest,
+        run_fixtures,
+        fetch_live,
+        latest_health,
         fetch_feed_url,
     )
 }
@@ -199,6 +232,7 @@ pub fn build_sources_report_with_fetcher<F>(
     manifest: SourceManifest,
     run_fixtures: bool,
     fetch_live: bool,
+    latest_health: BTreeMap<String, LatestSourceHealth>,
     mut fetcher: F,
 ) -> Result<SourcesReport, TianJiError>
 where
@@ -216,8 +250,21 @@ where
         .filter(|source| source.enabled)
         .count();
     let disabled = total.saturating_sub(enabled);
-    let runs = build_source_runs(&manifest.sources, run_fixtures, fetch_live, &mut fetcher);
-    let sources = build_source_statuses(&manifest.sources, &runs, run_fixtures, fetch_live);
+    let checked_at = current_checked_at();
+    let runs = build_source_runs(
+        &manifest.sources,
+        run_fixtures,
+        fetch_live,
+        &checked_at,
+        &mut fetcher,
+    );
+    let sources = build_source_statuses(
+        &manifest.sources,
+        &runs,
+        run_fixtures,
+        fetch_live,
+        &latest_health,
+    );
     let ready = sources
         .iter()
         .filter(|source| source.status == "ready")
@@ -249,11 +296,39 @@ where
 pub fn run_enabled_fixtures(
     sources: &[SourceDefinition],
 ) -> Result<Vec<SourceRunReport>, TianJiError> {
+    let checked_at = current_checked_at();
     Ok(sources
         .iter()
         .filter(|source| source.enabled && source.kind == SourceKind::Fixture)
-        .map(run_fixture_source)
+        .map(|source| run_fixture_source(source, &checked_at))
         .collect())
+}
+
+pub fn source_health_inputs_from_runs(runs: &[SourceRunReport]) -> Vec<SourceHealthCheckInput> {
+    runs.iter()
+        .map(|run| SourceHealthCheckInput {
+            source_id: run.source_id.clone(),
+            kind: run.kind.as_str().to_string(),
+            status: run.status.clone(),
+            checked_at: run.checked_at.clone(),
+            raw_item_count: run.raw_item_count.and_then(usize_to_i64),
+            normalized_event_count: run.normalized_event_count.and_then(usize_to_i64),
+            scored_event_count: run.scored_event_count.and_then(usize_to_i64),
+            intervention_candidate_count: run.intervention_candidate_count.and_then(usize_to_i64),
+            dominant_field: run.dominant_field.clone(),
+            risk_level: run.risk_level.clone(),
+            error: run.error.clone(),
+            run_id: None,
+        })
+        .collect()
+}
+
+fn usize_to_i64(value: usize) -> Option<i64> {
+    i64::try_from(value).ok()
+}
+
+fn current_checked_at() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 fn build_source_statuses(
@@ -261,6 +336,7 @@ fn build_source_statuses(
     runs: &[SourceRunReport],
     run_fixtures: bool,
     fetch_live: bool,
+    latest_health: &BTreeMap<String, LatestSourceHealth>,
 ) -> Vec<SourceStatusReport> {
     sources
         .iter()
@@ -284,6 +360,7 @@ fn build_source_statuses(
             } else {
                 "skipped"
             };
+            let persisted = latest_health.get(&source.id);
             SourceStatusReport {
                 id: source.id.clone(),
                 name: source.name.clone(),
@@ -297,8 +374,16 @@ fn build_source_statuses(
                 runnable,
                 last_success: run
                     .filter(|run| run.status == "ok")
-                    .map(|_| "1970-01-01T00:00:00+00:00".to_string()),
-                last_error: run.and_then(|run| run.error.clone()),
+                    .map(|run| run.checked_at.clone())
+                    .or_else(|| persisted.and_then(|health| health.last_success.clone())),
+                last_error: run
+                    .filter(|run| run.status == "error")
+                    .map(|run| run.checked_at.clone())
+                    .or_else(|| persisted.and_then(|health| health.last_error.clone())),
+                last_error_message: run
+                    .filter(|run| run.status == "error")
+                    .and_then(|run| run.error.clone())
+                    .or_else(|| persisted.and_then(|health| health.last_error_message.clone())),
             }
         })
         .collect()
@@ -308,6 +393,7 @@ fn build_source_runs<F>(
     sources: &[SourceDefinition],
     run_fixtures: bool,
     fetch_live: bool,
+    checked_at: &str,
     fetcher: &mut F,
 ) -> Vec<SourceRunReport>
 where
@@ -321,31 +407,40 @@ where
         .iter()
         .map(|source| {
             if !source.enabled {
-                return skipped_run(source, "Source is disabled.");
+                return skipped_run(source, checked_at, "Source is disabled.");
             }
             match (&source.kind, run_fixtures, fetch_live) {
-                (SourceKind::Fixture, true, _) => run_fixture_source(source),
+                (SourceKind::Fixture, true, _) => run_fixture_source(source, checked_at),
                 (SourceKind::Fixture, false, true) => {
-                    skipped_run(source, "Fixture source is not a live source.")
+                    skipped_run(source, checked_at, "Fixture source is not a live source.")
                 }
-                (SourceKind::Rss | SourceKind::Atom, _, true) => run_live_source(source, fetcher),
+                (SourceKind::Rss | SourceKind::Atom, _, true) => {
+                    run_live_source(source, checked_at, fetcher)
+                }
                 (SourceKind::Rss | SourceKind::Atom, true, false) => {
-                    skipped_run(source, "Live source requires --fetch-live.")
+                    skipped_run(source, checked_at, "Live source requires --fetch-live.")
                 }
-                _ => skipped_run(source, "Source is not selected for this mode."),
+                _ => skipped_run(source, checked_at, "Source is not selected for this mode."),
             }
         })
         .collect()
 }
 
-fn run_fixture_source(source: &SourceDefinition) -> SourceRunReport {
+fn run_fixture_source(source: &SourceDefinition, checked_at: &str) -> SourceRunReport {
     match source.path.as_deref() {
         Some(path) => match run_fixture_path(path, None) {
-            Ok(result) => successful_run(source, Some(path.to_string()), None, result),
-            Err(error) => errored_run(source, Some(path.to_string()), None, error.to_string()),
+            Ok(result) => successful_run(source, checked_at, Some(path.to_string()), None, result),
+            Err(error) => errored_run(
+                source,
+                checked_at,
+                Some(path.to_string()),
+                None,
+                error.to_string(),
+            ),
         },
         None => errored_run(
             source,
+            checked_at,
             None,
             None,
             "Fixture source is missing path.".to_string(),
@@ -353,19 +448,32 @@ fn run_fixture_source(source: &SourceDefinition) -> SourceRunReport {
     }
 }
 
-fn run_live_source<F>(source: &SourceDefinition, fetcher: &mut F) -> SourceRunReport
+fn run_live_source<F>(
+    source: &SourceDefinition,
+    checked_at: &str,
+    fetcher: &mut F,
+) -> SourceRunReport
 where
     F: FnMut(&str) -> Result<String, TianJiError>,
 {
     match source.url.as_deref() {
         Some(url) => {
             match fetcher(url).and_then(|feed_text| run_feed_text(&feed_text, url, None)) {
-                Ok(result) => successful_run(source, None, Some(url.to_string()), result),
-                Err(error) => errored_run(source, None, Some(url.to_string()), error.to_string()),
+                Ok(result) => {
+                    successful_run(source, checked_at, None, Some(url.to_string()), result)
+                }
+                Err(error) => errored_run(
+                    source,
+                    checked_at,
+                    None,
+                    Some(url.to_string()),
+                    error.to_string(),
+                ),
             }
         }
         None => errored_run(
             source,
+            checked_at,
             None,
             None,
             "Live source is missing url.".to_string(),
@@ -375,6 +483,7 @@ where
 
 fn successful_run(
     source: &SourceDefinition,
+    checked_at: &str,
     path: Option<String>,
     url: Option<String>,
     result: crate::RunResult,
@@ -383,6 +492,7 @@ fn successful_run(
         source_id: source.id.clone(),
         kind: source.kind.clone(),
         status: "ok".to_string(),
+        checked_at: checked_at.to_string(),
         path,
         url,
         raw_item_count: Some(result.artifact.input_summary.raw_item_count),
@@ -395,11 +505,12 @@ fn successful_run(
     }
 }
 
-fn skipped_run(source: &SourceDefinition, reason: &str) -> SourceRunReport {
+fn skipped_run(source: &SourceDefinition, checked_at: &str, reason: &str) -> SourceRunReport {
     SourceRunReport {
         source_id: source.id.clone(),
         kind: source.kind.clone(),
         status: "skipped".to_string(),
+        checked_at: checked_at.to_string(),
         path: source.path.clone(),
         url: source.url.clone(),
         raw_item_count: None,
@@ -414,6 +525,7 @@ fn skipped_run(source: &SourceDefinition, reason: &str) -> SourceRunReport {
 
 fn errored_run(
     source: &SourceDefinition,
+    checked_at: &str,
     path: Option<String>,
     url: Option<String>,
     error: String,
@@ -422,6 +534,7 @@ fn errored_run(
         source_id: source.id.clone(),
         kind: source.kind.clone(),
         status: "error".to_string(),
+        checked_at: checked_at.to_string(),
         path,
         url,
         raw_item_count: None,
@@ -668,6 +781,7 @@ sources:
             manifest,
             false,
             false,
+            BTreeMap::new(),
             |_| {
                 fetch_count += 1;
                 Err(TianJiError::Input("should not fetch".to_string()))
@@ -690,12 +804,18 @@ sources:
         let fixture = std::fs::read_to_string("tests/fixtures/sample_feed.xml").expect("fixture");
         let mut fetched_urls = Vec::new();
 
-        let report =
-            build_sources_report_with_fetcher("tests/live.yaml", manifest, false, true, |url| {
+        let report = build_sources_report_with_fetcher(
+            "tests/live.yaml",
+            manifest,
+            false,
+            true,
+            BTreeMap::new(),
+            |url| {
                 fetched_urls.push(url.to_string());
                 Ok(fixture.clone())
-            })
-            .expect("source report");
+            },
+        )
+        .expect("source report");
 
         assert_eq!(fetched_urls, vec!["https://example.invalid/feed.xml"]);
         assert_eq!(report.runs.len(), 3);
@@ -721,12 +841,18 @@ sources:
         let manifest = valid_manifest();
         let mut fetch_count = 0;
 
-        let report =
-            build_sources_report_with_fetcher("tests/live.yaml", manifest, false, true, |_| {
+        let report = build_sources_report_with_fetcher(
+            "tests/live.yaml",
+            manifest,
+            false,
+            true,
+            BTreeMap::new(),
+            |_| {
                 fetch_count += 1;
                 Err(TianJiError::Input("disabled fetch attempted".to_string()))
-            })
-            .expect("source report");
+            },
+        )
+        .expect("source report");
 
         assert_eq!(fetch_count, 0);
         let disabled = report
@@ -735,5 +861,48 @@ sources:
             .find(|run| run.source_id == "disabled_dummy_remote")
             .expect("disabled run report");
         assert_eq!(disabled.status, "skipped");
+    }
+
+    #[test]
+    fn source_registry_listing_enriches_persisted_source_health() {
+        let mut latest_health = BTreeMap::new();
+        latest_health.insert(
+            "sample_technology".to_string(),
+            LatestSourceHealth {
+                source_id: "sample_technology".to_string(),
+                latest_status: "error".to_string(),
+                latest_checked_at: "2026-06-09T00:00:00+00:00".to_string(),
+                last_success: Some("2026-06-08T00:00:00+00:00".to_string()),
+                last_error: Some("2026-06-09T00:00:00+00:00".to_string()),
+                last_error_message: Some("temporary parse failure".to_string()),
+            },
+        );
+
+        let report = build_sources_report_with_health(
+            "examples/sources.example.yaml",
+            valid_manifest(),
+            false,
+            false,
+            latest_health,
+        )
+        .expect("source report");
+
+        let source = report
+            .sources
+            .iter()
+            .find(|source| source.id == "sample_technology")
+            .expect("sample status");
+        assert_eq!(
+            source.last_success.as_deref(),
+            Some("2026-06-08T00:00:00+00:00")
+        );
+        assert_eq!(
+            source.last_error.as_deref(),
+            Some("2026-06-09T00:00:00+00:00")
+        );
+        assert_eq!(
+            source.last_error_message.as_deref(),
+            Some("temporary parse failure")
+        );
     }
 }

@@ -3,7 +3,7 @@
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
 > Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, and Phase J operational reliability complete.
-> Tests: 423 total pass / 0 fail
+> Tests: 426 total pass / 0 fail (source health persistence adds 3 targeted tests)
 
 ---
 
@@ -42,8 +42,8 @@ Phase I ████████████████████ ✅ Source/
 Phase J ████████████████████ ✅ Operational reliability
 ```
 
-  源码: 28,273 行 Rust / 58 源文件
-  测试: 371 unit + 52 integration = 423 total pass / 0 fail
+  源码: 28,699 行 Rust / 58 源文件
+  测试: 374 unit + 52 integration = 426 total pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -323,8 +323,15 @@ adding live polling metadata or persistence.
 - Default `tianji sources --config <PATH>` remains validation/report-only with no network I/O.
 - README documents registry listing, fixture fan-in, live-fetch opt-in, safety constraints, and CI-friendly smoke commands.
 
-Later source-management candidates:
-- Live source polling metadata persistence, source health history, and operator scheduling integration.
+**I5. Source health scheduling completion** ✅
+- Added additive SQLite source-health history for source check/run outcomes.
+- `tianji sources --sqlite-path <PATH>` listing reads latest persisted health and
+  enriches per-source `last_success`, `last_error`, and error message metadata.
+- `--run-fixtures --sqlite-path` and `--fetch-live --sqlite-path` persist health
+  rows for enabled runs plus disabled/skipped sources; default listing without
+  `--sqlite-path` remains no-network/no-DB.
+- Operator scheduling is external: cron/systemd/Kubernetes invokes `sources
+  --fetch-live --sqlite-path`, while TianJi records health history only.
 
 **Phase J — Operational reliability**
 
@@ -397,7 +404,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 371 unit + 52 integration = 423 total)
+- `cargo test` all green (currently 374 unit + 52 integration = 426 total)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
