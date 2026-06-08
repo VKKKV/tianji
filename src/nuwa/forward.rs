@@ -8,6 +8,10 @@ use crate::worldline::types::{ActorId, FieldKey, Worldline};
 
 use super::outcome::{ConvergenceReason, SimulationOutcome, WorldlineBranch};
 use super::sandbox::{fork_worldline, SimulationMode};
+use super::trace::{
+    SimulationTrace, SimulationTraceCompleted, SimulationTraceFrame, SimulationTraceMetadata,
+    TraceAgentAction, SIM_TRACE_SCHEMA_VERSION,
+};
 
 struct TickInput<'a> {
     tick: u64,
@@ -20,6 +24,7 @@ struct TickInput<'a> {
 struct TickOutput {
     agent_ids: Vec<ActorId>,
     action_types: Vec<String>,
+    agent_actions: Vec<TraceAgentAction>,
     field_changes: Vec<FieldChange>,
 }
 
@@ -34,6 +39,7 @@ async fn tick_simulation(input: TickInput<'_>) -> TickOutput {
 
     let mut action_types = Vec::new();
     let mut agent_ids = Vec::new();
+    let mut agent_actions = Vec::new();
 
     for agent in agents {
         let action = if let Some(clients) = resolve_forward_clients(provider) {
@@ -50,8 +56,10 @@ async fn tick_simulation(input: TickInput<'_>) -> TickOutput {
         } else {
             agent.pick_stub_action(tick)
         };
+        let actor_id = agent.actor_id.clone();
         action_types.push(action.action_type.clone());
-        agent_ids.push(agent.actor_id.clone());
+        agent_ids.push(actor_id.clone());
+        agent_actions.push(TraceAgentAction::from_agent_action(actor_id, &action));
         agent.action_history.push(action);
     }
 
@@ -70,6 +78,7 @@ async fn tick_simulation(input: TickInput<'_>) -> TickOutput {
     TickOutput {
         agent_ids,
         action_types,
+        agent_actions,
         field_changes,
     }
 }
@@ -81,19 +90,45 @@ pub async fn run_forward(
     config: &HongmengConfig,
     provider: Option<&ProviderRegistry>,
 ) -> SimulationOutcome {
+    run_forward_with_trace(base_worldline, agents, mode, config, provider)
+        .await
+        .0
+}
+
+pub async fn run_forward_with_trace(
+    base_worldline: &Worldline,
+    agents: &[Agent],
+    mode: &SimulationMode,
+    config: &HongmengConfig,
+    provider: Option<&ProviderRegistry>,
+) -> (SimulationOutcome, SimulationTrace) {
     let (target_field, horizon_ticks) = match mode {
         SimulationMode::Forward {
             target_field,
             horizon_ticks,
         } => (target_field.clone(), *horizon_ticks),
         _ => {
-            return SimulationOutcome {
+            let outcome = SimulationOutcome {
                 mode: mode.clone(),
                 branches: vec![],
                 intervention_paths: vec![],
                 tick_count: 0,
                 convergence_reason: ConvergenceReason::MaxTicksReached(0),
-            }
+            };
+            let trace = SimulationTrace {
+                metadata: SimulationTraceMetadata {
+                    schema_version: SIM_TRACE_SCHEMA_VERSION.to_string(),
+                    mode: mode_name(mode).to_string(),
+                    target_field: None,
+                    horizon_ticks: 0,
+                    frame_count: 0,
+                },
+                frames: vec![],
+                completed: SimulationTraceCompleted {
+                    outcome: outcome.clone(),
+                },
+            };
+            return (outcome, trace);
         }
     };
 
@@ -102,6 +137,7 @@ pub async fn run_forward(
     let mut working_agents: Vec<Agent> = agents.to_vec();
     let mut delta_history: Vec<FieldChange> = Vec::new();
     let mut event_sequence: Vec<String> = Vec::new();
+    let mut frames: Vec<SimulationTraceFrame> = Vec::new();
     let mut tick: u64 = 0;
     let mut convergence_reason = ConvergenceReason::MaxTicksReached(horizon_ticks);
 
@@ -135,6 +171,14 @@ pub async fn run_forward(
                 ));
             }
         }
+
+        frames.push(SimulationTraceFrame {
+            tick,
+            field_values: worldline.fields.clone(),
+            field_changes: output.field_changes.clone(),
+            agent_actions: output.agent_actions,
+            event_sequence_len: event_sequence.len(),
+        });
 
         if let Some(target_value) = worldline.fields.get(&target_field) {
             if *target_value >= 10.0 {
@@ -227,12 +271,35 @@ pub async fn run_forward(
     });
     branches.truncate(3);
 
-    SimulationOutcome {
+    let outcome = SimulationOutcome {
         mode: mode.clone(),
         branches,
         intervention_paths: vec![],
         tick_count: tick,
         convergence_reason,
+    };
+
+    let trace = SimulationTrace {
+        metadata: SimulationTraceMetadata {
+            schema_version: SIM_TRACE_SCHEMA_VERSION.to_string(),
+            mode: mode_name(mode).to_string(),
+            target_field: Some(target_field),
+            horizon_ticks,
+            frame_count: frames.len(),
+        },
+        frames,
+        completed: SimulationTraceCompleted {
+            outcome: outcome.clone(),
+        },
+    };
+
+    (outcome, trace)
+}
+
+fn mode_name(mode: &SimulationMode) -> &'static str {
+    match mode {
+        SimulationMode::Forward { .. } => "forward",
+        SimulationMode::Backward { .. } => "backward",
     }
 }
 
@@ -356,6 +423,62 @@ mod tests {
         for i in 1..outcome.branches.len() {
             assert!(outcome.branches[i].probability <= outcome.branches[i - 1].probability);
         }
+    }
+
+    #[tokio::test]
+    async fn forward_with_trace_has_one_monotonic_frame_per_tick() {
+        let worldline = sample_worldline();
+        let agents = vec![sample_agent("usa")];
+        let mode = SimulationMode::Forward {
+            target_field: FieldKey {
+                region: "global".to_string(),
+                domain: "conflict".to_string(),
+            },
+            horizon_ticks: 4,
+        };
+        let config = HongmengConfig::default();
+
+        let (outcome, trace) =
+            run_forward_with_trace(&worldline, &agents, &mode, &config, None).await;
+
+        assert_eq!(trace.metadata.schema_version, SIM_TRACE_SCHEMA_VERSION);
+        assert_eq!(trace.metadata.frame_count, trace.frames.len());
+        assert_eq!(trace.frames.len(), outcome.tick_count as usize);
+        for (index, frame) in trace.frames.iter().enumerate() {
+            assert_eq!(frame.tick, index as u64 + 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn forward_trace_includes_agent_audit_fields() {
+        let worldline = sample_worldline();
+        let agents = vec![sample_agent("usa")];
+        let mode = SimulationMode::Forward {
+            target_field: FieldKey {
+                region: "global".to_string(),
+                domain: "conflict".to_string(),
+            },
+            horizon_ticks: 1,
+        };
+        let config = HongmengConfig::default();
+
+        let (_outcome, trace) =
+            run_forward_with_trace(&worldline, &agents, &mode, &config, None).await;
+        let action = &trace.frames[0].agent_actions[0];
+
+        assert_eq!(action.actor_id, "usa");
+        assert_eq!(
+            action.assessment,
+            "deterministic stub fallback; no LLM assessment available"
+        );
+        assert_eq!(action.category, "stub_fallback");
+        assert_eq!(
+            action.drivers,
+            vec![
+                "no_llm_provider".to_string(),
+                "deterministic_profile_pattern".to_string()
+            ]
+        );
     }
 
     #[tokio::test]

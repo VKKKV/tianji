@@ -301,6 +301,9 @@ enum Cli {
         /// Optional path to TianJi config YAML
         #[arg(long)]
         config: Option<String>,
+        /// Optional JSONL trace export path for replay/import tooling
+        #[arg(long = "trace-jsonl")]
+        trace_jsonl: Option<String>,
     },
     /// Run backward constraint search for intervention paths
     Backtrack {
@@ -818,7 +821,13 @@ mod tests {
     fn predict_output_is_valid_json_with_branches() {
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let output = rt
-            .block_on(handle_predict("global.conflict", 5, "profiles/", None))
+            .block_on(handle_predict(
+                "global.conflict",
+                5,
+                "profiles/",
+                None,
+                None,
+            ))
             .expect("predict output");
         let value: Value = serde_json::from_str(&output).expect("json output");
 
@@ -833,7 +842,7 @@ mod tests {
     #[test]
     fn predict_rejects_invalid_field_format() {
         let rt = tokio::runtime::Runtime::new().expect("runtime");
-        let result = rt.block_on(handle_predict("conflict", 5, "profiles/", None));
+        let result = rt.block_on(handle_predict("conflict", 5, "profiles/", None, None));
         assert!(result.is_err());
         assert!(matches!(result, Err(TianJiError::Usage(msg)) if msg.contains("region.domain")));
     }
@@ -1151,12 +1160,74 @@ mod tests {
         ])
         .expect("parse predict");
         match cli {
-            Cli::Predict { field, horizon, .. } => {
+            Cli::Predict {
+                field,
+                horizon,
+                trace_jsonl,
+                ..
+            } => {
                 assert_eq!(field, "east-asia.conflict");
                 assert_eq!(horizon, 10);
+                assert_eq!(trace_jsonl, None);
             }
             _ => panic!("expected Predict variant"),
         }
+    }
+
+    #[test]
+    fn cli_parse_predict_trace_jsonl() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "predict",
+            "--field",
+            "east-asia.conflict",
+            "--trace-jsonl",
+            "runs/trace.jsonl",
+        ])
+        .expect("parse predict trace jsonl");
+        match cli {
+            Cli::Predict { trace_jsonl, .. } => {
+                assert_eq!(trace_jsonl.as_deref(), Some("runs/trace.jsonl"));
+            }
+            _ => panic!("expected Predict variant"),
+        }
+    }
+
+    #[test]
+    fn predict_trace_jsonl_writes_trace_and_preserves_stdout_outcome() {
+        let trace_path = std::env::temp_dir().join(format!(
+            "tianji_predict_trace_{}_{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos()
+        ));
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let output = rt
+            .block_on(handle_predict(
+                "global.conflict",
+                3,
+                "profiles/",
+                None,
+                Some(&trace_path),
+            ))
+            .expect("predict output");
+        let stdout: Value = serde_json::from_str(&output).expect("json output");
+        assert!(stdout.get("branches").is_some());
+        assert!(stdout.get("metadata").is_none());
+
+        let trace = tianji::nuwa::read_trace_jsonl(&trace_path).expect("trace jsonl");
+        let _ = std::fs::remove_file(&trace_path);
+        assert_eq!(
+            trace.metadata.schema_version,
+            tianji::nuwa::SIM_TRACE_SCHEMA_VERSION
+        );
+        assert_eq!(trace.metadata.frame_count, trace.frames.len());
+        assert_eq!(
+            trace.frames.len(),
+            stdout["tick_count"].as_u64().unwrap() as usize
+        );
     }
 
     #[test]
@@ -2719,10 +2790,11 @@ async fn handle_predict(
     horizon: u64,
     profile_dir: &str,
     config_path: Option<&str>,
+    trace_jsonl: Option<&Path>,
 ) -> Result<String, TianJiError> {
     use tianji::hongmeng::Agent;
     use tianji::llm::ProviderRegistry;
-    use tianji::nuwa::forward::run_forward;
+    use tianji::nuwa::forward::run_forward_with_trace;
     use tianji::nuwa::sandbox::SimulationMode;
     use tianji::profile::ProfileRegistry;
     use tianji::worldline::types::{FieldKey, Worldline};
@@ -2803,7 +2875,11 @@ async fn handle_predict(
         sim_config.clone(),
     );
 
-    let outcome = run_forward(&worldline, &agents, &mode, &sim_config, Some(&provider)).await;
+    let (outcome, trace) =
+        run_forward_with_trace(&worldline, &agents, &mode, &sim_config, Some(&provider)).await;
+    if let Some(path) = trace_jsonl {
+        tianji::nuwa::write_trace_jsonl(path, &trace)?;
+    }
     Ok(serde_json::to_string_pretty(&outcome)?)
 }
 
@@ -3741,7 +3817,17 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             horizon,
             profile_dir,
             config,
-        } => handle_predict(&field, horizon, &profile_dir, config.as_deref()).await,
+            trace_jsonl,
+        } => {
+            handle_predict(
+                &field,
+                horizon,
+                &profile_dir,
+                config.as_deref(),
+                trace_jsonl.as_deref().map(Path::new),
+            )
+            .await
+        }
         Cli::Backtrack {
             goal,
             field_constraints,

@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, and Phase J operational reliability complete.
-> Tests: 426 total pass / 0 fail (source health persistence adds 3 targeted tests)
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, Phase J operational reliability, and Phase K1 simulation JSONL trace export complete.
+> Tests: 432 total pass / 0 fail (K1 trace export adds 6 targeted tests)
 
 ---
 
@@ -40,10 +40,11 @@ Phase F ████████████████████ ✅ Product
 Phase H ████████████████████ ✅ Evaluation harness
 Phase I ████████████████████ ✅ Source/feed management
 Phase J ████████████████████ ✅ Operational reliability
+Phase K1████████████████████ ✅ Simulation JSONL trace export
 ```
 
-  源码: 28,699 行 Rust / 58 源文件
-  测试: 374 unit + 52 integration = 426 total pass / 0 fail
+  源码: 29,260 行 Rust / 59 源文件
+  测试: 377 unit + 55 integration = 432 total pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -362,6 +363,11 @@ adding live polling metadata or persistence.
 **Phase K — Simulation replay/export**
 - JSONL trace export, replay bundle packaging, structured agent audit viewer improvements.
 
+**K1. Simulation JSONL trace export** ✅
+- Added `tianji.sim-trace.v1` JSONL export/import helpers with `metadata`, `frame`, and `completed` records.
+- Added `run_forward_with_trace(...)` while preserving `run_forward(...)` and default `predict` stdout outcome JSON.
+- Added `tianji predict --trace-jsonl <PATH>` for replay-friendly forward simulation traces including field changes and structured agent audit fields.
+
 ---
 
 ## 4. Dependencies
@@ -404,7 +410,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 374 unit + 52 integration = 426 total)
+- `cargo test` all green (currently 377 unit + 55 integration = 432 total)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional

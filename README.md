@@ -4,7 +4,7 @@ TianJi is a geopolitical intelligence engine — ingest signals, compute diverge
 
 ## Current State (2026-05-20)
 
-Pure Rust project. 374 unit tests + 52 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management with SQLite source health history, SQLite retention, daemon health/readiness probes, and local maintenance check/backup/export/compact are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 377 unit tests + 55 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, JSONL simulation trace export, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management with SQLite source health history, SQLite retention, daemon health/readiness probes, and local maintenance check/backup/export/compact are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
@@ -178,6 +178,9 @@ Optional Hongmeng/Nuwa simulation uses configured providers when requested:
 ```bash
 # Provider-backed; optional; may use network/model calls depending on config.
 cargo run -- predict --field east-asia.conflict --horizon 30 --config ~/.tianji/config.yaml
+
+# Export replay-friendly JSONL trace without changing stdout outcome JSON.
+cargo run -- predict --field east-asia.conflict --horizon 30 --trace-jsonl runs/predict-trace.jsonl
 ```
 
 ---
