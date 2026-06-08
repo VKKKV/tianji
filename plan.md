@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, and Phase J1 SQLite retention complete.
-> Tests: 407 total pass / 0 fail
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, and Phase J2 daemon health/readiness complete.
+> Tests: 410 total pass / 0 fail
 
 ---
 
@@ -39,11 +39,11 @@ TUI ████████████████████ ✅ 4 views + s
 Phase F ████████████████████ ✅ Product polish + operator readiness
 Phase H ████████████████████ ✅ Evaluation harness
 Phase I ████████████████████ ✅ Source/feed management
-Phase J1████████████████████ ✅ SQLite retention policy
+Phase J2████████████████████ ✅ SQLite retention + daemon health/readiness
 ```
 
-  源码: 27,223 行 Rust / 58 源文件
-  测试: 361 unit + 46 integration = 407 total pass / 0 fail
+  源码: 27,351 行 Rust / 58 源文件
+  测试: 364 unit + 46 integration = 410 total pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -158,7 +158,7 @@ evaluation, source management, and operational reliability.
 - Phase D: D1-D8 production features complete.
 - Phase E: agent command channel, structured simulation auditability, timeline replay.
 - Phase F: operator readiness, API contracts, release checklist, release gate.
-- Phase J1: deterministic SQLite run-history retention.
+- Phase J: SQLite retention policy and daemon health/readiness probes.
 
 ### Phase D — Completed Production & Features
 
@@ -335,8 +335,15 @@ Later source-management candidates:
   and removes orphan canonical source items.
 - Emits `tianji.retention-report.v1` JSON for operator automation.
 
+**J2. Daemon health/readiness endpoints** ✅
+- Added `GET /api/v1/health` for API process liveness without SQLite access.
+- Added `GET /api/v1/ready` for SQLite-backed readiness via pooled connection
+  checkout plus a trivial query.
+- Daemon startup readiness polling now checks `/api/v1/ready` instead of
+  inferring readiness from `/api/v1/meta`.
+
 Later operational reliability candidates:
-- SQLite backup/export, daemon health/readiness, additional operator maintenance commands.
+- SQLite backup/export and additional operator maintenance commands.
 
 **Phase K — Simulation replay/export**
 - JSONL trace export, replay bundle packaging, structured agent audit viewer improvements.
@@ -383,7 +390,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 361 unit + 46 integration = 407 total)
+- `cargo test` all green (currently 364 unit + 46 integration = 410 total)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional

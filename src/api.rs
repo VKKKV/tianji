@@ -90,6 +90,8 @@ fn api_meta_data() -> JsonValue {
         },
         "resources": [
             "/api/v1/meta",
+            "/api/v1/health",
+            "/api/v1/ready",
             "/api/v1/runs",
             "/api/v1/runs/{run_id}",
             "/api/v1/compare?left_run_id=<id>&right_run_id=<id>",
@@ -247,6 +249,42 @@ struct AgentCommandRequest {
 async fn get_meta() -> impl IntoResponse {
     let data = api_meta_data();
     JsonEnvelope(success_envelope(data))
+}
+
+async fn get_health() -> impl IntoResponse {
+    let data = serde_json::json!({
+        "status": "ok",
+        "checks": {
+            "api": "ok",
+        },
+    });
+    JsonEnvelope(success_envelope(data))
+}
+
+async fn get_ready(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let connection = state.sqlite_pool.get().map_err(|_| ApiError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        body: error_envelope("not_ready", "SQLite connection pool is not ready"),
+    })?;
+
+    let query_result = connection.query_row("SELECT 1", [], |row| row.get::<_, i64>(0));
+    match query_result {
+        Ok(1) => {
+            let data = serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "api": "ok",
+                    "sqlite": "ok",
+                },
+                "sqlite_path": state.sqlite_path,
+            });
+            Ok(JsonEnvelope(success_envelope(data)))
+        }
+        Ok(_) | Err(_) => Err(ApiError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            body: error_envelope("not_ready", "SQLite readiness query failed"),
+        }),
+    }
 }
 
 async fn get_runs(
@@ -663,6 +701,8 @@ async fn fallback() -> impl IntoResponse {
 pub fn build_router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/meta", get(get_meta))
+        .route("/api/v1/health", get(get_health))
+        .route("/api/v1/ready", get(get_ready))
         .route("/api/v1/runs", get(get_runs))
         .route("/api/v1/runs/latest", get(get_latest_run))
         .route("/api/v1/runs/{run_id}", get(get_run_by_id))
@@ -698,6 +738,66 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     const TEST_SECRET: &[u8] = b"deterministic-agent-command-test-secret";
+
+    #[test]
+    fn api_health_returns_liveness_envelope() {
+        let db_path = temp_sqlite_path();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let response = rt.block_on(async {
+            let state = AppState::new(db_path.clone()).expect("api state");
+            let server = TestServer::start(state).await;
+            let response = get_test_request(&server.url, "/api/v1/health").await;
+            server.handle.abort();
+            response
+        });
+        cleanup_db(&db_path);
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.body,
+            serde_json::json!({
+                "api_version": "v1",
+                "data": {
+                    "status": "ok",
+                    "checks": {
+                        "api": "ok"
+                    }
+                },
+                "error": null
+            })
+        );
+    }
+
+    #[test]
+    fn api_ready_returns_sqlite_readiness_envelope() {
+        let db_path = temp_sqlite_path();
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let response = rt.block_on(async {
+            let state = AppState::new(db_path.clone()).expect("api state");
+            let server = TestServer::start(state).await;
+            let response = get_test_request(&server.url, "/api/v1/ready").await;
+            server.handle.abort();
+            response
+        });
+        cleanup_db(&db_path);
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(
+            response.body,
+            serde_json::json!({
+                "api_version": "v1",
+                "data": {
+                    "status": "ready",
+                    "checks": {
+                        "api": "ok",
+                        "sqlite": "ok"
+                    },
+                    "sqlite_path": db_path
+                },
+                "error": null
+            })
+        );
+    }
 
     #[test]
     fn agent_command_valid_signed_command_is_accepted() {
@@ -937,6 +1037,17 @@ mod tests {
             .header("x-tianji-signature", signature)
             .header("content-type", "application/json")
             .body(body.to_string())
+            .send()
+            .await
+            .expect("request");
+        let status = response.status();
+        let body = serde_json::from_str(&response.text().await.expect("text")).expect("json");
+        TestResponse { status, body }
+    }
+
+    async fn get_test_request(base_url: &str, path: &str) -> TestResponse {
+        let response = reqwest::Client::new()
+            .get(format!("{base_url}{path}"))
             .send()
             .await
             .expect("request");

@@ -17,6 +17,8 @@
     },
     "resources": [
       "/api/v1/meta",
+      "/api/v1/health",
+      "/api/v1/ready",
       "/api/v1/runs",
       "/api/v1/runs/{run_id}",
       "/api/v1/compare?left_run_id=<id>&right_run_id=<id>",

@@ -4,14 +4,14 @@ TianJi is a geopolitical intelligence engine — ingest signals, compute diverge
 
 ## Current State (2026-05-20)
 
-Pure Rust project. 361 unit tests + 46 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management, and SQLite retention are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 364 unit tests + 46 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management, SQLite retention, and daemon health/readiness probes are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
 | M1A Feed + Normalization (RSS/Atom, SHA-256 hash, keywords/actors/regions) | ✅ |
 | M1B Scoring + Grouping + Backtrack (Im/Fa, divergence, intervention candidates) | ✅ |
 | M2 Storage + History CLI (SQLite 6 tables, history/history-show/history-compare) | ✅ |
-| M3A Daemon + Local API (UNIX socket, axum 5-route HTTP API, job queue) | ✅ |
+| M3A Daemon + Local API (UNIX socket, axum HTTP API, job queue) | ✅ |
 | M3B Web UI (embedded static files, API proxy, /queue-run) | ✅ |
 | M3C Daemon schedule (bounded repeated run queue) | ✅ |
 | M4 TUI (ratatui history browser MVP, Kanagawa Dark, Vim keybindings) | ✅ |
@@ -351,6 +351,8 @@ The daemon exposes a read-first HTTP API at `http://127.0.0.1:8765`:
 
 ```bash
 curl http://127.0.0.1:8765/api/v1/meta
+curl http://127.0.0.1:8765/api/v1/health
+curl http://127.0.0.1:8765/api/v1/ready
 curl 'http://127.0.0.1:8765/api/v1/runs?limit=20'
 curl http://127.0.0.1:8765/api/v1/runs/latest
 curl 'http://127.0.0.1:8765/api/v1/compare?left_run_id=1&right_run_id=2'
@@ -360,6 +362,8 @@ curl http://127.0.0.1:8765/api/v1/delta/latest
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/v1/meta` | API metadata, resource manifest, schema version |
+| `GET /api/v1/health` | Liveness probe for the local API process; does not query SQLite |
+| `GET /api/v1/ready` | Readiness probe for SQLite-backed API serving; checks pool checkout and a trivial query |
 | `GET /api/v1/runs?limit=20` | List persisted runs |
 | `GET /api/v1/runs/latest` | Latest run summary |
 | `GET /api/v1/runs/{run_id}` | Single run detail |

@@ -684,6 +684,18 @@ mod tests {
         assert_eq!(sleep_calls, vec![std::time::Duration::from_secs(60)]);
     }
 
+    #[test]
+    fn daemon_api_readiness_url_uses_ready_endpoint_and_brackets_ipv6() {
+        assert_eq!(
+            api_readiness_url("127.0.0.1", 8765),
+            "http://127.0.0.1:8765/api/v1/ready"
+        );
+        assert_eq!(
+            api_readiness_url("::1", 8765),
+            "http://[::1]:8765/api/v1/ready"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Predict / Backtrack / Baseline / Watch tests
     // -----------------------------------------------------------------------
@@ -1688,10 +1700,7 @@ fn wait_for_socket(socket_path: &str, timeout_secs: f64) -> bool {
 
 fn wait_for_api(host: &str, port: u16, timeout_secs: f64) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(timeout_secs);
-    let url = format!(
-        "{}/api/v1/meta",
-        tianji::daemon::loopback_http_base_url(host, port)
-    );
+    let url = api_readiness_url(host, port);
     while std::time::Instant::now() < deadline {
         if let Ok(resp) = reqwest::blocking::Client::new()
             .get(&url)
@@ -1705,6 +1714,13 @@ fn wait_for_api(host: &str, port: u16, timeout_secs: f64) -> bool {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     false
+}
+
+fn api_readiness_url(host: &str, port: u16) -> String {
+    format!(
+        "{}/api/v1/ready",
+        tianji::daemon::loopback_http_base_url(host, port)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1783,9 +1799,10 @@ fn handle_daemon_start(
     if !wait_for_api(&validated_host, port, start_timeout_secs) {
         remove_pid_file(socket_path);
         terminate_child(&mut child, start_timeout_secs);
-        return Err(TianJiError::Usage(
-            format!("Daemon HTTP API did not become ready within {start_timeout_secs:.1}s at {}/api/v1/meta.", tianji::daemon::loopback_http_base_url(&validated_host, port))
-        ));
+        return Err(TianJiError::Usage(format!(
+            "Daemon HTTP API did not become ready within {start_timeout_secs:.1}s at {}.",
+            api_readiness_url(&validated_host, port)
+        )));
     }
 
     // Intentionally detach from the child: the daemon must outlive the
