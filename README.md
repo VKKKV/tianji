@@ -4,7 +4,7 @@ TianJi is a geopolitical intelligence engine — ingest signals, compute diverge
 
 ## Current State (2026-05-20)
 
-Pure Rust project. 358 unit tests + 44 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, and source/feed management are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 361 unit tests + 46 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management, and SQLite retention are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
@@ -49,7 +49,10 @@ cargo run -- sources --config examples/sources.example.yaml --run-fixtures
 # 6. Terminal UI browser (read-only)
 cargo run -- tui --sqlite-path runs/tianji.sqlite3
 
-# 7. Optional daemon + local HTTP API on loopback
+# 7. Prune old persisted runs while keeping the latest N
+cargo run -- maintenance retain --sqlite-path runs/tianji.sqlite3 --keep-last-runs 20
+
+# 8. Optional daemon + local HTTP API on loopback
 cargo run -- daemon start --sqlite-path runs/tianji.sqlite3 --socket-path runs/tianji.sock --host 127.0.0.1 --port 8765
 ```
 
@@ -191,6 +194,7 @@ tianji watch            Poll feeds with fast/slow scheduling helpers
 tianji doctor           Validate local config readiness without printing secrets
 tianji eval             Run deterministic fixture evaluation and drift checks
 tianji sources          Inspect source registry manifests and run enabled fixtures
+tianji maintenance      Operator maintenance commands for local storage
 tianji completions      Generate shell completion scripts (bash/zsh/fish)
 ```
 
@@ -286,6 +290,32 @@ Output includes:
 Example:
 ```bash
 tianji delta --sqlite-path runs/tianji.sqlite3 --latest-pair
+```
+
+### `tianji maintenance retain`
+
+Apply the local SQLite retention policy. The command keeps the most recent N
+runs by descending run id, deletes older run rows inside one transaction, relies
+on existing `ON DELETE CASCADE` cleanup for run-scoped tables, and removes
+canonical `source_items` no longer referenced by raw or normalized events.
+
+```
+tianji maintenance retain --sqlite-path <PATH> --keep-last-runs <N>
+```
+
+`--keep-last-runs 0` is allowed and deletes all persisted runs before removing
+orphan source items. Output is JSON:
+
+```json
+{
+  "schema_version": "tianji.retention-report.v1",
+  "sqlite_path": "runs/tianji.sqlite3",
+  "keep_last_runs": 2,
+  "runs_before": 3,
+  "runs_after": 2,
+  "deleted_runs": 1,
+  "deleted_source_items": 0
+}
 ```
 
 ### `tianji daemon`

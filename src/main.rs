@@ -10,9 +10,9 @@ use clap_complete::{generate, Shell};
 use rusqlite::Connection;
 use serde::Serialize;
 use tianji::{
-    artifact_json, classify_delta_tier, clear_baseline, compare_runs, compute_delta,
-    get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id, get_run_summary,
-    list_runs, load_baseline, run_feed_text, run_fixture_path, save_baseline,
+    apply_retention_policy, artifact_json, classify_delta_tier, clear_baseline, compare_runs,
+    compute_delta, get_latest_run_id, get_latest_run_pair, get_next_run_id, get_previous_run_id,
+    get_run_summary, list_runs, load_baseline, run_feed_text, run_fixture_path, save_baseline,
     source_registry::{build_sources_report, load_source_manifest},
     storage::{EventGroupFilters, RunListFilters, ScoredEventFilters},
     worldline::{
@@ -355,6 +355,11 @@ enum Cli {
         #[arg(long = "fetch-live")]
         fetch_live: bool,
     },
+    /// Operator maintenance commands for local storage
+    Maintenance {
+        #[command(subcommand)]
+        command: MaintenanceCommands,
+    },
     /// Generate shell completion scripts
     Completions {
         /// Shell to generate completions for
@@ -439,6 +444,19 @@ enum DaemonCommands {
         /// Loopback HTTP API port
         #[arg(long = "port", default_value_t = 8765)]
         port: u16,
+    },
+}
+
+#[derive(Subcommand)]
+enum MaintenanceCommands {
+    /// Apply SQLite run-history retention policy
+    Retain {
+        /// SQLite database path containing persisted TianJi runs
+        #[arg(long = "sqlite-path")]
+        sqlite_path: String,
+        /// Number of most recent runs to preserve by run id descending
+        #[arg(long = "keep-last-runs")]
+        keep_last_runs: usize,
     },
 }
 
@@ -1250,6 +1268,74 @@ mod tests {
             Cli::Sources { fetch_live, .. } => assert!(fetch_live),
             _ => panic!("expected Sources variant"),
         }
+    }
+
+    #[test]
+    fn cli_parse_maintenance_retain() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "maintenance",
+            "retain",
+            "--sqlite-path",
+            "runs/tianji.sqlite3",
+            "--keep-last-runs",
+            "2",
+        ])
+        .expect("parse maintenance retain");
+
+        match cli {
+            Cli::Maintenance {
+                command:
+                    MaintenanceCommands::Retain {
+                        sqlite_path,
+                        keep_last_runs,
+                    },
+            } => {
+                assert_eq!(sqlite_path, "runs/tianji.sqlite3");
+                assert_eq!(keep_last_runs, 2);
+            }
+            _ => panic!("expected Maintenance::Retain variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn maintenance_retain_outputs_report_and_prunes_history() {
+        let db_path = temp_sqlite_path("maintenance_retain");
+        for _ in 0..3 {
+            run(Cli::Run {
+                fixture: SAMPLE_FIXTURE.to_string(),
+                sqlite_path: Some(db_path.clone()),
+                show_delta: false,
+            })
+            .await
+            .expect("seed run");
+        }
+
+        let output = run(Cli::Maintenance {
+            command: MaintenanceCommands::Retain {
+                sqlite_path: db_path.clone(),
+                keep_last_runs: 2,
+            },
+        })
+        .await
+        .expect("maintenance retain output");
+        let value: Value = serde_json::from_str(&output).expect("retention json");
+
+        assert_eq!(value["schema_version"], "tianji.retention-report.v1");
+        assert_eq!(value["sqlite_path"], db_path);
+        assert_eq!(value["keep_last_runs"], 2);
+        assert_eq!(value["runs_before"], 3);
+        assert_eq!(value["runs_after"], 2);
+        assert_eq!(value["deleted_runs"], 1);
+
+        let runs = list_runs(&db_path, 10, &RunListFilters::default()).expect("list runs");
+        let run_ids: Vec<i64> = runs
+            .iter()
+            .map(|run| run["run_id"].as_i64().expect("run id"))
+            .collect();
+        assert_eq!(run_ids, vec![3, 2]);
+
+        cleanup_sqlite_path(&db_path);
     }
 
     #[test]
@@ -3397,6 +3483,15 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             let report = build_sources_report(&config, manifest, run_fixtures, fetch_live)?;
             Ok(serde_json::to_string_pretty(&report)?)
         }
+        Cli::Maintenance { command } => match command {
+            MaintenanceCommands::Retain {
+                sqlite_path,
+                keep_last_runs,
+            } => {
+                let report = apply_retention_policy(&sqlite_path, keep_last_runs)?;
+                Ok(serde_json::to_string_pretty(&report)?)
+            }
+        },
         Cli::Completions { shell } => {
             let shell = match shell {
                 ShellName::Bash => Shell::Bash,

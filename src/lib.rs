@@ -41,12 +41,13 @@ use normalize::normalize_items;
 use scoring::{score_events, summarize_scenario};
 use serde_json::Value as JsonValue;
 pub use storage::{
-    clear_baseline, compare_runs, compare_runs_with_conn, get_latest_run_id,
-    get_latest_run_id_with_conn, get_latest_run_pair, get_next_run_id, get_previous_run_id,
-    get_run_summary, get_run_summary_with_conn, list_runs, list_runs_with_conn, load_baseline,
-    load_latest_worldlines, load_worldline, next_worldline_id, persist_run, save_baseline,
-    save_worldline, EventGroupFilters, RunListFilters, ScoredEventFilters, SqlitePool,
-    DEFAULT_SQLITE_POOL_SIZE, MAX_RUN_SUMMARY_EVENT_LIMIT, MAX_RUN_SUMMARY_GROUP_LIMIT,
+    apply_retention_policy, clear_baseline, compare_runs, compare_runs_with_conn,
+    get_latest_run_id, get_latest_run_id_with_conn, get_latest_run_pair, get_next_run_id,
+    get_previous_run_id, get_run_summary, get_run_summary_with_conn, list_runs,
+    list_runs_with_conn, load_baseline, load_latest_worldlines, load_worldline, next_worldline_id,
+    persist_run, save_baseline, save_worldline, EventGroupFilters, RetentionReport, RunListFilters,
+    ScoredEventFilters, SqlitePool, DEFAULT_SQLITE_POOL_SIZE, MAX_RUN_SUMMARY_EVENT_LIMIT,
+    MAX_RUN_SUMMARY_GROUP_LIMIT, RETENTION_REPORT_SCHEMA_VERSION,
 };
 
 pub const RUN_ARTIFACT_SCHEMA_VERSION: &str = "tianji.run-artifact.v1";

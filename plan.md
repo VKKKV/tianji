@@ -2,8 +2,8 @@
 
 > Branch: `main` | Updated: 2026-05-20
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, and Phase I source/feed management complete.
-> Tests: 402 total pass / 0 fail
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, and Phase J1 SQLite retention complete.
+> Tests: 407 total pass / 0 fail
 
 ---
 
@@ -39,10 +39,11 @@ TUI ████████████████████ ✅ 4 views + s
 Phase F ████████████████████ ✅ Product polish + operator readiness
 Phase H ████████████████████ ✅ Evaluation harness
 Phase I ████████████████████ ✅ Source/feed management
+Phase J1████████████████████ ✅ SQLite retention policy
 ```
 
-  源码: 26,903 行 Rust / 58 源文件
-  测试: 358 unit + 44 integration = 402 total pass / 0 fail
+  源码: 27,223 行 Rust / 58 源文件
+  测试: 361 unit + 46 integration = 407 total pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
@@ -157,6 +158,7 @@ evaluation, source management, and operational reliability.
 - Phase D: D1-D8 production features complete.
 - Phase E: agent command channel, structured simulation auditability, timeline replay.
 - Phase F: operator readiness, API contracts, release checklist, release gate.
+- Phase J1: deterministic SQLite run-history retention.
 
 ### Phase D — Completed Production & Features
 
@@ -325,7 +327,16 @@ Later source-management candidates:
 - Live source polling metadata persistence, source health history, and operator scheduling integration.
 
 **Phase J — Operational reliability**
-- SQLite backup/export, retention policy, daemon health/readiness, operator maintenance commands.
+
+**J1. SQLite retention policy** ✅
+- Added `tianji maintenance retain --sqlite-path <PATH> --keep-last-runs <N>`.
+- Storage retention keeps the latest N runs by run id descending, deletes older
+  runs in one transaction, relies on foreign-key cascades for run-scoped rows,
+  and removes orphan canonical source items.
+- Emits `tianji.retention-report.v1` JSON for operator automation.
+
+Later operational reliability candidates:
+- SQLite backup/export, daemon health/readiness, additional operator maintenance commands.
 
 **Phase K — Simulation replay/export**
 - JSONL trace export, replay bundle packaging, structured agent audit viewer improvements.
@@ -372,7 +383,7 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 358 unit + 44 integration = 402 total)
+- `cargo test` all green (currently 361 unit + 46 integration = 407 total)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional

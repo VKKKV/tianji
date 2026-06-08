@@ -13,6 +13,8 @@ use crate::worldline::baseline::Baseline;
 use crate::worldline::types::Worldline;
 use crate::TianJiError;
 
+pub const RETENTION_REPORT_SCHEMA_VERSION: &str = "tianji.retention-report.v1";
+
 pub const DEFAULT_RUN_SUMMARY_EVENT_LIMIT: usize = 200;
 pub const MAX_RUN_SUMMARY_EVENT_LIMIT: usize = 500;
 pub const DEFAULT_RUN_SUMMARY_GROUP_LIMIT: usize = 200;
@@ -144,6 +146,77 @@ pub fn persist_run(
     tx.commit()?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Retention policy
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct RetentionReport {
+    pub schema_version: String,
+    pub sqlite_path: String,
+    pub keep_last_runs: usize,
+    pub runs_before: usize,
+    pub runs_after: usize,
+    pub deleted_runs: usize,
+    pub deleted_source_items: usize,
+}
+
+pub fn apply_retention_policy(
+    sqlite_path: &str,
+    keep_last_runs: usize,
+) -> Result<RetentionReport, TianJiError> {
+    let mut connection = open_initialized_connection(Path::new(sqlite_path))?;
+    let tx = connection.transaction()?;
+
+    let runs_before = count_rows(&tx, "runs")?;
+    let deleted_runs = if keep_last_runs >= runs_before {
+        0
+    } else {
+        tx.execute(
+            "DELETE FROM runs WHERE id NOT IN (SELECT id FROM runs ORDER BY id DESC LIMIT ?1)",
+            params![keep_last_runs as i64],
+        )?
+    };
+    let deleted_source_items = tx.execute(
+        "DELETE FROM source_items
+         WHERE NOT EXISTS (
+             SELECT 1 FROM raw_items WHERE raw_items.canonical_source_item_id = source_items.id
+         )
+         AND NOT EXISTS (
+             SELECT 1 FROM normalized_events WHERE normalized_events.canonical_source_item_id = source_items.id
+         )",
+        [],
+    )?;
+    let runs_after = count_rows(&tx, "runs")?;
+    tx.commit()?;
+
+    Ok(RetentionReport {
+        schema_version: RETENTION_REPORT_SCHEMA_VERSION.to_string(),
+        sqlite_path: sqlite_path.to_string(),
+        keep_last_runs,
+        runs_before,
+        runs_after,
+        deleted_runs,
+        deleted_source_items,
+    })
+}
+
+fn count_rows(connection: &Connection, table_name: &str) -> Result<usize, TianJiError> {
+    let query = match table_name {
+        "runs" => "SELECT COUNT(*) FROM runs",
+        "source_items" => "SELECT COUNT(*) FROM source_items",
+        _ => {
+            return Err(TianJiError::DataIntegrity(format!(
+                "unsupported retention row-count table: {table_name}"
+            )))
+        }
+    };
+    let count: i64 = connection.query_row(query, [], |row| row.get(0))?;
+    usize::try_from(count).map_err(|_| {
+        TianJiError::DataIntegrity(format!("negative row count returned for {table_name}"))
+    })
 }
 
 fn insert_run(connection: &Connection, artifact: &RunArtifact) -> Result<i64, TianJiError> {
@@ -1841,6 +1914,24 @@ mod storage_integrity_tests {
         let _ = std::fs::remove_file(format!("{path}-shm"));
     }
 
+    fn table_count(connection: &Connection, table_name: &str) -> usize {
+        connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table_name}"), [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("table count") as usize
+    }
+
+    fn run_ids_desc(connection: &Connection) -> Vec<i64> {
+        let mut stmt = connection
+            .prepare("SELECT id FROM runs ORDER BY id DESC")
+            .expect("prepare run ids");
+        stmt.query_map([], |row| row.get::<_, i64>(0))
+            .expect("query run ids")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect run ids")
+    }
+
     fn raw_item_with_hashes(identity_hash: &str, content_hash: &str) -> RawItem {
         RawItem {
             source: "fixture:test.xml".to_string(),
@@ -1954,6 +2045,81 @@ mod storage_integrity_tests {
         drop(first);
         assert_eq!(rx.recv_timeout(Duration::from_secs(1)).expect("marker"), 42);
         handle.join().expect("thread join");
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn retention_keep_latest_runs_deletes_older_runs_and_cascades_children() {
+        let db_path = temp_sqlite_path("retention_keep_latest");
+        for _ in 0..3 {
+            crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+                .expect("persist fixture run");
+        }
+
+        let report = apply_retention_policy(&db_path, 2).expect("apply retention");
+
+        assert_eq!(report.schema_version, RETENTION_REPORT_SCHEMA_VERSION);
+        assert_eq!(report.sqlite_path, db_path);
+        assert_eq!(report.keep_last_runs, 2);
+        assert_eq!(report.runs_before, 3);
+        assert_eq!(report.runs_after, 2);
+        assert_eq!(report.deleted_runs, 1);
+
+        let connection = Connection::open(&db_path).expect("open db");
+        assert_eq!(run_ids_desc(&connection), vec![3, 2]);
+        assert_eq!(table_count(&connection, "raw_items"), 6);
+        assert_eq!(table_count(&connection, "normalized_events"), 6);
+        assert_eq!(table_count(&connection, "scored_events"), 6);
+        assert_eq!(table_count(&connection, "intervention_candidates"), 6);
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn retention_zero_keeps_no_runs_and_removes_orphan_source_items() {
+        let db_path = temp_sqlite_path("retention_zero");
+        for _ in 0..2 {
+            crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+                .expect("persist fixture run");
+        }
+
+        let report = apply_retention_policy(&db_path, 0).expect("apply retention");
+
+        assert_eq!(report.runs_before, 2);
+        assert_eq!(report.runs_after, 0);
+        assert_eq!(report.deleted_runs, 2);
+        assert_eq!(report.deleted_source_items, 3);
+
+        let connection = Connection::open(&db_path).expect("open db");
+        assert_eq!(table_count(&connection, "runs"), 0);
+        assert_eq!(table_count(&connection, "raw_items"), 0);
+        assert_eq!(table_count(&connection, "normalized_events"), 0);
+        assert_eq!(table_count(&connection, "scored_events"), 0);
+        assert_eq!(table_count(&connection, "intervention_candidates"), 0);
+        assert_eq!(table_count(&connection, "source_items"), 0);
+
+        cleanup_db(&db_path);
+    }
+
+    #[test]
+    fn retention_keep_more_than_current_runs_is_noop_with_counts() {
+        let db_path = temp_sqlite_path("retention_noop");
+        for _ in 0..2 {
+            crate::run_fixture_path("tests/fixtures/sample_feed.xml", Some(&db_path))
+                .expect("persist fixture run");
+        }
+
+        let report = apply_retention_policy(&db_path, 10).expect("apply retention");
+
+        assert_eq!(report.runs_before, 2);
+        assert_eq!(report.runs_after, 2);
+        assert_eq!(report.deleted_runs, 0);
+        assert_eq!(report.deleted_source_items, 0);
+
+        let connection = Connection::open(&db_path).expect("open db");
+        assert_eq!(run_ids_desc(&connection), vec![2, 1]);
+        assert_eq!(table_count(&connection, "source_items"), 3);
 
         cleanup_db(&db_path);
     }
