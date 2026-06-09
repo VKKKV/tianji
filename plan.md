@@ -47,7 +47,7 @@ Phase K3████████████████████ ✅ TUI tra
 Phase K4████████████████████ ✅ Structured agent audit viewer
 ```
 
-  源码: 30,412 行 Rust / 59 源文件
+  源码: 30,399 行 Rust / 59 源文件
   测试: 445 cargo tests across 3 suites pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
