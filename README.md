@@ -2,35 +2,40 @@
 
 TianJi is a geopolitical intelligence engine — ingest signals, compute divergence, generate intervention candidates, and track changes across runs. Deterministic by default. Daemon-ready. Single binary.
 
-## Current State (2026-05-20)
+## Current State (2026-06-09)
 
-Pure Rust project. 378 unit tests + 57 integration tests, zero failures. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, JSONL simulation trace export, daemon API, alert dispatch, TUI replay, eval harness drift checks, source/feed management with SQLite source health history, SQLite retention, daemon health/readiness probes, and local maintenance check/backup/export/compact are implemented. Phase F release readiness passed with a 15,338,616-byte / 14.63 MiB release binary under the 25 MB target.
+Pure Rust project. 445 cargo tests across 3 suites pass / 0 fail. Single binary, no Python dependencies. Deterministic core pipeline remains local-first; optional LLM-backed Hongmeng/Nuwa simulation, JSONL simulation trace export, replay bundle packaging, trace-backed TUI replay loading, structured agent audit viewer, daemon API, alert dispatch, eval harness drift checks, source/feed management with SQLite source health history, SQLite retention, daemon health/readiness probes, and local maintenance check/backup/export/compact are implemented. Latest local release-readiness build measured 16,245,408 bytes / 15.49 MiB under the 25 MB target.
 
 | Milestone | Status |
 |-----------|--------|
 | M1A Feed + Normalization (RSS/Atom, SHA-256 hash, keywords/actors/regions) | ✅ |
 | M1B Scoring + Grouping + Backtrack (Im/Fa, divergence, intervention candidates) | ✅ |
-| M2 Storage + History CLI (SQLite 6 tables, history/history-show/history-compare) | ✅ |
+| M2 Storage + History CLI (SQLite persistence, history/history-show/history-compare) | ✅ |
 | M3A Daemon + Local API (UNIX socket, axum HTTP API, job queue) | ✅ |
 | M3B Web UI (embedded static files, API proxy, /queue-run) | ✅ |
 | M3C Daemon schedule (bounded repeated run queue) | ✅ |
 | M4 TUI (ratatui history browser MVP, Kanagawa Dark, Vim keybindings) | ✅ |
 | Crucix Delta Engine (cross-run change tracking, AlertTier FLASH/PRIORITY/ROUTINE, alert decay) | ✅ |
+| Hongmeng/Nuwa simulation (provider config, actor profiles, worldline sandbox, predict/backtrack/baseline/watch) | ✅ |
+| Evaluation Harness (fixture corpus, golden snapshots, semantic drift reporter) | ✅ |
+| Source/feed management (local registry, fixture fan-in, live fetch opt-in, SQLite source health) | ✅ |
+| Operational reliability (retention, health/readiness probes, maintenance check/backup/export/compact) | ✅ |
+| Phase K replay/audit (JSONL trace, replay bundle, trace-backed TUI, structured agent audit viewer) | ✅ |
 
 ---
 
 ## Operator Quickstart (local-first)
 
-The first path is credential-free: local fixture in, deterministic JSON out. No LLM, API key, daemon, webhook, or network is required.
+The first path is credential-free: local fixture in, deterministic JSON out. No LLM, API key, daemon, webhook, or network is required. `run` prints the JSON artifact to stdout and uses the local default SQLite path (`runs/tianji.sqlite3`) unless you pass an explicit `--sqlite-path`.
 
 ```bash
-git clone <repo> && cd tianji
+# From the repository root
 cargo build
 
 # 1. Deterministic fixture run — zero config, no network
 cargo run -- run --fixture tests/fixtures/sample_feed.xml
 
-# 2. Persist locally for history, delta, daemon/API, and TUI
+# 2. Use an explicit local DB for repeatable history, delta, daemon/API, and TUI
 mkdir -p runs
 cargo run -- run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
 
@@ -74,7 +79,7 @@ No config files. No API keys. No LLM.
 cargo run -- run --fixture tests/fixtures/sample_feed.xml
 ```
 
-This runs the full pipeline on a local RSS/Atom XML file and prints a JSON artifact to stdout:
+This runs the full pipeline on a local RSS/Atom XML file and prints a JSON artifact to stdout. The CLI default also persists to `runs/tianji.sqlite3`; pass `--sqlite-path <PATH>` when you want a specific local history database for later commands.
 
 ```
 feed.xml → parse → normalize → score → group → backtrack → JSON
@@ -85,7 +90,7 @@ The output is a `RunArtifact` with:
 - `scenario_summary`: dominant field, top actors, top regions, risk level, headline
 - `intervention_candidates`: ranked interventions with type, target, reason, expected effect
 
-Add `--sqlite-path runs/tianji.sqlite3` to persist the run for later history queries, comparisons, and delta tracking.
+Use the selected SQLite path for later history queries, comparisons, delta tracking, daemon/API serving, and TUI browsing.
 
 ### Input format
 
@@ -173,7 +178,11 @@ cargo run -- doctor --config examples/config.example.yaml --json
 
 `doctor` reports config file presence/parse status, provider counts and shapes, `api_key_env` presence, inline key presence (without printing the value), provider fallback references, agent model-map references, and optional SQLite path readiness. Missing config is a warning; malformed YAML fails. Raw API keys and credential values are never printed.
 
-Optional Hongmeng/Nuwa simulation uses configured providers when requested:
+### Optional simulation, replay, and audit export
+
+Hongmeng/Nuwa simulation can run with configured providers when requested. Without
+provider config, the local deterministic stub path still works and does not call
+external model endpoints.
 
 ```bash
 # Provider-backed; optional; may use network/model calls depending on config.
@@ -186,17 +195,22 @@ cargo run -- predict --field east-asia.conflict --horizon 30 --trace-jsonl runs/
 cargo run -- predict --field east-asia.conflict --horizon 30 --replay-bundle-dir runs/replay-bundle
 ```
 
-Replay bundles use schema `tianji.replay-bundle.v1`. They contain only simulation
-metadata, frame traces, and the final outcome; raw config, API keys, and provider
-secrets are not written. `predict` stdout remains the final `SimulationOutcome`
-JSON whether or not trace or bundle export flags are set.
+JSONL traces use schema `tianji.sim-trace.v1` records (`metadata`, `frame`,
+`completed`). Replay bundles use schema `tianji.replay-bundle.v1` and contain
+`manifest.json`, `trace.jsonl`, and `outcome.json`. They contain only simulation
+metadata, frame traces, structured audit fields, and the final outcome; raw
+config, API keys, and provider secrets are not written. `predict` stdout remains
+the final `SimulationOutcome` JSON whether or not trace or bundle export flags
+are set.
 
 Replay traces and bundles can be inspected locally in the TUI without running a
-provider or reading config/secrets:
+provider or reading config/secrets. `--render-once` is useful for smoke tests and
+automation because it prints a deterministic plain-text replay frame and exits:
 
 ```bash
 cargo run -- tui --trace-jsonl runs/predict-trace.jsonl
 cargo run -- tui --replay-bundle-dir runs/replay-bundle
+cargo run -- tui --trace-jsonl runs/predict-trace.jsonl --render-once
 ```
 
 ---
@@ -215,6 +229,8 @@ tianji daemon           Daemon lifecycle and job queue
 tianji webui            Serve the optional local web dashboard
 tianji tui              Browse persisted runs and simulation replay in a terminal UI
 tianji predict          Run Hongmeng/Nuwa simulation against configured actor profiles
+tianji backtrack        Search backward intervention paths for a target goal
+tianji baseline         Manage worldline baselines for divergence tracking
 tianji watch            Poll feeds with fast/slow scheduling helpers
 tianji doctor           Validate local config readiness without printing secrets
 tianji eval             Run deterministic fixture evaluation and drift checks
@@ -226,17 +242,21 @@ tianji completions      Generate shell completion scripts (bash/zsh/fish)
 ### `tianji run`
 
 ```
-tianji run --fixture <PATH> [--sqlite-path <PATH>]
+tianji run --fixture <PATH> [--sqlite-path <PATH>] [--show-delta]
 ```
 
 Examples:
 ```bash
-# Stdout only, no persistence
+# Deterministic fixture run; prints RunArtifact JSON and uses the default local SQLite path
 tianji run --fixture tests/fixtures/sample_feed.xml
 
-# Persist to SQLite for later history queries
+# Choose an explicit SQLite path for later history queries
 tianji run --fixture tests/fixtures/sample_feed.xml --sqlite-path runs/tianji.sqlite3
 ```
+
+Use `--show-delta` with `--sqlite-path` when you want stdout wrapped with the
+new run artifact plus delta/alert-tier context against the previous persisted
+run.
 
 ### `tianji history`
 
@@ -250,7 +270,9 @@ tianji history --sqlite-path <PATH>
     [--risk-level low|medium|high|critical]
     [--since <ISO>] [--until <ISO>]
     [--min-top-impact-score <f64>] [--max-top-impact-score <f64>]
+    [--min-top-field-attraction <f64>] [--max-top-field-attraction <f64>]
     [--min-top-divergence-score <f64>] [--max-top-divergence-score <f64>]
+    [--top-group-dominant-field <str>]
     [--min-event-group-count <i64>] [--max-event-group-count <i64>]
 ```
 
@@ -268,8 +290,11 @@ tianji history-show --sqlite-path <PATH>
     [--run-id <i64> | --latest | --previous | --next]
     [--dominant-field <str>]
     [--min-impact-score <f64>] [--max-impact-score <f64>]
+    [--min-field-attraction <f64>] [--max-field-attraction <f64>]
+    [--min-divergence-score <f64>] [--max-divergence-score <f64>]
     [--limit-scored-events <usize>]
     [--only-matching-interventions]
+    [--group-dominant-field <str>]
     [--limit-event-groups <usize>]
 ```
 
@@ -390,6 +415,7 @@ tianji daemon start    [--socket-path <PATH>] [--sqlite-path <PATH>] [--host 127
 tianji daemon stop     [--socket-path <PATH>]
 tianji daemon status   [--socket-path <PATH>] [--job-id <ID>]
 tianji daemon run      [--socket-path <PATH>] --fixture <PATH> [--sqlite-path <PATH>]
+tianji daemon schedule [--socket-path <PATH>] --fixture <PATH> [--sqlite-path <PATH>] --every-seconds <N> --count <N>
 ```
 
 Examples:
@@ -533,6 +559,23 @@ tianji tui [--sqlite-path <PATH>] --replay-bundle-dir <DIR> [--render-once]
 Keybindings: `j/k` or arrow keys navigate history, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` opens detail or compare depending on staged state, `c` stages a compare-left run, `Esc`/`h` returns from detail/compare, and `q` quits. In simulation replay, `Left`/`h` scrubs to the previous frame and `Right`/`l` scrubs to the next frame. Trace-backed replay updates the displayed selected frame data, including tick/frame metadata, field values, field changes, event sequence length, and compact structured agent audit fields (action, target, confidence, category, assessment, drivers, rationale).
 
 Simulation replay is still local/read-only from the terminal perspective. Replay bundle loading reads only `manifest.json`, `trace.jsonl`, and `outcome.json` from the bundle directory. Provider-backed simulation remains optional and follows the config rules above.
+
+### `tianji predict / backtrack / baseline / watch`
+
+Simulation and worldline helpers remain optional and separate from the
+credential-free `run` path.
+
+```
+tianji predict   --field <region.domain> [--horizon 30] [--profile-dir profiles/] [--config <PATH>] [--trace-jsonl <PATH>] [--replay-bundle-dir <DIR>]
+tianji backtrack --goal <TEXT> --field-constraint <region.domain:min:max> [--field-constraint <region.domain:min:max>] [--max-interventions 5] [--profile-dir profiles/] [--config <PATH>]
+tianji baseline  --sqlite-path <PATH> (--set | --show | --clear)
+tianji watch     --source-url <RSS_OR_ATOM_URL> [--interval 300] [--sqlite-path <PATH>] [--config <PATH>]
+```
+
+Use `predict` without `--config` for deterministic local simulation smoke tests;
+pass `--config` only when intentionally using provider-backed agents. `watch`
+performs live feed polling and therefore is not part of the first-run or CI
+fixture path.
 
 ### Alert dispatch dry-run/redaction
 
@@ -696,6 +739,9 @@ tianji completions zsh > ~/.zfunc/_tianji
 tianji completions fish > ~/.config/fish/completions/tianji.fish
 ```
 
+For release/readiness checks, generate completions to `/tmp` and inspect them;
+do not install into your interactive shell unless you intend to.
+
 ---
 
 ## Daemon + Web UI Quick Setup
@@ -768,7 +814,7 @@ RunArtifact JSON (stdout) + optional SQLite persistence + optional DeltaReport
 tianji/
 ├── Cargo.toml                  # Rust crate manifest
 ├── src/
-│   ├── main.rs                 # CLI entry (9 subcommands)
+│   ├── main.rs                 # CLI entry (17 top-level subcommands)
 │   ├── lib.rs                  # Pipeline library + integration tests
 │   ├── models.rs               # RawItem → NormalizedEvent → ScoredEvent → RunArtifact
 │   ├── fetch.rs                # RSS/Atom parsing + SHA-256 canonical hash
@@ -776,9 +822,9 @@ tianji/
 │   ├── scoring.rs              # Im/Fa scoring + divergence + rationale
 │   ├── grouping.rs             # Event grouping + causal ordering
 │   ├── backtrack.rs            # Intervention candidate generation (HeadlineRole enum)
-│   ├── storage.rs              # SQLite 6 tables + history CRUD
+│   ├── storage.rs              # SQLite persistence + history/source-health/maintenance CRUD
 │   ├── daemon.rs               # UNIX socket + job queue + serve + mark_delta_signals_alerted
-│   ├── api.rs                  # axum 6-route HTTP API + response envelope
+│   ├── api.rs                  # axum /api/v1 HTTP API + response envelope
 │   ├── webui.rs                # Embedded static files + API proxy + /queue-run
 │   ├── tui/                    # ratatui history/simulation browser (Kanagawa Dark, Vim keys)
 │   ├── delta.rs                # Crucix Delta Engine: compute_delta, MetricSnapshot, severity
@@ -794,7 +840,7 @@ tianji/
 
 ## Design Principles
 
-1. **Local First** — zero cloud dependencies. Everything runs from local XML fixtures.
+1. **Local First** — deterministic fixture and SQLite workflows run without cloud dependencies; provider-backed simulation, live feed fetch, and alert dispatch require explicit opt-in.
 2. **Deterministic First** — BTreeMap (not HashMap), LazyLock regex, no wall-clock in pipeline. Same input always produces same output.
 3. **CLI First** — every feature ships as a CLI subcommand before any UI or service layer.
 4. **Single Binary** — `cargo build` produces one binary. Web UI assets are `include_str!` embedded.

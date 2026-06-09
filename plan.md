@@ -1,9 +1,9 @@
 # TianJi (天机) — Development Plan v6
 
-> Branch: `main` | Updated: 2026-05-20
+> Branch: `main` | Updated: 2026-06-09
 > Target: 智库级信号分析引擎 — 确定性管线 + 跨 run 变化追踪 + 多 Agent 仿真
-> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, Phase J operational reliability, and Phase K3/K4 TUI replay/audit viewer complete.
-> Tests: 443 total pass / 0 fail (K3/K4 TUI replay/audit hardening adds targeted coverage)
+> Current: Core Rust product, Phase A/B/C/D/E hardening, Phase F operator readiness, Phase G roadmap/spec authority refresh, release-readiness gate, Phase H evaluation harness, Phase I source/feed management, Phase J operational reliability, and Phase K simulation replay/export with TUI replay/audit viewer complete.
+> Tests: 445 cargo tests across 3 suites pass / 0 fail (replay/audit and CLI guard coverage)
 
 ---
 
@@ -37,6 +37,7 @@ TUI ████████████████████ ✅ 4 views + s
  5.3 ████████████████████ ✅ Human-in-the-loop pruning (TUI ↔ Sim)
 
 Phase F ████████████████████ ✅ Product polish + operator readiness
+Phase G ████████████████████ ✅ Roadmap/spec authority refresh
 Phase H ████████████████████ ✅ Evaluation harness
 Phase I ████████████████████ ✅ Source/feed management
 Phase J ████████████████████ ✅ Operational reliability
@@ -47,11 +48,11 @@ Phase K4████████████████████ ✅ Structu
 ```
 
   源码: 30,412 行 Rust / 59 源文件
-  测试: 386 unit + 57 integration = 443 total pass / 0 fail
+  测试: 445 cargo tests across 3 suites pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
   Python: 已退役
-  Release binary: 15,338,616 bytes / 14.63 MiB (< 25MB)
+  Release binary: 16,245,408 bytes / 15.49 MiB (< 25MB)
 
 ### Phase A — Immediate Cleanup (COMPLETE)
 
@@ -147,9 +148,10 @@ RunArtifact JSON ─────────────────────
 
 ## 3. Development Roadmap (v6)
 
-The core Rust engine and Phase F release-readiness checkpoint are complete.
-Development now moves from product completion to quality governance: reproducible
-evaluation, source management, and operational reliability.
+The core Rust engine, Phase F release-readiness checkpoint, and Phase K
+replay/audit work are complete. Development now moves from product completion to
+post-K release polish and quality governance: reproducible evaluation, source
+management, operational reliability, and local-first operator documentation.
 
 ### Completed hardening
 
@@ -162,7 +164,12 @@ evaluation, source management, and operational reliability.
 - Phase D: D1-D8 production features complete.
 - Phase E: agent command channel, structured simulation auditability, timeline replay.
 - Phase F: operator readiness, API contracts, release checklist, release gate.
+- Phase G: roadmap and spec authority refresh after Phase F.
+- Phase H: deterministic fixture evaluation, golden snapshots, drift reporting.
+- Phase I: source registry, local fixture fan-in, live fetch opt-in, source health.
 - Phase J: SQLite retention policy and daemon health/readiness probes.
+- Phase K: simulation JSONL trace export, replay bundle packaging, TUI replay
+  loading, and structured agent audit viewer.
 
 ### Phase D — Completed Production & Features
 
@@ -226,7 +233,7 @@ Files: `src/tui/*`, `src/storage.rs`, `src/worldline/*`
 ## 3.5 Cross-Project Borrowings (ShadowBroker v0.9.7 → TianJi)
 
 > Full analysis: `.trellis/reviews/shadowbroker-cross-project-analysis.md`
-> Repo: `/home/kita/code/Shadowbroker`
+> Repo: external ShadowBroker checkout used for historical cross-project analysis
 
 Borrowing adoption status after Phase D/E:
 
@@ -270,9 +277,10 @@ Borrowing adoption status after Phase D/E:
 - Kept examples local-first and credential-free.
 
 **F4. Release readiness check** ✅
-- Verified `cargo build --release`; release binary `target/release/tianji` is 15,338,616 bytes (14.63 MiB), under the 25 MB target.
+- Verified `cargo build --release` under the 25 MB target.
 - Verified shell completions for bash/zsh/fish and a fixture-based smoke run.
-- Added `RELEASE_CHECKLIST.md` with exact commands, results, and local-first/no-secrets release notes.
+- Added `RELEASE_CHECKLIST.md`; the current checklist tracks exact binary size,
+  replay/audit smoke output, regression gates, and local-first/no-secrets notes.
 
 ### Phase G — Roadmap & Spec Authority Refresh (COMPLETE)
 
@@ -306,7 +314,7 @@ Purpose: make TianJi's analysis quality measurable before deeper scoring, simula
 - Added `scripts/check-eval.sh` as a local credential-free eval gate.
 - Eval remains independent of live network, LLM providers, daemon/API, and external services.
 
-### Later candidate phases
+### Completed follow-on phases
 
 ### Phase I — Source/feed management (COMPLETE)
 
@@ -337,7 +345,7 @@ adding live polling metadata or persistence.
 - Operator scheduling is external: cron/systemd/Kubernetes invokes `sources
   --fetch-live --sqlite-path`, while TianJi records health history only.
 
-**Phase J — Operational reliability**
+### Phase J — Operational reliability (COMPLETE)
 
 **J1. SQLite retention policy** ✅
 - Added `tianji maintenance retain --sqlite-path <PATH> --keep-last-runs <N>`.
@@ -363,7 +371,7 @@ adding live polling metadata or persistence.
 - Added `tianji maintenance compact` for WAL checkpoint truncate and optional
   `VACUUM`.
 
-**Phase K — Simulation replay/export**
+### Phase K — Simulation replay/export (COMPLETE)
 - JSONL trace export, replay bundle packaging, structured agent audit viewer improvements.
 
 **K1. Simulation JSONL trace export** ✅
@@ -384,6 +392,17 @@ adding live polling metadata or persistence.
 **K4. Structured agent audit viewer** ✅
 - TUI simulation replay renders compact structured agent audit fields from trace frames: actor id, action type, target, confidence, category, assessment, drivers, and rationale.
 - Added `--render-once` for deterministic plain-text replay smoke checks without launching an interactive terminal.
+
+### Next development direction
+
+Post-K work should stay local-first and documentation-led until a new PRD scopes
+runtime behavior changes. Candidate directions are:
+
+- Refresh release packaging/readiness docs after replay/audit work.
+- Expand the credential-free evaluation corpus and replay smoke checks.
+- Improve operator-facing replay/audit ergonomics without changing API schemas.
+- Keep provider-backed simulation, live feed fetch, daemon write paths, and alert
+  dispatch explicitly optional.
 
 ---
 
@@ -427,8 +446,8 @@ lto = true
 
 Each phase must pass:
 - `cargo build` / `cargo build --release` zero error
-- `cargo test` all green (currently 386 unit + 57 integration = 443 total)
+- `cargo test` all green (currently 445 tests across 3 cargo suites)
 - `cargo clippy -- -D warnings` zero warning
 - `tianji run --fixture ...` output field-level consistent with contracts
 - `tianji delta --latest-pair` cross-run change tracking functional
-- Single binary < 25MB release (current: 15,338,616 bytes / 14.63 MiB)
+- Single binary < 25MB release (current: 16,245,408 bytes / 15.49 MiB)

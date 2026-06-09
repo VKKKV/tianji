@@ -8,7 +8,8 @@ Rust surfaces, current dependency list, verification criteria, and next-phase
 roadmap.
 
 **Python oracle retired in Phase 6 (v0.2.0).** All Rust parity gates have passed.
-The project is now a pure Rust binary. Current verified snapshot after Phase F:
+The project is now a pure Rust binary. Historical verified snapshot after Phase F
+(root `plan.md` is authoritative for current status):
 56 Rust source files, 25,398 Rust source lines, 24 manifest dependencies, and
 341 unit + 39 integration tests passing.
 
@@ -32,7 +33,10 @@ The project is now a pure Rust binary. Current verified snapshot after Phase F:
 | E | Agent integration + simulation auditability | Complete |
 | F | Product polish + operator readiness | Complete |
 | G | Roadmap + spec authority refresh | Complete |
-| H | Evaluation harness | Next |
+| H | Evaluation harness | Complete |
+| I | Source/feed management | Complete |
+| J | Operational reliability | Complete |
+| K | Simulation replay/export | Complete |
 
 ### Milestone 1A — Feed + Normalization Parity
 
@@ -144,7 +148,9 @@ TUI simulation surfaces are implemented.
 
 ## Post-v0.2.0 Hardening Progress
 
-Root `plan.md` remains the authority for the current roadmap. As of 2026-05-20:
+Historical post-v0.2.0 hardening notes through Phase F are retained below for
+context. Root `plan.md` remains the authority for the current roadmap. As of
+2026-05-20:
 
 ### Phase A — Immediate Cleanup
 
@@ -198,7 +204,7 @@ snapshot replay are implemented and contract-tested.
 fixtures, README operator quickstart, shell completions verification, fixture
 smoke run, release build, and release checklist are complete.
 
-### Current Verification Baseline
+### Historical Phase F Verification Baseline
 
 - `cargo build --release`: pass ✅
 - `cargo test --quiet`: 341 unit + 39 integration passed / 0 failed ✅
