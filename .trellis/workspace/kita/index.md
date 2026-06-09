@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-0.md`
-- **Total Sessions**: 19
-- **Last Active**: 2026-05-18
+- **Total Sessions**: 20
+- **Last Active**: 2026-06-09
 <!-- @@@/auto:current-status -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-06-09 | Refine project docs | `eb332e2`, `4ec06a3` | `main` |
 | 19 | 2026-05-18 | Phase D1 storage history coverage | `604fe89`, `bdacfad` | `main` |
 | 18 | 2026-05-18 | Phase C4 fork worldline unification | `504b4af`, `836df75`, `b1c307d` | `main` |
 | 17 | 2026-05-18 | Phase C2 TUI view-state dispatch preservation | `45db1e8` | `main` |
