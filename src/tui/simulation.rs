@@ -40,6 +40,24 @@ fn format_simulation_with_replay(
     output.push_str(&format!("status: {}\n", sim.status));
     if let Some(frame) = selected_frame {
         output.push_str(&format!(
+            "replay summary: selected frame {} of {} · field changes {} · event sequence length {} · agent audit actions {}\n",
+            frame_number,
+            frame_count,
+            frame.field_changes.len(),
+            frame.event_sequence_len,
+            frame.audit_actions.len()
+        ));
+        output.push_str("replay controls: Left/h previous frame · Right/l next frame · q quit\n");
+        output.push_str(&format!(
+            "audit coverage: {} action(s), {} driver signal(s) in selected frame\n",
+            frame.audit_actions.len(),
+            frame
+                .audit_actions
+                .iter()
+                .map(|action| action.drivers.len())
+                .sum::<usize>()
+        ));
+        output.push_str(&format!(
             "frame metadata: tick {} · event sequence length {}\n",
             frame.tick, frame.event_sequence_len
         ));
@@ -234,6 +252,42 @@ pub fn render_simulation(
         Span::styled(sim.status.clone(), Style::default().fg(KANAGAWA.fg)),
     ]));
     if let Some(frame) = selected_frame {
+        lines.push(Line::from(vec![
+            Span::styled("  replay summary: ", Style::default().fg(KANAGAWA.label)),
+            Span::styled(
+                format!(
+                    "selected frame {} of {} · field changes {} · event sequence length {} · agent audit actions {}",
+                    frame_number,
+                    frame_count,
+                    frame.field_changes.len(),
+                    frame.event_sequence_len,
+                    frame.audit_actions.len()
+                ),
+                Style::default().fg(KANAGAWA.fg),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  replay controls: ", Style::default().fg(KANAGAWA.label)),
+            Span::styled(
+                "Left/h previous frame · Right/l next frame · q quit",
+                Style::default().fg(KANAGAWA.fg),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  audit coverage: ", Style::default().fg(KANAGAWA.label)),
+            Span::styled(
+                format!(
+                    "{} action(s), {} driver signal(s) in selected frame",
+                    frame.audit_actions.len(),
+                    frame
+                        .audit_actions
+                        .iter()
+                        .map(|action| action.drivers.len())
+                        .sum::<usize>()
+                ),
+                Style::default().fg(KANAGAWA.fg),
+            ),
+        ]));
         lines.push(Line::from(vec![
             Span::styled("  frame metadata: ", Style::default().fg(KANAGAWA.label)),
             Span::styled(
@@ -646,6 +700,11 @@ mod tests {
         let latest = format_simulation_view(&view);
         assert!(latest.contains("tick 2/2"));
         assert!(latest.contains("frame 2/2"));
+        assert!(latest.contains(
+            "replay summary: selected frame 2 of 2 · field changes 1 · event sequence length 5 · agent audit actions 1"
+        ));
+        assert!(latest.contains("replay controls: Left/h previous frame"));
+        assert!(latest.contains("audit coverage: 1 action(s), 1 driver signal(s)"));
         assert!(latest.contains("value 4.50  delta +0.75"));
         assert!(latest.contains("event sequence length 5"));
         assert!(latest.contains("actor-c"));
@@ -656,6 +715,11 @@ mod tests {
         let previous = format_simulation_view(&view);
         assert!(previous.contains("tick 1/2"));
         assert!(previous.contains("frame 1/2"));
+        assert!(previous.contains(
+            "replay summary: selected frame 1 of 2 · field changes 1 · event sequence length 4 · agent audit actions 1"
+        ));
+        assert!(previous.contains("replay controls: Left/h previous frame"));
+        assert!(previous.contains("audit coverage: 1 action(s), 2 driver signal(s)"));
         assert!(previous.contains("value 3.75  delta +0.25"));
         assert!(previous.contains("event sequence length 4"));
         assert!(previous.contains("actor-a"));

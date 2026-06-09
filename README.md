@@ -222,8 +222,9 @@ bash scripts/check-replay-smoke.sh
 That gate writes only under `/tmp`, runs `predict --replay-bundle-dir`, renders
 the bundle once through `tui --render-once`, verifies the bundle contains only
 `manifest.json`, `trace.jsonl`, and `outcome.json`, validates trace/bundle JSON
-record kinds and outcome consistency, and checks the TUI text includes replay
-frame and audit signals.
+record kinds and outcome consistency, and checks the TUI text includes a replay
+summary, selected-frame metadata, field changes, event sequence length, and
+agent audit signals.
 
 ---
 
@@ -568,7 +569,7 @@ tianji tui [--sqlite-path <PATH>] --trace-jsonl <PATH> [--render-once]
 tianji tui [--sqlite-path <PATH>] --replay-bundle-dir <DIR> [--render-once]
 ```
 
-Keybindings: `j/k` or arrow keys navigate history, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` opens detail or compare depending on staged state, `c` stages a compare-left run, `Esc`/`h` returns from detail/compare, and `q` quits. In simulation replay, `Left`/`h` scrubs to the previous frame and `Right`/`l` scrubs to the next frame. Trace-backed replay updates the displayed selected frame data, including tick/frame metadata, field values, field changes, event sequence length, and compact structured agent audit fields (action, target, confidence, category, assessment, drivers, rationale).
+Keybindings: `j/k` or arrow keys navigate history, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` opens detail or compare depending on staged state, `c` stages a compare-left run, `Esc`/`h` returns from detail/compare, and `q` quits. In simulation replay, `Left`/`h` scrubs to the previous frame and `Right`/`l` scrubs to the next frame. Trace-backed replay updates the displayed selected frame data, including tick/frame metadata, replay controls, audit coverage counts, field values, field changes, event sequence length, and compact structured agent audit fields (action, target, confidence, category, assessment, drivers, rationale).
 
 Simulation replay is still local/read-only from the terminal perspective. Replay bundle loading reads only `manifest.json`, `trace.jsonl`, and `outcome.json` from the bundle directory. Provider-backed simulation remains optional and follows the config rules above.
 
@@ -653,8 +654,9 @@ cargo run --quiet -- tui --replay-bundle-dir "$TMP_BUNDLE" --render-once
 
 It then validates the bundle file set, manifest schema `tianji.replay-bundle.v1`,
 trace schema `tianji.sim-trace.v1`, metadata/frame/completed record ordering,
-outcome JSON consistency, and TUI replay text signals without network, daemon,
-provider config, or secrets.
+outcome JSON consistency, and TUI replay text signals including the replay
+summary and selected-frame audit counts without network, daemon, provider config,
+or secrets.
 
 To refresh golden snapshots intentionally after an accepted deterministic
 pipeline/scoring change:

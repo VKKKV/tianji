@@ -1369,6 +1369,8 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         assert!(rendered.contains("frame 1/1"));
+        assert!(rendered.contains("replay controls: Left/h previous frame"));
+        assert!(rendered.contains("audit coverage: 1 action(s), 1 driver signal(s)"));
         assert!(rendered.contains("event sequence length 7"));
         assert!(rendered.contains("Agent audit"));
         assert!(rendered.contains("assessment: trace assessment"));

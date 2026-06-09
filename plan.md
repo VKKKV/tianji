@@ -47,7 +47,7 @@ Phase K3████████████████████ ✅ TUI tra
 Phase K4████████████████████ ✅ Structured agent audit viewer
 ```
 
-  源码: 30,399 行 Rust / 59 源文件
+  源码: 30,465 行 Rust / 59 源文件
   测试: 445 cargo tests across 3 suites pass / 0 fail
   构建: cargo build --release + clippy -D warnings zero
   依赖: 24 manifest dependencies
@@ -397,14 +397,13 @@ adding live polling metadata or persistence.
 **K4. Structured agent audit viewer** ✅
 - TUI simulation replay renders compact structured agent audit fields from trace frames: actor id, action type, target, confidence, category, assessment, drivers, and rationale.
 - Added `--render-once` for deterministic plain-text replay smoke checks without launching an interactive terminal.
+- Replay render-once output includes operator-facing replay controls and audit coverage counts for the selected frame.
 
 ### Next development direction
 
 Post-K work should stay local-first and documentation-led until a new PRD scopes
 runtime behavior changes. Candidate directions are:
 
-- Refresh release packaging/readiness docs after replay/audit work.
-- Improve operator-facing replay/audit ergonomics without changing API schemas.
 - Keep provider-backed simulation, live feed fetch, daemon write paths, and alert
   dispatch explicitly optional.
 

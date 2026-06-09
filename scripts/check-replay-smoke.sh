@@ -101,6 +101,8 @@ if [record.get('record_type') for record in trace_records].count('completed') !=
 tui_text = tui_path.read_text()
 required_text = [
     'status: replay loaded',
+    'replay summary: selected frame',
+    'agent audit actions',
     'frame metadata:',
     'Field changes',
     'event sequence length',
