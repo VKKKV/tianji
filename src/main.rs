@@ -269,7 +269,7 @@ enum Cli {
         #[arg(long = "simulate", conflicts_with_all = ["trace_jsonl", "replay_bundle_dir"])]
         simulate: Option<String>,
         /// Enable interactive pruning during simulation
-        #[arg(long)]
+        #[arg(long, requires = "simulate", conflicts_with = "render_once")]
         interactive: bool,
         /// Load a simulation trace JSONL file into the TUI replay view
         #[arg(long = "trace-jsonl", conflicts_with_all = ["simulate", "replay_bundle_dir"])]
@@ -2051,6 +2051,29 @@ agent_model_map:
         ])
         .err()
         .expect("simulate and replay flags conflict");
+        assert!(error.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn cli_parse_tui_rejects_interactive_without_simulate() {
+        let error = Cli::try_parse_from(["tianji", "tui", "--interactive"])
+            .err()
+            .expect("interactive requires simulate");
+        assert!(error.to_string().contains("required arguments"));
+    }
+
+    #[test]
+    fn cli_parse_tui_rejects_interactive_render_once() {
+        let error = Cli::try_parse_from([
+            "tianji",
+            "tui",
+            "--simulate",
+            "global.conflict:2",
+            "--interactive",
+            "--render-once",
+        ])
+        .err()
+        .expect("interactive render-once conflict");
         assert!(error.to_string().contains("cannot be used"));
     }
 

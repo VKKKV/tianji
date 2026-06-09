@@ -157,7 +157,11 @@ fn load_replay_trace(
             "Use either --trace-jsonl or --replay-bundle-dir for TUI replay loading, not both."
                 .to_string(),
         )),
-        (Some(path), None) => crate::nuwa::read_trace_jsonl(path).map(Some),
+        (Some(path), None) => {
+            let trace = crate::nuwa::read_trace_jsonl(path)?;
+            validate_trace_integrity(&trace)?;
+            Ok(Some(trace))
+        }
         (None, Some(dir)) => {
             let dir = Path::new(dir);
             let manifest_path = dir.join(crate::nuwa::REPLAY_BUNDLE_MANIFEST_FILE);
@@ -196,8 +200,9 @@ fn load_replay_trace(
                 )));
             }
             let outcome_file = std::fs::File::open(outcome_path)?;
-            let _outcome: crate::nuwa::SimulationOutcome = serde_json::from_reader(outcome_file)?;
+            let outcome: crate::nuwa::SimulationOutcome = serde_json::from_reader(outcome_file)?;
             let trace = crate::nuwa::read_trace_jsonl(trace_path)?;
+            validate_trace_integrity(&trace)?;
             if manifest.frame_count != trace.frames.len() {
                 return Err(TianJiError::DataIntegrity(format!(
                     "replay bundle frame_count mismatch: manifest {} trace {}",
@@ -205,12 +210,12 @@ fn load_replay_trace(
                     trace.frames.len()
                 )));
             }
-            if trace.metadata.frame_count != trace.frames.len() {
-                return Err(TianJiError::DataIntegrity(format!(
-                    "trace metadata frame_count mismatch: metadata {} trace {}",
-                    trace.metadata.frame_count,
-                    trace.frames.len()
-                )));
+            let outcome_json = serde_json::to_value(&outcome)?;
+            let trace_outcome_json = serde_json::to_value(&trace.completed.outcome)?;
+            if outcome_json != trace_outcome_json {
+                return Err(TianJiError::DataIntegrity(
+                    "replay bundle outcome.json does not match trace completed outcome".to_string(),
+                ));
             }
             if manifest.mode != trace.metadata.mode
                 || manifest.target_field != trace.metadata.target_field
@@ -224,6 +229,24 @@ fn load_replay_trace(
         }
         (None, None) => Ok(None),
     }
+}
+
+fn validate_trace_integrity(trace: &crate::nuwa::SimulationTrace) -> Result<(), TianJiError> {
+    if trace.metadata.schema_version != crate::nuwa::SIM_TRACE_SCHEMA_VERSION {
+        return Err(TianJiError::DataIntegrity(format!(
+            "trace schema_version must be {}, got {}",
+            crate::nuwa::SIM_TRACE_SCHEMA_VERSION,
+            trace.metadata.schema_version
+        )));
+    }
+    if trace.metadata.frame_count != trace.frames.len() {
+        return Err(TianJiError::DataIntegrity(format!(
+            "trace metadata frame_count mismatch: metadata {} trace {}",
+            trace.metadata.frame_count,
+            trace.frames.len()
+        )));
+    }
+    Ok(())
 }
 
 fn render_once_text(state: &TuiState) -> String {
