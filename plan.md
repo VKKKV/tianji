@@ -314,6 +314,11 @@ Purpose: make TianJi's analysis quality measurable before deeper scoring, simula
 - Added `scripts/check-eval.sh` as a local credential-free eval gate.
 - Eval remains independent of live network, LLM providers, daemon/API, and external services.
 
+**H5. Credential-free replay smoke gate** ✅
+- Added `scripts/check-replay-smoke.sh` as a local `/tmp`-only gate for replay bundle export and trace-backed TUI render-once.
+- The gate validates bundle file set, manifest schema, trace metadata/frame/completed records, outcome consistency, and replay/audit text signals.
+- The gate runs without provider config, network, daemon/API, live feeds, secrets, or repository-local transient outputs.
+
 ### Completed follow-on phases
 
 ### Phase I — Source/feed management (COMPLETE)
@@ -399,7 +404,6 @@ Post-K work should stay local-first and documentation-led until a new PRD scopes
 runtime behavior changes. Candidate directions are:
 
 - Refresh release packaging/readiness docs after replay/audit work.
-- Expand the credential-free evaluation corpus and replay smoke checks.
 - Improve operator-facing replay/audit ergonomics without changing API schemas.
 - Keep provider-backed simulation, live feed fetch, daemon write paths, and alert
   dispatch explicitly optional.

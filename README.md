@@ -213,6 +213,18 @@ cargo run -- tui --replay-bundle-dir runs/replay-bundle
 cargo run -- tui --trace-jsonl runs/predict-trace.jsonl --render-once
 ```
 
+Credential-free replay smoke gate:
+
+```bash
+bash scripts/check-replay-smoke.sh
+```
+
+That gate writes only under `/tmp`, runs `predict --replay-bundle-dir`, renders
+the bundle once through `tui --render-once`, verifies the bundle contains only
+`manifest.json`, `trace.jsonl`, and `outcome.json`, validates trace/bundle JSON
+record kinds and outcome consistency, and checks the TUI text includes replay
+frame and audit signals.
+
 ---
 
 ## Full CLI Reference
@@ -622,13 +634,27 @@ Local gate:
 
 ```bash
 bash scripts/check-eval.sh
+bash scripts/check-replay-smoke.sh
 ```
 
-That script runs only:
+The eval script runs only:
 
 ```bash
 cargo run --quiet -- eval --manifest tests/fixtures/eval/corpus.yaml
 ```
+
+The replay smoke script uses a temporary `/tmp/tianji-replay-smoke.*` workdir and
+runs only local deterministic commands:
+
+```bash
+cargo run --quiet -- predict --field global.conflict --horizon 2 --replay-bundle-dir "$TMP_BUNDLE"
+cargo run --quiet -- tui --replay-bundle-dir "$TMP_BUNDLE" --render-once
+```
+
+It then validates the bundle file set, manifest schema `tianji.replay-bundle.v1`,
+trace schema `tianji.sim-trace.v1`, metadata/frame/completed record ordering,
+outcome JSON consistency, and TUI replay text signals without network, daemon,
+provider config, or secrets.
 
 To refresh golden snapshots intentionally after an accepted deterministic
 pipeline/scoring change:
