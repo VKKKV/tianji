@@ -18,8 +18,8 @@ pub use state::{
     compact_stick_value, compact_timestamp, detect_glyph_mode, format_alert_tier, numeric_field,
     optional_f64_field, placeholder_or_value, signed_numeric_field, string_field, CompareState,
     DashboardState, DetailState, FieldStat, GlyphSet, HistoryRow, HistoryViewState, LoadingState,
-    SimAgent, SimField, SimulationState, SimulationViewState, TopEvent, TuiState, TuiView,
-    ViewState, ASCII_GLYPHS, EMPTY_TUI_MESSAGE, NERD_GLYPHS,
+    SimAgent, SimAuditAction, SimField, SimReplayFrame, SimulationState, SimulationViewState,
+    TopEvent, TuiState, TuiView, ViewState, ASCII_GLYPHS, EMPTY_TUI_MESSAGE, NERD_GLYPHS,
 };
 pub use theme::{Theme, KANAGAWA};
 
@@ -43,34 +43,54 @@ use crate::storage::{
 use crate::{delta_memory_path, HotMemory, TianJiError};
 
 pub async fn run_history_browser(
-    sqlite_path: &str,
+    sqlite_path: Option<&str>,
     limit: usize,
     simulate: Option<&str>,
     interactive: bool,
+    trace_jsonl: Option<&str>,
+    replay_bundle_dir: Option<&str>,
+    render_once: bool,
 ) -> Result<String, TianJiError> {
-    if !Path::new(sqlite_path).exists() {
+    let replay_trace = load_replay_trace(trace_jsonl, replay_bundle_dir)?;
+
+    let sqlite_path = match sqlite_path {
+        Some(path) => path.to_string(),
+        None => {
+            if replay_trace.is_some() {
+                "/tmp/tianji-tui-replay-placeholder.sqlite3".to_string()
+            } else {
+                return Ok(EMPTY_TUI_MESSAGE.to_string());
+            }
+        }
+    };
+
+    if replay_trace.is_none() && !Path::new(&sqlite_path).exists() {
         return Ok(EMPTY_TUI_MESSAGE.to_string());
     }
 
-    let values = match list_runs(sqlite_path, limit, &RunListFilters::default()) {
-        Ok(rows) => rows,
-        Err(TianJiError::Storage(error)) if is_missing_runs_table(&error) => Vec::new(),
-        Err(error) => return Err(error),
+    let values = if Path::new(&sqlite_path).exists() {
+        match list_runs(&sqlite_path, limit, &RunListFilters::default()) {
+            Ok(rows) => rows,
+            Err(TianJiError::Storage(error)) if is_missing_runs_table(&error) => Vec::new(),
+            Err(error) => return Err(error),
+        }
+    } else {
+        Vec::new()
     };
     let rows: Vec<HistoryRow> = values.iter().map(HistoryRow::from_json).collect();
-    if rows.is_empty() {
+    if rows.is_empty() && replay_trace.is_none() {
         return Ok(EMPTY_TUI_MESSAGE.to_string());
     }
 
-    let memory = HotMemory::load(&delta_memory_path(sqlite_path));
+    let memory = HotMemory::load(&delta_memory_path(&sqlite_path));
 
     let latest_summary = if !rows.is_empty() {
-        get_latest_run_id(sqlite_path)
+        get_latest_run_id(&sqlite_path)
             .ok()
             .flatten()
             .and_then(|id| {
                 get_run_summary(
-                    sqlite_path,
+                    &sqlite_path,
                     id,
                     &ScoredEventFilters::default(),
                     false,
@@ -84,7 +104,11 @@ pub async fn run_history_browser(
     };
 
     let dashboard = DashboardState::from_run_summary(&rows, &memory, latest_summary);
-    let mut tui_state = TuiState::new_with_storage(rows, dashboard, sqlite_path);
+    let mut tui_state = TuiState::new_with_storage(rows, dashboard, &sqlite_path);
+
+    if let Some(trace) = replay_trace {
+        tui_state.show_simulation(SimulationState::from_trace(&trace));
+    }
 
     // Optionally run a simulation if --simulate was provided
     if let Some(sim_spec) = simulate {
@@ -116,8 +140,105 @@ pub async fn run_history_browser(
         }
     }
 
+    if render_once {
+        return Ok(render_once_text(&tui_state));
+    }
+
     run_terminal(tui_state)?;
     Ok(String::new())
+}
+
+fn load_replay_trace(
+    trace_jsonl: Option<&str>,
+    replay_bundle_dir: Option<&str>,
+) -> Result<Option<crate::nuwa::SimulationTrace>, TianJiError> {
+    match (trace_jsonl, replay_bundle_dir) {
+        (Some(_), Some(_)) => Err(TianJiError::Usage(
+            "Use either --trace-jsonl or --replay-bundle-dir for TUI replay loading, not both."
+                .to_string(),
+        )),
+        (Some(path), None) => crate::nuwa::read_trace_jsonl(path).map(Some),
+        (None, Some(dir)) => {
+            let dir = Path::new(dir);
+            let manifest_path = dir.join(crate::nuwa::REPLAY_BUNDLE_MANIFEST_FILE);
+            let manifest_file = std::fs::File::open(&manifest_path)?;
+            let manifest: crate::nuwa::ReplayBundleManifest =
+                serde_json::from_reader(manifest_file)?;
+            if manifest.schema_version != crate::nuwa::REPLAY_BUNDLE_SCHEMA_VERSION {
+                return Err(TianJiError::DataIntegrity(format!(
+                    "replay bundle schema_version must be {}, got {}",
+                    crate::nuwa::REPLAY_BUNDLE_SCHEMA_VERSION,
+                    manifest.schema_version
+                )));
+            }
+            if manifest.trace_file != crate::nuwa::REPLAY_BUNDLE_TRACE_FILE
+                || manifest.outcome_file != crate::nuwa::REPLAY_BUNDLE_OUTCOME_FILE
+            {
+                return Err(TianJiError::DataIntegrity(
+                    "replay bundle manifest must reference trace.jsonl and outcome.json"
+                        .to_string(),
+                ));
+            }
+            let trace_path = dir.join(crate::nuwa::REPLAY_BUNDLE_TRACE_FILE);
+            let trace_bytes = std::fs::metadata(&trace_path)?.len();
+            if manifest.trace_bytes != trace_bytes {
+                return Err(TianJiError::DataIntegrity(format!(
+                    "replay bundle trace_bytes mismatch: manifest {} actual {}",
+                    manifest.trace_bytes, trace_bytes
+                )));
+            }
+            let outcome_path = dir.join(crate::nuwa::REPLAY_BUNDLE_OUTCOME_FILE);
+            let outcome_bytes = std::fs::metadata(&outcome_path)?.len();
+            if manifest.outcome_bytes != outcome_bytes {
+                return Err(TianJiError::DataIntegrity(format!(
+                    "replay bundle outcome_bytes mismatch: manifest {} actual {}",
+                    manifest.outcome_bytes, outcome_bytes
+                )));
+            }
+            let outcome_file = std::fs::File::open(outcome_path)?;
+            let _outcome: crate::nuwa::SimulationOutcome = serde_json::from_reader(outcome_file)?;
+            let trace = crate::nuwa::read_trace_jsonl(trace_path)?;
+            if manifest.frame_count != trace.frames.len() {
+                return Err(TianJiError::DataIntegrity(format!(
+                    "replay bundle frame_count mismatch: manifest {} trace {}",
+                    manifest.frame_count,
+                    trace.frames.len()
+                )));
+            }
+            if trace.metadata.frame_count != trace.frames.len() {
+                return Err(TianJiError::DataIntegrity(format!(
+                    "trace metadata frame_count mismatch: metadata {} trace {}",
+                    trace.metadata.frame_count,
+                    trace.frames.len()
+                )));
+            }
+            if manifest.mode != trace.metadata.mode
+                || manifest.target_field != trace.metadata.target_field
+                || manifest.horizon_ticks != trace.metadata.horizon_ticks
+            {
+                return Err(TianJiError::DataIntegrity(
+                    "replay bundle manifest metadata does not match trace metadata".to_string(),
+                ));
+            }
+            Ok(Some(trace))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn render_once_text(state: &TuiState) -> String {
+    match &state.view {
+        ViewState::Dashboard(dashboard) => format_dashboard(dashboard),
+        ViewState::History(_) => state
+            .rows
+            .iter()
+            .map(format_history_row)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        ViewState::Detail(detail) => format_detail(detail),
+        ViewState::Compare(compare) => format_compare(compare),
+        ViewState::Simulation(simulation) => format_simulation_view(simulation),
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -338,6 +459,7 @@ async fn run_demo_simulation(spec: &str) -> Option<SimulationState> {
         agent_statuses,
         event_log,
         branches: vec![],
+        replay_frames: vec![],
     })
 }
 
@@ -790,6 +912,7 @@ mod tests {
             agent_statuses: vec![],
             event_log: vec![],
             branches: vec![],
+            replay_frames: vec![],
         }
     }
 
@@ -1142,6 +1265,159 @@ mod tests {
             panic!("expected simulation view");
         };
         assert_eq!(simulation.replay_cursor, 4);
+    }
+
+    #[tokio::test]
+    async fn tui_render_once_loads_trace_jsonl() {
+        use crate::nuwa::trace::{
+            write_trace_jsonl, SimulationTrace, SimulationTraceCompleted, SimulationTraceFrame,
+            SimulationTraceMetadata, TraceAgentAction, SIM_TRACE_SCHEMA_VERSION,
+        };
+        use crate::nuwa::{ConvergenceReason, SimulationMode, SimulationOutcome};
+        use crate::worldline::types::FieldKey;
+        use std::collections::BTreeMap;
+
+        let field = FieldKey {
+            region: "global".to_string(),
+            domain: "conflict".to_string(),
+        };
+        let trace = SimulationTrace {
+            metadata: SimulationTraceMetadata {
+                schema_version: SIM_TRACE_SCHEMA_VERSION.to_string(),
+                mode: "forward".to_string(),
+                target_field: Some(field.clone()),
+                horizon_ticks: 1,
+                frame_count: 1,
+            },
+            frames: vec![SimulationTraceFrame {
+                tick: 1,
+                field_values: BTreeMap::from([(field.clone(), 4.25)]),
+                field_changes: vec![crate::hongmeng::referee::FieldChange {
+                    region: "global".to_string(),
+                    domain: "conflict".to_string(),
+                    delta: 0.75,
+                }],
+                agent_actions: vec![TraceAgentAction {
+                    actor_id: "actor-a".to_string(),
+                    action_type: "observe".to_string(),
+                    target: None,
+                    confidence: 0.8,
+                    rationale: "trace rationale".to_string(),
+                    assessment: "trace assessment".to_string(),
+                    category: "trace_category".to_string(),
+                    drivers: vec!["trace_driver".to_string()],
+                }],
+                event_sequence_len: 7,
+            }],
+            completed: SimulationTraceCompleted {
+                outcome: SimulationOutcome {
+                    mode: SimulationMode::Forward {
+                        target_field: field,
+                        horizon_ticks: 1,
+                    },
+                    branches: vec![],
+                    intervention_paths: vec![],
+                    tick_count: 1,
+                    convergence_reason: ConvergenceReason::MaxTicksReached(1),
+                },
+            },
+        };
+        let path = std::env::temp_dir().join(format!(
+            "tianji_tui_trace_render_once_{}_{}.jsonl",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        write_trace_jsonl(&path, &trace).expect("write trace");
+
+        let rendered = run_history_browser(
+            Some("/tmp/tianji-missing-for-trace-render.sqlite3"),
+            20,
+            None,
+            false,
+            path.to_str(),
+            None,
+            true,
+        )
+        .await
+        .expect("render trace");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(rendered.contains("frame 1/1"));
+        assert!(rendered.contains("event sequence length 7"));
+        assert!(rendered.contains("Agent audit"));
+        assert!(rendered.contains("assessment: trace assessment"));
+    }
+
+    #[tokio::test]
+    async fn tui_replay_bundle_rejects_manifest_mismatch() {
+        use crate::nuwa::trace::{
+            write_replay_bundle_dir, SimulationTrace, SimulationTraceCompleted,
+            SimulationTraceFrame, SimulationTraceMetadata, SIM_TRACE_SCHEMA_VERSION,
+        };
+        use crate::nuwa::{ConvergenceReason, SimulationMode, SimulationOutcome};
+        use crate::worldline::types::FieldKey;
+        use std::collections::BTreeMap;
+
+        let field = FieldKey {
+            region: "global".to_string(),
+            domain: "conflict".to_string(),
+        };
+        let trace = SimulationTrace {
+            metadata: SimulationTraceMetadata {
+                schema_version: SIM_TRACE_SCHEMA_VERSION.to_string(),
+                mode: "forward".to_string(),
+                target_field: Some(field.clone()),
+                horizon_ticks: 1,
+                frame_count: 1,
+            },
+            frames: vec![SimulationTraceFrame {
+                tick: 1,
+                field_values: BTreeMap::from([(field.clone(), 4.25)]),
+                field_changes: vec![],
+                agent_actions: vec![],
+                event_sequence_len: 1,
+            }],
+            completed: SimulationTraceCompleted {
+                outcome: SimulationOutcome {
+                    mode: SimulationMode::Forward {
+                        target_field: field,
+                        horizon_ticks: 1,
+                    },
+                    branches: vec![],
+                    intervention_paths: vec![],
+                    tick_count: 1,
+                    convergence_reason: ConvergenceReason::MaxTicksReached(1),
+                },
+            },
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "tianji_tui_bundle_bad_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let mut manifest = write_replay_bundle_dir(&dir, &trace).expect("write bundle");
+        manifest.frame_count = 99;
+        let manifest_path = dir.join(crate::nuwa::REPLAY_BUNDLE_MANIFEST_FILE);
+        serde_json::to_writer_pretty(
+            std::fs::File::create(&manifest_path).expect("manifest"),
+            &manifest,
+        )
+        .expect("rewrite manifest");
+
+        let err = run_history_browser(None, 20, None, false, None, dir.to_str(), true)
+            .await
+            .expect_err("bad manifest rejected");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            matches!(err, TianJiError::DataIntegrity(message) if message.contains("frame_count"))
+        );
     }
 
     #[tokio::test]

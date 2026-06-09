@@ -662,6 +662,7 @@ pub async fn run_interactive_forward(
             agent_statuses,
             event_log,
             branches: branches.clone(),
+            replay_frames: vec![],
         };
 
         // Pruning check

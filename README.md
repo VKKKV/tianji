@@ -191,6 +191,14 @@ metadata, frame traces, and the final outcome; raw config, API keys, and provide
 secrets are not written. `predict` stdout remains the final `SimulationOutcome`
 JSON whether or not trace or bundle export flags are set.
 
+Replay traces and bundles can be inspected locally in the TUI without running a
+provider or reading config/secrets:
+
+```bash
+cargo run -- tui --trace-jsonl runs/predict-trace.jsonl
+cargo run -- tui --replay-bundle-dir runs/replay-bundle
+```
+
 ---
 
 ## Full CLI Reference
@@ -518,11 +526,13 @@ Read-only terminal UI for browsing persisted runs and optional simulation replay
 ```
 tianji tui --sqlite-path <PATH> [--limit 20]
 tianji tui --sqlite-path <PATH> --simulate <field:horizon> [--interactive]
+tianji tui [--sqlite-path <PATH>] --trace-jsonl <PATH> [--render-once]
+tianji tui [--sqlite-path <PATH>] --replay-bundle-dir <DIR> [--render-once]
 ```
 
-Keybindings: `j/k` or arrow keys navigate history, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` opens detail or compare depending on staged state, `c` stages a compare-left run, `Esc`/`h` returns from detail/compare, and `q` quits. In simulation replay, `Left`/`h` scrubs to the previous frame and `Right`/`l` scrubs to the next frame.
+Keybindings: `j/k` or arrow keys navigate history, `g`/`G` first/last, `Ctrl-d`/`Ctrl-u` page scroll, `Enter` opens detail or compare depending on staged state, `c` stages a compare-left run, `Esc`/`h` returns from detail/compare, and `q` quits. In simulation replay, `Left`/`h` scrubs to the previous frame and `Right`/`l` scrubs to the next frame. Trace-backed replay updates the displayed selected frame data, including tick/frame metadata, field values, field changes, event sequence length, and compact structured agent audit fields (action, target, confidence, category, assessment, drivers, rationale).
 
-Simulation replay is still local/read-only from the terminal perspective. Provider-backed simulation remains optional and follows the config rules above.
+Simulation replay is still local/read-only from the terminal perspective. Replay bundle loading reads only `manifest.json`, `trace.jsonl`, and `outcome.json` from the bundle directory. Provider-backed simulation remains optional and follows the config rules above.
 
 ### Alert dispatch dry-run/redaction
 

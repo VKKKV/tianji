@@ -1,235 +1,84 @@
 # TianJi handoff
 
-Date: 2026-05-19
-Repo: /home/kita/code/tianji
-Branch: main
-Agent workflow: Hermes plans/verifies/commits; OpenCode implements non-trivial code changes with model `kita/gpt-5.5`.
+Date: 2026-06-09
+Repo: `/home/kita/code/tianji`
+Branch: `main`
+Agent workflow: Hermes plans/verifies/commits; OpenCode implements non-trivial code changes with model `kita/gpt-5.5`. Do not let OpenCode commit unless explicitly requested.
 
 ## Current status
 
-Clean checkpoint after Phase F2.
+Active task: `.trellis/tasks/06-09-k3-k4-tui-replay-audit/`
 
-- Git worktree: clean before writing this handoff.
-- Trellis active tasks: 0.
-- Last completed target: F2 API contract fixtures.
-- Next planned target: F3 README operator quickstart refresh.
-- Verification baseline:
-  - cargo test --quiet: 341 unit + 39 integration passed
-  - cargo clippy -- -D warnings passed
-  - git diff --check passed
-- `plan.md` is authoritative and currently marks:
-  - Phase D complete
-  - Phase E complete
-  - F1 complete
-  - F2 complete
-  - F3/F4 pending
+K3/K4 TUI replay/audit implementation is in dirty worktree and not committed. The implementation now includes trace-backed TUI replay loading, selected-frame rendering, structured audit display, CLI parse constraints, replay bundle integrity checks, render sanitization, and updated plan counters.
 
-## Recent commits
+## Current dirty areas
+
+- `src/tui/state.rs` — trace-to-TUI state mapping, replay cursor state, trace text sanitization.
+- `src/tui/simulation.rs` — selected-frame worldline/agents/events/audit rendering and tests.
+- `src/tui/mod.rs` — TUI replay trace/bundle loading, bundle integrity validation, render-once support, tests.
+- `src/main.rs` — TUI CLI flags, conflict constraints, parse tests.
+- `src/nuwa/trace.rs` / `src/nuwa.rs` — K1/K2 trace and bundle support from the current dirty stack.
+- `plan.md` — current counters updated to 30,412 Rust lines / 59 files and 443 tests.
+- `README.md` — existing K3/K4 documentation changes from the dirty stack.
+
+## Implemented K3/K4 behavior
+
+- `tianji tui --trace-jsonl <PATH> [--render-once]` loads a simulation trace into the simulation view without requiring provider execution.
+- `tianji tui --replay-bundle-dir <DIR> [--render-once]` reads only `manifest.json`, `trace.jsonl`, and `outcome.json`.
+- Replay bundle loading validates:
+  - manifest schema version,
+  - fixed file names,
+  - trace/outcome byte sizes,
+  - manifest frame count,
+  - trace metadata frame count,
+  - manifest mode/target/horizon against trace metadata.
+- `Left`/`h` and `Right`/`l` change selected frame display, not just frame counters.
+- Worldline, field changes, Agents, Events, and Agent audit sections now reflect the selected trace frame.
+- Trace strings are sanitized before rendering: control characters/ESC are removed, whitespace/newlines/tabs collapse to spaces, and long text is truncated.
+- CLI constraints now reject replay flag conflicts and reject `--simulate` with replay flags.
+- Plain `tianji tui` defaults to `runs/tianji.sqlite3` again.
+
+## Verification run by OpenCode
 
 ```text
-dd3104b Mark F2 complete in roadmap
-d3fedca chore(task): archive 05-19-f2-api-contract-fixtures
-407960d Add API contract fixture coverage
-ac20d91 Add F2 API contract fixtures task
-79761bc chore(task): archive 05-19-f1-config-doctor-command
-52e0e55 Add config doctor command
-4241553 Add F1 config doctor task
-467c5fb chore(task): archive 05-19-f0-roadmap-docs-refresh
-28530ea Refresh roadmap and docs for Phase F
-7079b8b Mark Phase E complete in roadmap
-40f2103 chore(task): archive 05-19-e3-tui-snapshot-timeline-replay
-6577b3c Add TUI simulation timeline replay
+cargo fmt: passed
+cargo test tui --quiet: passed (79 passed, 364 filtered)
+cargo test trace --quiet: passed (11 passed, 432 filtered)
+cargo test predict --quiet: passed (7 passed, 436 filtered)
 ```
 
-## Completed in this session
+Counters recomputed after changes:
 
-### Phase E — complete
-
-E1. HMAC-Signed Agent Command Channel
-- Added daemon API route `POST /api/v1/agent/command`.
-- HMAC-SHA256 over timestamp + nonce + body digest.
-- Replay protection with timestamp/nonce checks.
-- Test-only deterministic secrets; no real credentials.
-
-E2. Structured Agent Output / Auditability
-- Enriched `AgentAction` with structured audit fields:
-  - assessment
-  - category
-  - confidence
-  - drivers[]
-- Kept backward-compatible serde defaults.
-
-E3. TUI Snapshot Timeline Replay
-- Added replay cursor/frame metadata.
-- Added left/right and h/l style scrubbing in simulation view.
-- Preserved existing view keybindings.
-
-### Phase F — partial
-
-F0. Roadmap/docs refresh
-- Refreshed `plan.md` and README state after Phase E.
-
-F1. Config sample and doctor command
-- Added `tianji doctor`:
-  - `--config <PATH>`
-  - `--sqlite-path <PATH>`
-  - `--json`
-- Checks config presence/parse, provider references, env-var presence, inline key presence without printing secret values, SQLite parent readiness.
-- Added `examples/config.example.yaml`.
-- README mentions `doctor` and config template.
-
-F2. API contract fixtures
-- Strengthened `/api/v1/meta` contract against `tests/fixtures/contracts/local_api_meta_v1.json`.
-- Added `/api/v1/agent/command` accepted/rejected envelope contract test.
-- Added alert dispatch dry-run/redaction contract tests.
-- Added mocked webhook payload contract test.
-- Added TUI replay frame/cursor formatting contract test.
-
-## Pending targets
-
-### F3. README operator quickstart refresh
-
-Goal from `plan.md`:
-- Document current LLM config.
-- Document daemon API.
-- Document signed command channel.
-- Document alert dispatch dry-run.
-- Document TUI replay keybindings.
-- Keep examples local-first and credential-free.
-
-Suggested workflow:
-1. Create Trellis task:
-   ```bash
-   python3 ./.trellis/scripts/task.py create "F3 README operator quickstart refresh" --slug f3-readme-operator-quickstart-refresh
-   ```
-2. Add PRD/spec under `.trellis/tasks/.../prd.md` and `.trellis/spec/docs/phase-f3-readme-operator-quickstart-refresh.md`.
-3. Update README only unless a small helper fixture is clearly needed.
-4. Verify with:
-   ```bash
-   cargo test --quiet
-   cargo clippy -- -D warnings
-   git diff --check
-   ```
-5. Commit README changes, archive task, update `plan.md` to mark F3 complete.
-
-Important docs to inspect before F3:
-- `README.md`
-- `plan.md`
-- `examples/config.example.yaml`
-- `src/api.rs`
-- `src/alert_dispatch.rs`
-- `src/tui/simulation.rs`
-
-### F4. Release readiness check
-
-Goal from `plan.md`:
-- Verify `cargo build --release`.
-- Verify binary size target: single binary < 25MB.
-- Verify shell completions generation.
-- Run a fixture-based smoke run.
-- Produce concise release checklist in repo.
-
-Likely output file:
-- `RELEASE_CHECKLIST.md` or `docs/release-checklist.md`.
-
-Suggested verification commands:
-```bash
-cargo build --release
-stat -c '%s %n' target/release/tianji
-cargo run --quiet -- completions fish >/tmp/tianji.fish
-cargo run --quiet -- run --fixture tests/fixtures/sample_feed.xml >/tmp/tianji-run.json
-cargo test --quiet
-cargo clippy -- -D warnings
-git diff --check
+```text
+Rust lines/files: 30,412 / 59
+cargo test -- --list: 443 tests
 ```
 
-Note: if live LLM/model endpoint testing is needed, start local model service first:
-```bash
-systemctl --user start llama-server
-```
-F3/F4 should not need live LLM unless scope changes.
+## Recommended next verification
 
-## OpenCode workflow to continue
-
-Use interactive PTY, not a broad one-shot:
-```bash
-opencode --model kita/gpt-5.5 /home/kita/code/tianji
-```
-
-Hermes process pattern:
-1. Start with `terminal(background=true, pty=true, notify_on_complete=true)`.
-2. Submit prompt with `process.submit`.
-3. Send carriage return with `process.write(data="\r")`.
-4. Do not set broad watch patterns.
-5. If OpenCode spins after code changed, inspect `git status --short` and logs; Ctrl-C is safe after it reports tests/diff state.
-6. Hermes must independently verify before committing.
-7. Hermes commits implementation and archives Trellis task.
-
-Do not let OpenCode commit unless explicitly requested.
-
-## Verification commands used most recently
+Run full gate before commit:
 
 ```bash
-cargo fmt
-cargo test --quiet contract
-cargo test --quiet api
-cargo test --quiet alert_dispatch
+cargo fmt --check
 cargo test --quiet tui
+cargo test --quiet trace
+cargo test --quiet predict
 cargo test --quiet
 cargo clippy -- -D warnings
 git diff --check
 ```
 
-Latest full pass:
-```text
-cargo test --quiet
-- 341 unit passed
-- 39 integration passed
+Optional smoke:
 
-cargo clippy -- -D warnings
-- passed
-
-git diff --check
-- passed
-```
-
-## Trellis notes
-
-- Active tasks are currently zero.
-- Archived current tasks:
-  - `.trellis/tasks/archive/2026-05/05-19-f1-config-doctor-command`
-  - `.trellis/tasks/archive/2026-05/05-19-f2-api-contract-fixtures`
-- For new work, create a new Trellis task first, then PRD/spec, then implementation.
-
-## Safety constraints
-
-- No real secrets in fixtures, README, tests, or logs.
-- Use `[REDACTED]`, `<redacted>`, or dummy test-only values.
-- Alert dispatch tests must stay mocked/dry-run.
-- F3 examples should be local-first and credential-free.
-- F4 release checks should not require external services.
-
-## Known quirks
-
-- Terminal tool may sometimes summarize output as “1 lines output”; rerun narrower commands or read files directly.
-- OpenCode TUI output is ANSI-heavy and may truncate; trust `git status`, tests, clippy, and direct file reads.
-- For TianJi live LLM testing only, start local model endpoint first:
-  ```bash
-  systemctl --user start llama-server
-  ```
-- F3/F4 should not require live LLM by default.
-
-## Immediate next action
-
-Start F3:
 ```bash
-python3 ./.trellis/scripts/task.py create "F3 README operator quickstart refresh" --slug f3-readme-operator-quickstart-refresh
+rm -rf /tmp/tianji-k3-bundle
+cargo run --quiet -- predict --field global.conflict --horizon 2 --replay-bundle-dir /tmp/tianji-k3-bundle >/tmp/tianji-k3-outcome.json
+cargo run --quiet -- tui --replay-bundle-dir /tmp/tianji-k3-bundle --render-once >/tmp/tianji-k3-tui.txt
+python3 - <<'PY'
+from pathlib import Path
+text = Path('/tmp/tianji-k3-tui.txt').read_text()
+assert 'frame' in text.lower()
+assert 'audit' in text.lower() or 'assessment' in text.lower()
+print('ok')
+PY
 ```
-
-Then write PRD/spec and update README with operator quickstart covering:
-- deterministic fixture run
-- config template + `tianji doctor`
-- daemon/API overview
-- signed agent command channel with dummy HMAC example only
-- alert dispatch dry-run
-- TUI replay keybindings

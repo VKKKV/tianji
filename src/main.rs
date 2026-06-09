@@ -69,7 +69,7 @@ enum Cli {
         #[arg(long = "fixture")]
         fixture: String,
         /// Optional SQLite database path for persisting run data
-        #[arg(long = "sqlite-path")]
+        #[arg(long = "sqlite-path", default_value = "runs/tianji.sqlite3")]
         sqlite_path: Option<String>,
         /// Include delta and alert tier context in a wrapper JSON payload
         #[arg(long = "show-delta")]
@@ -78,7 +78,7 @@ enum Cli {
     /// List persisted runs
     History {
         /// SQLite database path containing persisted TianJi runs
-        #[arg(long = "sqlite-path")]
+        #[arg(long = "sqlite-path", default_value = "runs/tianji.sqlite3")]
         sqlite_path: String,
         /// Maximum number of runs to list
         #[arg(long = "limit", default_value_t = 20)]
@@ -254,23 +254,32 @@ enum Cli {
         #[arg(long = "socket-path", default_value = "runs/tianji.sock")]
         socket_path: String,
         /// Optional SQLite path forwarded to queued runs
-        #[arg(long = "sqlite-path")]
+        #[arg(long = "sqlite-path", default_value = "runs/tianji.sqlite3")]
         sqlite_path: Option<String>,
     },
     /// Browse persisted runs in a read-only terminal UI
     Tui {
         /// SQLite database path containing persisted TianJi runs
-        #[arg(long = "sqlite-path")]
-        sqlite_path: String,
+        #[arg(long = "sqlite-path", default_value = "runs/tianji.sqlite3")]
+        sqlite_path: Option<String>,
         /// Maximum number of runs to list
         #[arg(long = "limit", default_value_t = 20)]
         limit: usize,
         /// Optional simulation spec in "field:horizon" format (e.g. "east-asia.conflict:30")
-        #[arg(long = "simulate")]
+        #[arg(long = "simulate", conflicts_with_all = ["trace_jsonl", "replay_bundle_dir"])]
         simulate: Option<String>,
         /// Enable interactive pruning during simulation
         #[arg(long)]
         interactive: bool,
+        /// Load a simulation trace JSONL file into the TUI replay view
+        #[arg(long = "trace-jsonl", conflicts_with_all = ["simulate", "replay_bundle_dir"])]
+        trace_jsonl: Option<String>,
+        /// Load a replay bundle directory containing manifest.json, trace.jsonl, and outcome.json
+        #[arg(long = "replay-bundle-dir", conflicts_with_all = ["simulate", "trace_jsonl"])]
+        replay_bundle_dir: Option<String>,
+        /// Render the selected TUI view once as plain text and exit
+        #[arg(long = "render-once")]
+        render_once: bool,
     },
     /// Show delta between the latest runs or an explicit run pair
     Delta {
@@ -1977,11 +1986,17 @@ agent_model_map:
                 limit,
                 simulate,
                 interactive,
+                trace_jsonl,
+                replay_bundle_dir,
+                render_once,
             } => {
-                assert_eq!(sqlite_path, "runs/tianji.sqlite3");
+                assert_eq!(sqlite_path.as_deref(), Some("runs/tianji.sqlite3"));
                 assert_eq!(limit, 20);
                 assert_eq!(simulate, Some("east-asia.conflict:30".to_string()));
                 assert!(!interactive);
+                assert!(trace_jsonl.is_none());
+                assert!(replay_bundle_dir.is_none());
+                assert!(!render_once);
             }
             _ => panic!("expected Tui variant"),
         }
@@ -1989,16 +2004,78 @@ agent_model_map:
 
     #[test]
     fn cli_parse_tui_without_simulate() {
-        let cli = Cli::try_parse_from(["tianji", "tui", "--sqlite-path", "runs/tianji.sqlite3"])
-            .expect("parse tui without simulate");
+        let cli = Cli::try_parse_from(["tianji", "tui"]).expect("parse tui without simulate");
         match cli {
             Cli::Tui {
                 sqlite_path,
                 simulate,
+                trace_jsonl,
+                replay_bundle_dir,
+                render_once,
                 ..
             } => {
-                assert_eq!(sqlite_path, "runs/tianji.sqlite3");
+                assert_eq!(sqlite_path.as_deref(), Some("runs/tianji.sqlite3"));
                 assert!(simulate.is_none());
+                assert!(trace_jsonl.is_none());
+                assert!(replay_bundle_dir.is_none());
+                assert!(!render_once);
+            }
+            _ => panic!("expected Tui variant"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_tui_rejects_conflicting_replay_flags() {
+        let error = Cli::try_parse_from([
+            "tianji",
+            "tui",
+            "--trace-jsonl",
+            "runs/trace.jsonl",
+            "--replay-bundle-dir",
+            "runs/bundle",
+        ])
+        .err()
+        .expect("trace and bundle flags conflict");
+        assert!(error.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn cli_parse_tui_rejects_simulate_with_replay_flags() {
+        let error = Cli::try_parse_from([
+            "tianji",
+            "tui",
+            "--simulate",
+            "global.conflict:2",
+            "--trace-jsonl",
+            "runs/trace.jsonl",
+        ])
+        .err()
+        .expect("simulate and replay flags conflict");
+        assert!(error.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn cli_parse_tui_replay_loading_flags() {
+        let cli = Cli::try_parse_from([
+            "tianji",
+            "tui",
+            "--sqlite-path",
+            "runs/tianji.sqlite3",
+            "--replay-bundle-dir",
+            "runs/replay-bundle",
+            "--render-once",
+        ])
+        .expect("parse tui replay flags");
+        match cli {
+            Cli::Tui {
+                replay_bundle_dir,
+                trace_jsonl,
+                render_once,
+                ..
+            } => {
+                assert_eq!(replay_bundle_dir, Some("runs/replay-bundle".to_string()));
+                assert!(trace_jsonl.is_none());
+                assert!(render_once);
             }
             _ => panic!("expected Tui variant"),
         }
@@ -3850,9 +3927,20 @@ async fn run(cli: Cli) -> Result<String, TianJiError> {
             limit,
             simulate,
             interactive,
+            trace_jsonl,
+            replay_bundle_dir,
+            render_once,
         } => {
-            tianji::tui::run_history_browser(&sqlite_path, limit, simulate.as_deref(), interactive)
-                .await
+            tianji::tui::run_history_browser(
+                sqlite_path.as_deref(),
+                limit,
+                simulate.as_deref(),
+                interactive,
+                trace_jsonl.as_deref(),
+                replay_bundle_dir.as_deref(),
+                render_once,
+            )
+            .await
         }
         Cli::Delta {
             sqlite_path,

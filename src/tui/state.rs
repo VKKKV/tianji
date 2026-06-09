@@ -7,6 +7,8 @@ use crate::storage::{
 };
 use crate::AlertTier;
 
+use crate::nuwa::trace::{SimulationTrace, SimulationTraceFrame, TraceAgentAction};
+
 pub const EMPTY_TUI_MESSAGE: &str = "No persisted runs are available for the TUI browser.";
 
 // ── Glyph set: Nerd Font / ASCII fallback ──────────────────────────
@@ -130,6 +132,27 @@ pub struct SimAgent {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SimAuditAction {
+    pub actor_id: String,
+    pub action_type: String,
+    pub target: Option<String>,
+    pub confidence: f64,
+    pub category: String,
+    pub assessment: String,
+    pub drivers: Vec<String>,
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimReplayFrame {
+    pub tick: u64,
+    pub field_values: Vec<SimField>,
+    pub field_changes: Vec<SimField>,
+    pub audit_actions: Vec<SimAuditAction>,
+    pub event_sequence_len: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SimulationState {
     pub mode: String,
     pub target: String,
@@ -141,6 +164,7 @@ pub struct SimulationState {
     pub agent_statuses: Vec<SimAgent>,
     pub event_log: Vec<String>,
     pub branches: Vec<crate::nuwa::outcome::BranchSummary>,
+    pub replay_frames: Vec<SimReplayFrame>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -352,7 +376,178 @@ impl SimulationViewState {
     }
 }
 
+impl SimulationState {
+    pub fn from_trace(trace: &SimulationTrace) -> Self {
+        let replay_frames: Vec<SimReplayFrame> = trace
+            .frames
+            .iter()
+            .map(SimReplayFrame::from_trace_frame)
+            .collect();
+        let selected = replay_frames.last();
+        let tick = selected.map(|frame| frame.tick).unwrap_or(0);
+        let total_ticks = trace.metadata.horizon_ticks.max(tick);
+        let target = trace
+            .metadata
+            .target_field
+            .as_ref()
+            .map(|field| format!("{}.{}", field.region, field.domain))
+            .unwrap_or_else(|| "all-fields".to_string());
+        let event_log = selected
+            .map(|frame| {
+                vec![format!(
+                    "event sequence length: {}",
+                    frame.event_sequence_len
+                )]
+            })
+            .unwrap_or_else(|| vec!["No trace frames available.".to_string()]);
+
+        Self {
+            mode: sanitize_trace_text(&trace.metadata.mode),
+            target: sanitize_trace_text(&target),
+            horizon: trace.metadata.horizon_ticks,
+            tick,
+            total_ticks,
+            status: "replay loaded".to_string(),
+            field_values: selected
+                .map(|frame| frame.field_values.clone())
+                .unwrap_or_default(),
+            agent_statuses: selected
+                .map(|frame| {
+                    frame
+                        .audit_actions
+                        .iter()
+                        .map(|action| SimAgent {
+                            actor_id: sanitize_trace_text(&action.actor_id),
+                            status: sanitize_trace_text(&action.category),
+                            last_action: sanitize_trace_text(&action.action_type),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            event_log,
+            branches: vec![],
+            replay_frames,
+        }
+    }
+}
+
+impl SimReplayFrame {
+    pub fn from_trace_frame(frame: &SimulationTraceFrame) -> Self {
+        let mut field_values: Vec<SimField> = frame
+            .field_values
+            .iter()
+            .map(|(key, value)| SimField {
+                region: sanitize_trace_text(&key.region),
+                domain: sanitize_trace_text(&key.domain),
+                value: *value,
+                delta: 0.0,
+            })
+            .collect();
+        field_values.sort_by(|a, b| a.region.cmp(&b.region).then(a.domain.cmp(&b.domain)));
+
+        let mut field_changes: Vec<SimField> = frame
+            .field_changes
+            .iter()
+            .map(|change| SimField {
+                region: sanitize_trace_text(&change.region),
+                domain: sanitize_trace_text(&change.domain),
+                value: frame
+                    .field_values
+                    .iter()
+                    .find(|(key, _)| key.region == change.region && key.domain == change.domain)
+                    .map(|(_, value)| *value)
+                    .unwrap_or(0.0),
+                delta: change.delta,
+            })
+            .collect();
+        field_changes.sort_by(|a, b| {
+            b.delta
+                .abs()
+                .partial_cmp(&a.delta.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        Self {
+            tick: frame.tick,
+            field_values,
+            field_changes,
+            audit_actions: frame
+                .agent_actions
+                .iter()
+                .map(SimAuditAction::from_trace_action)
+                .collect(),
+            event_sequence_len: frame.event_sequence_len,
+        }
+    }
+}
+
+impl SimAuditAction {
+    fn from_trace_action(action: &TraceAgentAction) -> Self {
+        Self {
+            actor_id: sanitize_trace_text(&action.actor_id),
+            action_type: sanitize_trace_text(&action.action_type),
+            target: action
+                .target
+                .as_ref()
+                .map(|target| sanitize_trace_text(target)),
+            confidence: action.confidence,
+            category: sanitize_trace_text(&action.category),
+            assessment: sanitize_trace_text(&action.assessment),
+            drivers: action
+                .drivers
+                .iter()
+                .map(|driver| sanitize_trace_text(driver))
+                .collect(),
+            rationale: sanitize_trace_text(&action.rationale),
+        }
+    }
+}
+
+pub fn sanitize_trace_text(value: &str) -> String {
+    const MAX_TRACE_TEXT_LEN: usize = 240;
+    let mut output = String::new();
+    let mut pending_space = false;
+    let mut in_ansi_escape = false;
+
+    for character in value.chars() {
+        if in_ansi_escape {
+            if character.is_ascii_alphabetic() {
+                in_ansi_escape = false;
+            }
+            continue;
+        }
+        if character == '\u{1b}' {
+            in_ansi_escape = true;
+            pending_space = true;
+            continue;
+        }
+        if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
+            pending_space = true;
+            continue;
+        }
+        if character.is_whitespace() {
+            pending_space = true;
+            continue;
+        }
+        if pending_space && !output.is_empty() {
+            output.push(' ');
+        }
+        pending_space = false;
+        output.push(character);
+        if output.chars().count() >= MAX_TRACE_TEXT_LEN {
+            output.push('…');
+            break;
+        }
+    }
+
+    output.trim().to_string()
+}
+
 fn replay_bounds(sim_state: &SimulationState) -> (usize, usize) {
+    if !sim_state.replay_frames.is_empty() {
+        let frame_count = sim_state.replay_frames.len();
+        return (frame_count - 1, frame_count);
+    }
     let frame_count = sim_state.total_ticks.max(sim_state.tick).max(1) as usize;
     let latest_cursor = sim_state.tick.saturating_sub(1) as usize;
     (latest_cursor.min(frame_count - 1), frame_count)
@@ -1805,6 +2000,7 @@ mod tests {
             }],
             event_log: vec!["tick 1: conflict increased by 0.12".to_string()],
             branches: vec![],
+            replay_frames: vec![],
         };
 
         assert_eq!(sim.mode, "forward");
@@ -1835,6 +2031,7 @@ mod tests {
             agent_statuses: vec![],
             event_log: vec![],
             branches: vec![],
+            replay_frames: vec![],
         };
         state.show_simulation(sim.clone());
 
@@ -1856,6 +2053,7 @@ mod tests {
             agent_statuses: vec![],
             event_log: vec![],
             branches: vec![],
+            replay_frames: vec![],
         };
         let mut view = SimulationViewState::new(Some(sim));
 

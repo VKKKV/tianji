@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
-use super::state::{SimulationState, SimulationViewState};
+use super::state::{SimReplayFrame, SimulationState, SimulationViewState};
 use super::theme::KANAGAWA;
 
 pub fn format_simulation(sim: &SimulationState) -> String {
@@ -29,20 +29,31 @@ fn format_simulation_with_replay(
 ) -> String {
     let mut output = String::new();
     let (frame_number, frame_count) = timeline_position(replay_cursor, replay_frame_count, sim);
+    let selected_frame = selected_replay_frame(sim, replay_cursor);
+    let display_tick = selected_frame.map(|frame| frame.tick).unwrap_or(sim.tick);
 
     // Header
     output.push_str(&format!(
         "mode: {}  field: {}  tick {}/{}  frame {}/{}\n",
-        sim.mode, sim.target, sim.tick, sim.total_ticks, frame_number, frame_count
+        sim.mode, sim.target, display_tick, sim.total_ticks, frame_number, frame_count
     ));
     output.push_str(&format!("status: {}\n", sim.status));
+    if let Some(frame) = selected_frame {
+        output.push_str(&format!(
+            "frame metadata: tick {} · event sequence length {}\n",
+            frame.tick, frame.event_sequence_len
+        ));
+    }
 
     // Worldline
     output.push_str("\nWorldline\n");
-    if sim.field_values.is_empty() {
+    let field_values = selected_frame
+        .map(|frame| frame.field_values.as_slice())
+        .unwrap_or(sim.field_values.as_slice());
+    if field_values.is_empty() {
         output.push_str("  No field data available.\n");
     } else {
-        for field in &sim.field_values {
+        for field in field_values {
             let delta_arrow = if field.delta > 0.01 {
                 format!("+{:.2}", field.delta)
             } else if field.delta < -0.01 {
@@ -57,12 +68,30 @@ fn format_simulation_with_replay(
         }
     }
 
+    if let Some(frame) = selected_frame {
+        output.push_str("\nField changes\n");
+        if frame.field_changes.is_empty() {
+            output.push_str("  No field changes in selected frame.\n");
+        } else {
+            for field in &frame.field_changes {
+                output.push_str(&format!(
+                    "  {}.{}   value {:.2}  delta {:+.2}\n",
+                    field.region, field.domain, field.value, field.delta
+                ));
+            }
+        }
+    }
+
     // Agents
     output.push_str("\nAgents\n");
-    if sim.agent_statuses.is_empty() {
+    let frame_agents = selected_frame.map(frame_agents);
+    let agents = frame_agents
+        .as_deref()
+        .unwrap_or(sim.agent_statuses.as_slice());
+    if agents.is_empty() {
         output.push_str("  No agents.\n");
     } else {
-        for agent in &sim.agent_statuses {
+        for agent in agents {
             let action_part = if agent.last_action == "none" {
                 String::new()
             } else {
@@ -77,15 +106,45 @@ fn format_simulation_with_replay(
 
     // Events
     output.push_str("\nEvents\n");
-    if sim.event_log.is_empty() {
+    let frame_events = selected_frame.map(frame_events);
+    let events = frame_events.as_deref().unwrap_or(sim.event_log.as_slice());
+    if events.is_empty() {
         output.push_str("  No events.\n");
     } else {
-        for event in &sim.event_log {
+        for event in events {
             output.push_str(&format!("  {event}\n"));
         }
     }
 
+    if let Some(frame) = selected_frame {
+        output.push_str("\nAgent audit\n");
+        if frame.audit_actions.is_empty() {
+            output.push_str("  No agent audit actions in selected frame.\n");
+        } else {
+            for action in &frame.audit_actions {
+                let target = action.target.as_deref().unwrap_or("none");
+                let drivers = if action.drivers.is_empty() {
+                    "none".to_string()
+                } else {
+                    action.drivers.join(", ")
+                };
+                output.push_str(&format!(
+                    "  {} · action {} · target {} · confidence {:.2} · category {}\n",
+                    action.actor_id, action.action_type, target, action.confidence, action.category
+                ));
+                output.push_str(&format!("    assessment: {}\n", action.assessment));
+                output.push_str(&format!("    drivers: {}\n", drivers));
+                output.push_str(&format!("    rationale: {}\n", action.rationale));
+            }
+        }
+    }
+
     output
+}
+
+fn selected_replay_frame(sim: &SimulationState, replay_cursor: usize) -> Option<&SimReplayFrame> {
+    sim.replay_frames
+        .get(replay_cursor.min(sim.replay_frames.len().saturating_sub(1)))
 }
 
 fn timeline_position(
@@ -96,6 +155,25 @@ fn timeline_position(
     let frame_count = replay_frame_count.max(sim.total_ticks.max(sim.tick).max(1) as usize);
     let frame_number = replay_cursor.min(frame_count - 1) + 1;
     (frame_number, frame_count)
+}
+
+fn frame_agents(frame: &SimReplayFrame) -> Vec<super::state::SimAgent> {
+    frame
+        .audit_actions
+        .iter()
+        .map(|action| super::state::SimAgent {
+            actor_id: action.actor_id.clone(),
+            status: action.category.clone(),
+            last_action: action.action_type.clone(),
+        })
+        .collect()
+}
+
+fn frame_events(frame: &SimReplayFrame) -> Vec<String> {
+    vec![format!(
+        "event sequence length: {}",
+        frame.event_sequence_len
+    )]
 }
 
 pub fn render_simulation(
@@ -125,6 +203,8 @@ pub fn render_simulation(
 
     let mut lines: Vec<Line<'_>> = Vec::new();
     let (frame_number, frame_count) = timeline_position(replay_cursor, replay_frame_count, sim);
+    let selected_frame = selected_replay_frame(sim, replay_cursor);
+    let display_tick = selected_frame.map(|frame| frame.tick).unwrap_or(sim.tick);
 
     // Header section
     lines.push(Line::from(vec![
@@ -140,7 +220,7 @@ pub fn render_simulation(
         ),
         Span::styled("tick ", Style::default().fg(KANAGAWA.label)),
         Span::styled(
-            format!("{}/{}", sim.tick, sim.total_ticks),
+            format!("{}/{}", display_tick, sim.total_ticks),
             Style::default().fg(KANAGAWA.value),
         ),
         Span::styled("  frame ", Style::default().fg(KANAGAWA.label)),
@@ -153,6 +233,18 @@ pub fn render_simulation(
         Span::styled("  status: ", Style::default().fg(KANAGAWA.label)),
         Span::styled(sim.status.clone(), Style::default().fg(KANAGAWA.fg)),
     ]));
+    if let Some(frame) = selected_frame {
+        lines.push(Line::from(vec![
+            Span::styled("  frame metadata: ", Style::default().fg(KANAGAWA.label)),
+            Span::styled(
+                format!(
+                    "tick {} · event sequence length {}",
+                    frame.tick, frame.event_sequence_len
+                ),
+                Style::default().fg(KANAGAWA.fg),
+            ),
+        ]));
+    }
 
     // Blank line
     lines.push(Line::from(""));
@@ -165,7 +257,10 @@ pub fn render_simulation(
             .add_modifier(Modifier::BOLD),
     )]));
 
-    for field in &sim.field_values {
+    let field_values = selected_frame
+        .map(|frame| frame.field_values.as_slice())
+        .unwrap_or(sim.field_values.as_slice());
+    for field in field_values {
         let (delta_str, delta_color) = if field.delta > 0.01 {
             (format!("+{:.2}", field.delta), KANAGAWA.up)
         } else if field.delta < -0.01 {
@@ -187,6 +282,41 @@ pub fn render_simulation(
         ]));
     }
 
+    if let Some(frame) = selected_frame {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "  Field changes",
+            Style::default()
+                .fg(KANAGAWA.title)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        if frame.field_changes.is_empty() {
+            lines.push(Line::from("    No field changes in selected frame."));
+        } else {
+            for field in &frame.field_changes {
+                let color = if field.delta > 0.01 {
+                    KANAGAWA.up
+                } else if field.delta < -0.01 {
+                    KANAGAWA.down
+                } else {
+                    KANAGAWA.fg
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("    ", Style::default().fg(KANAGAWA.fg)),
+                    Span::styled(
+                        format!("{}.{}", field.region, field.domain),
+                        Style::default().fg(KANAGAWA.label),
+                    ),
+                    Span::styled(
+                        format!("   value {:.2}  delta ", field.value),
+                        Style::default().fg(KANAGAWA.fg),
+                    ),
+                    Span::styled(format!("{:+.2}", field.delta), Style::default().fg(color)),
+                ]));
+            }
+        }
+    }
+
     // Blank line
     lines.push(Line::from(""));
 
@@ -198,7 +328,11 @@ pub fn render_simulation(
             .add_modifier(Modifier::BOLD),
     )]));
 
-    for agent in &sim.agent_statuses {
+    let frame_agents = selected_frame.map(frame_agents);
+    let agents = frame_agents
+        .as_deref()
+        .unwrap_or(sim.agent_statuses.as_slice());
+    for agent in agents {
         let action_part = if agent.last_action == "none" {
             String::new()
         } else {
@@ -229,11 +363,49 @@ pub fn render_simulation(
             .add_modifier(Modifier::BOLD),
     )]));
 
-    for event in &sim.event_log {
+    let frame_events = selected_frame.map(frame_events);
+    let events = frame_events.as_deref().unwrap_or(sim.event_log.as_slice());
+    for event in events {
         lines.push(Line::from(vec![
             Span::styled("    ", Style::default().fg(KANAGAWA.fg)),
             Span::styled(event.clone(), Style::default().fg(KANAGAWA.fg)),
         ]));
+    }
+
+    if let Some(frame) = selected_frame {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "  Agent audit",
+            Style::default()
+                .fg(KANAGAWA.title)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        if frame.audit_actions.is_empty() {
+            lines.push(Line::from("    No agent audit actions in selected frame."));
+        } else {
+            for action in &frame.audit_actions {
+                let target = action.target.as_deref().unwrap_or("none");
+                let drivers = if action.drivers.is_empty() {
+                    "none".to_string()
+                } else {
+                    action.drivers.join(", ")
+                };
+                lines.push(Line::from(vec![
+                    Span::styled("    ", Style::default().fg(KANAGAWA.fg)),
+                    Span::styled(&action.actor_id, Style::default().fg(KANAGAWA.label)),
+                    Span::raw(format!(
+                        " · action {} · target {} · confidence {:.2} · category {}",
+                        action.action_type, target, action.confidence, action.category
+                    )),
+                ]));
+                lines.push(Line::from(format!(
+                    "      assessment: {}",
+                    action.assessment
+                )));
+                lines.push(Line::from(format!("      drivers: {drivers}")));
+                lines.push(Line::from(format!("      rationale: {}", action.rationale)));
+            }
+        }
     }
 
     // Prune mode overlay
@@ -333,7 +505,89 @@ mod tests {
                 "tick 1: conflict increased by 0.12".to_string(),
             ],
             branches: vec![],
+            replay_frames: vec![],
         }
+    }
+
+    fn sample_trace_simulation() -> SimulationState {
+        use crate::nuwa::outcome::{ConvergenceReason, SimulationOutcome};
+        use crate::nuwa::sandbox::SimulationMode;
+        use crate::nuwa::trace::{
+            SimulationTrace, SimulationTraceCompleted, SimulationTraceFrame,
+            SimulationTraceMetadata, TraceAgentAction, SIM_TRACE_SCHEMA_VERSION,
+        };
+        use crate::worldline::types::FieldKey;
+        use std::collections::BTreeMap;
+
+        let field = FieldKey {
+            region: "global".to_string(),
+            domain: "conflict".to_string(),
+        };
+        let empty_outcome = SimulationOutcome {
+            mode: SimulationMode::Forward {
+                target_field: field.clone(),
+                horizon_ticks: 2,
+            },
+            branches: vec![],
+            intervention_paths: vec![],
+            tick_count: 2,
+            convergence_reason: ConvergenceReason::MaxTicksReached(2),
+        };
+        let trace = SimulationTrace {
+            metadata: SimulationTraceMetadata {
+                schema_version: SIM_TRACE_SCHEMA_VERSION.to_string(),
+                mode: "forward".to_string(),
+                target_field: Some(field.clone()),
+                horizon_ticks: 2,
+                frame_count: 2,
+            },
+            frames: vec![
+                SimulationTraceFrame {
+                    tick: 1,
+                    field_values: BTreeMap::from([(field.clone(), 3.75)]),
+                    field_changes: vec![crate::hongmeng::referee::FieldChange {
+                        region: "global".to_string(),
+                        domain: "conflict".to_string(),
+                        delta: 0.25,
+                    }],
+                    agent_actions: vec![TraceAgentAction {
+                        actor_id: "actor-a".to_string(),
+                        action_type: "observe".to_string(),
+                        target: Some("actor-b".to_string()),
+                        confidence: 0.71,
+                        rationale: "watching escalation indicators".to_string(),
+                        assessment: "pressure is rising".to_string(),
+                        category: "monitoring".to_string(),
+                        drivers: vec!["field_delta".to_string(), "recent_action".to_string()],
+                    }],
+                    event_sequence_len: 4,
+                },
+                SimulationTraceFrame {
+                    tick: 2,
+                    field_values: BTreeMap::from([(field.clone(), 4.5)]),
+                    field_changes: vec![crate::hongmeng::referee::FieldChange {
+                        region: "global".to_string(),
+                        domain: "conflict".to_string(),
+                        delta: 0.75,
+                    }],
+                    agent_actions: vec![TraceAgentAction {
+                        actor_id: "actor-c".to_string(),
+                        action_type: "signal".to_string(),
+                        target: None,
+                        confidence: 0.62,
+                        rationale: "signaling restraint".to_string(),
+                        assessment: "pressure is stabilizing".to_string(),
+                        category: "signaling".to_string(),
+                        drivers: vec!["latest_frame".to_string()],
+                    }],
+                    event_sequence_len: 5,
+                },
+            ],
+            completed: SimulationTraceCompleted {
+                outcome: empty_outcome,
+            },
+        };
+        SimulationState::from_trace(&trace)
     }
 
     #[test]
@@ -384,6 +638,110 @@ mod tests {
     }
 
     #[test]
+    fn trace_replay_format_uses_selected_frame_data() {
+        let sim = sample_trace_simulation();
+        let mut view = SimulationViewState::new(Some(sim));
+
+        assert_eq!(view.replay_cursor, 1);
+        let latest = format_simulation_view(&view);
+        assert!(latest.contains("tick 2/2"));
+        assert!(latest.contains("frame 2/2"));
+        assert!(latest.contains("value 4.50  delta +0.75"));
+        assert!(latest.contains("event sequence length 5"));
+        assert!(latest.contains("actor-c"));
+        assert!(latest.contains("signal"));
+        assert!(!latest.contains("actor-a · action observe"));
+
+        view.previous_replay_frame();
+        let previous = format_simulation_view(&view);
+        assert!(previous.contains("tick 1/2"));
+        assert!(previous.contains("frame 1/2"));
+        assert!(previous.contains("value 3.75  delta +0.25"));
+        assert!(previous.contains("event sequence length 4"));
+        assert!(previous.contains("actor-a"));
+        assert!(previous.contains("observe"));
+        assert!(!previous.contains("actor-c · action signal"));
+    }
+
+    #[test]
+    fn trace_replay_format_renders_agent_audit_fields() {
+        let sim = sample_trace_simulation();
+        let mut view = SimulationViewState::new(Some(sim));
+        view.previous_replay_frame();
+        let formatted = format_simulation_view(&view);
+
+        assert!(formatted.contains("Agent audit"));
+        assert!(formatted.contains("actor-a · action observe · target actor-b"));
+        assert!(formatted.contains("confidence 0.71"));
+        assert!(formatted.contains("category monitoring"));
+        assert!(formatted.contains("assessment: pressure is rising"));
+        assert!(formatted.contains("drivers: field_delta, recent_action"));
+        assert!(formatted.contains("rationale: watching escalation indicators"));
+    }
+
+    #[test]
+    fn trace_replay_sanitizes_control_characters() {
+        use crate::nuwa::outcome::{ConvergenceReason, SimulationOutcome};
+        use crate::nuwa::sandbox::SimulationMode;
+        use crate::nuwa::trace::{
+            SimulationTrace, SimulationTraceCompleted, SimulationTraceFrame,
+            SimulationTraceMetadata, TraceAgentAction, SIM_TRACE_SCHEMA_VERSION,
+        };
+        use crate::worldline::types::FieldKey;
+        use std::collections::BTreeMap;
+
+        let field = FieldKey {
+            region: "global".to_string(),
+            domain: "conflict".to_string(),
+        };
+        let trace = SimulationTrace {
+            metadata: SimulationTraceMetadata {
+                schema_version: SIM_TRACE_SCHEMA_VERSION.to_string(),
+                mode: "forward".to_string(),
+                target_field: Some(field.clone()),
+                horizon_ticks: 1,
+                frame_count: 1,
+            },
+            frames: vec![SimulationTraceFrame {
+                tick: 1,
+                field_values: BTreeMap::from([(field.clone(), 1.0)]),
+                field_changes: vec![],
+                agent_actions: vec![TraceAgentAction {
+                    actor_id: "actor\u{1b}[31m".to_string(),
+                    action_type: "observe".to_string(),
+                    target: None,
+                    confidence: 0.5,
+                    rationale: format!("line1\nline2\t{}", "x".repeat(300)),
+                    assessment: "bad\u{1b}[0m\nassessment".to_string(),
+                    category: "cat\rname".to_string(),
+                    drivers: vec!["driver\nA".to_string()],
+                }],
+                event_sequence_len: 1,
+            }],
+            completed: SimulationTraceCompleted {
+                outcome: SimulationOutcome {
+                    mode: SimulationMode::Forward {
+                        target_field: field,
+                        horizon_ticks: 1,
+                    },
+                    branches: vec![],
+                    intervention_paths: vec![],
+                    tick_count: 1,
+                    convergence_reason: ConvergenceReason::MaxTicksReached(1),
+                },
+            },
+        };
+        let view = SimulationViewState::new(Some(SimulationState::from_trace(&trace)));
+        let formatted = format_simulation_view(&view);
+
+        assert!(!formatted.contains('\u{1b}'));
+        assert!(formatted.contains("assessment: bad assessment"));
+        assert!(formatted.contains("drivers: driver A"));
+        assert!(formatted.contains("rationale: line1 line2"));
+        assert!(formatted.contains('…'));
+    }
+
+    #[test]
     fn simulation_format_shows_delta_arrows() {
         let sim = sample_simulation();
         let formatted = format_simulation(&sim);
@@ -424,6 +782,7 @@ mod tests {
             agent_statuses: vec![],
             event_log: vec![],
             branches: vec![],
+            replay_frames: vec![],
         };
         let formatted = format_simulation(&sim);
 
