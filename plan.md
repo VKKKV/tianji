@@ -401,11 +401,10 @@ adding live polling metadata or persistence.
 
 ### Next development direction
 
-Post-K work should stay local-first and documentation-led until a new PRD scopes
-runtime behavior changes. Candidate directions are:
-
-- Keep provider-backed simulation, live feed fetch, daemon write paths, and alert
-  dispatch explicitly optional.
+No explicit Post-K development candidates remain in this plan. Future runtime
+behavior changes should start from a new PRD and stay local-first by default.
+Provider-backed simulation, live feed fetch, daemon write paths, and alert
+dispatch remain optional unless that future PRD scopes them explicitly.
 
 ---
 
